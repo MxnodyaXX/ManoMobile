@@ -7,9 +7,9 @@ import {
 } from "lucide-react";
 
 export const sidebarData = [
-  { title: "Test", icon: Wrench },
-  { title: "Test Test", icon: DollarSign },
-  { title: "Test Test", icon: Boxes },
-  { title: "Test Test", icon: Users },
-  { title: "Test Test", icon: Settings },
+  { title: "Repair Management", icon: Wrench },
+  { title: "Sales Management", icon: DollarSign },
+  { title: "Inventory Management", icon: Boxes },
+  { title: "Customer Management", icon: Users },
+  { title: "Admin Control", icon: Settings },
 ];
