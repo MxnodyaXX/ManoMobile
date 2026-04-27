@@ -30,7 +30,7 @@ export default function RepairManagement() {
   const ActiveIcon = activeSection.icon;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 24, flex: 1, minHeight: 0 }}>
 
       {/* Page header */}
       <div className="fade-up">
@@ -64,7 +64,7 @@ export default function RepairManagement() {
                 color: isActive ? "var(--accent)" : "var(--text-secondary)",
                 fontWeight: isActive ? 600 : 400,
                 cursor: "pointer", transition: "all 0.18s",
-                fontFamily: "'DM Sans', sans-serif",
+                fontFamily: "'Plus Jakarta Sans', sans-serif",
                 whiteSpace: "nowrap",
               }}
               onMouseEnter={(e) => {
@@ -113,7 +113,7 @@ export default function RepairManagement() {
       </div>
 
       {/* Content */}
-      <div className="fade-up fade-up-3">
+      <div className="fade-up fade-up-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {active === "New Repair" ? (
           <NewRepairForm />
         ) : (

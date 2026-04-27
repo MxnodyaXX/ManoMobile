@@ -15,12 +15,13 @@ export default function FilterBar({
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 6,
-        padding: "5px",
+        gap: 4,
+        padding: "4px",
         background: "var(--bg-card)",
         border: "1px solid var(--border)",
-        borderRadius: 12,
+        borderRadius: 10,
         width: "fit-content",
+        boxShadow: "var(--shadow-card)",
       }}
     >
       {filters.map((f) => {
@@ -31,22 +32,22 @@ export default function FilterBar({
             onClick={() => onChange(f)}
             style={{
               padding: "7px 18px",
-              borderRadius: 8,
+              borderRadius: 7,
               border: "none",
               cursor: "pointer",
               fontSize: 13,
-              fontWeight: isActive ? 600 : 400,
-              fontFamily: isActive ? "'Syne', sans-serif" : "'DM Sans', sans-serif",
+              fontWeight: isActive ? 700 : 500,
+              fontFamily: "'Plus Jakarta Sans', sans-serif",
               background: isActive ? "var(--accent)" : "transparent",
-              color: isActive ? "#0a0a0f" : "var(--text-secondary)",
+              color: isActive ? "#ffffff" : "var(--text-secondary)",
               transition: "all 0.18s ease",
               outline: "none",
-              letterSpacing: isActive ? "-0.01em" : "0",
+              letterSpacing: "-0.01em",
             }}
             onMouseEnter={(e) => {
               if (!isActive) {
-                (e.currentTarget as HTMLButtonElement).style.background = "var(--border)";
-                (e.currentTarget as HTMLButtonElement).style.color = "var(--text-primary)";
+                (e.currentTarget as HTMLButtonElement).style.background = "var(--accent-dim)";
+                (e.currentTarget as HTMLButtonElement).style.color = "var(--accent)";
               }
             }}
             onMouseLeave={(e) => {

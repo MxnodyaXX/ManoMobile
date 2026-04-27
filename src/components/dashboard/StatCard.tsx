@@ -1,6 +1,6 @@
 "use client";
 
-import { TrendingUp } from "lucide-react";
+import { TrendingUp, TrendingDown } from "lucide-react";
 
 export default function StatCard({
   title,
@@ -28,16 +28,16 @@ export default function StatCard({
         display: "flex",
         flexDirection: "column",
         gap: isSmall ? 6 : 12,
-        padding: isSmall ? "10px 0" : "4px 0",
+        padding: isSmall ? "12px 0" : "4px 0",
         borderTop: isSmall ? "1px solid var(--border)" : "none",
       }}
     >
       {/* Title row */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <p style={{
-          fontSize: isSmall ? 11 : 12,
+          fontSize: isSmall ? 12 : 12.5,
           color: "var(--text-secondary)",
-          fontWeight: 500,
+          fontWeight: 600,
           letterSpacing: "0.01em",
           lineHeight: 1.3,
         }}>
@@ -45,17 +45,17 @@ export default function StatCard({
         </p>
         {Icon && !isSmall && (
           <div style={{
-            width: 32, height: 32, borderRadius: 8,
+            width: 34, height: 34, borderRadius: 9,
             background: "var(--accent-dim)",
             border: "1px solid var(--accent-glow)",
             display: "flex", alignItems: "center", justifyContent: "center",
             color: "var(--accent)",
           }}>
-            <Icon size={14} strokeWidth={2} />
+            <Icon size={15} strokeWidth={2} />
           </div>
         )}
         {Icon && isSmall && (
-          <Icon size={12} strokeWidth={1.8} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+          <Icon size={13} strokeWidth={1.8} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
         )}
       </div>
 
@@ -63,7 +63,7 @@ export default function StatCard({
       <p
         className="stat-number"
         style={{
-          fontSize: isSmall ? (isCount ? 18 : 16) : 26,
+          fontSize: isSmall ? (isCount ? 20 : 17) : 28,
           color: "var(--text-primary)",
         }}
       >
@@ -74,22 +74,25 @@ export default function StatCard({
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{
           display: "inline-flex", alignItems: "center", gap: 3,
-          fontSize: isSmall ? 10 : 11,
-          fontWeight: 600,
+          fontSize: isSmall ? 11 : 11.5,
+          fontWeight: 700,
           color: isPositive ? "var(--success)" : "var(--danger)",
-          background: isPositive ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
-          border: `1px solid ${isPositive ? "rgba(74,222,128,0.18)" : "rgba(248,113,113,0.18)"}`,
+          background: isPositive ? "rgba(5,150,105,0.09)" : "rgba(220,38,38,0.09)",
+          border: `1px solid ${isPositive ? "rgba(5,150,105,0.22)" : "rgba(220,38,38,0.22)"}`,
           padding: isSmall ? "2px 7px" : "3px 9px",
           borderRadius: 100,
         }}>
-          <TrendingUp size={isSmall ? 8 : 10} strokeWidth={2.5} />
+          {isPositive
+            ? <TrendingUp size={isSmall ? 9 : 10} strokeWidth={2.5} />
+            : <TrendingDown size={isSmall ? 9 : 10} strokeWidth={2.5} />
+          }
           {change}
         </span>
         {!isSmall && (
-          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>vs last month</span>
+          <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>vs last month</span>
         )}
         {isSmall && (
-          <span style={{ fontSize: 10, color: "var(--text-muted)" }}>vs last mo.</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>vs last mo.</span>
         )}
       </div>
     </div>

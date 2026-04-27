@@ -31,8 +31,9 @@ export default function Home() {
         <Navbar activePage={activePage} />
 
         <main style={{
-          flex: 1, overflowY: "auto",
-          padding: "28px 28px 40px",
+          flex: 1,
+          overflowY: activePage === "Repair Management" ? "hidden" : "auto",
+          padding: activePage === "Repair Management" ? "28px 28px 0" : "28px 28px 40px",
           display: "flex", flexDirection: "column", gap: 20,
         }}>
 
@@ -86,8 +87,8 @@ export default function Home() {
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                <ChartCard title="Users Growth"   index={0} color="#e8ff47" />
-                <ChartCard title="Sales Overview" index={1} color="#60a5fa" />
+                <ChartCard title="Users Growth"   index={0} color="#6366f1" />
+                <ChartCard title="Sales Overview" index={1} color="#06b6d4" />
               </div>
             </>
           )}

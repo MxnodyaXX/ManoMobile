@@ -51,7 +51,7 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
           display: "flex", alignItems: "center", justifyContent: "center",
           flexShrink: 0,
         }}>
-          <Smartphone size={18} color="#0a0a0f" strokeWidth={2.5} />
+          <Smartphone size={18} color="var(--accent-fg)" strokeWidth={2.5} />
         </div>
         {!collapsed && (
           <motion.div

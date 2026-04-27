@@ -20,9 +20,19 @@ export default function Navbar({ activePage }: { activePage?: string }) {
 
   const pageInfo = pageTitles[activePage || "Home"] || pageTitles["Home"];
 
+  const iconBtnStyle: React.CSSProperties = {
+    width: 36, height: 36, borderRadius: 9,
+    border: "1px solid var(--border)",
+    background: "var(--bg-card)",
+    color: "var(--text-secondary)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    cursor: "pointer", transition: "all 0.18s", position: "relative",
+    boxShadow: "var(--shadow-card)",
+  };
+
   return (
     <header style={{
-      height: 64,
+      height: 60,
       display: "flex",
       alignItems: "center",
       justifyContent: "space-between",
@@ -30,26 +40,27 @@ export default function Navbar({ activePage }: { activePage?: string }) {
       borderBottom: "1px solid var(--border)",
       background: "var(--bg-secondary)",
       gap: 16,
+      flexShrink: 0,
     }}>
       {/* Breadcrumb + live badge */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span className="heading" style={{ fontSize: 16, color: "var(--text-primary)" }}>
+        <span className="heading" style={{ fontSize: 15, color: "var(--text-primary)" }}>
           {pageInfo.title}
         </span>
-        <span style={{ color: "var(--text-muted)", fontSize: 13 }}>/</span>
-        <span style={{ color: "var(--text-secondary)", fontSize: 13 }}>{pageInfo.sub}</span>
+        <span style={{ color: "var(--border-active)", fontSize: 14 }}>/</span>
+        <span style={{ color: "var(--text-muted)", fontSize: 13.5, fontWeight: 500 }}>{pageInfo.sub}</span>
         <div style={{
           display: "flex", alignItems: "center", gap: 5,
           marginLeft: 8, padding: "3px 10px",
           borderRadius: 100,
-          border: "1px solid rgba(74,222,128,0.2)",
-          background: "rgba(74,222,128,0.07)",
+          border: "1px solid rgba(5,150,105,0.25)",
+          background: "rgba(5,150,105,0.08)",
         }}>
           <span className="live-dot" style={{
             width: 6, height: 6, borderRadius: "50%",
             background: "var(--success)", display: "block",
           }} />
-          <span style={{ fontSize: 11, color: "var(--success)", fontWeight: 600, letterSpacing: "0.05em" }}>
+          <span style={{ fontSize: 11, color: "var(--success)", fontWeight: 700, letterSpacing: "0.06em" }}>
             LIVE
           </span>
         </div>
@@ -57,14 +68,16 @@ export default function Navbar({ activePage }: { activePage?: string }) {
 
       {/* Actions */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {/* Search */}
         <button style={{
           display: "flex", alignItems: "center", gap: 8,
-          padding: "8px 14px", borderRadius: 10,
+          padding: "7px 14px", borderRadius: 9,
           border: "1px solid var(--border)",
           background: "var(--bg-card)",
           color: "var(--text-muted)",
-          cursor: "pointer", fontSize: 13,
+          cursor: "pointer", fontSize: 13.5, fontWeight: 500,
           transition: "all 0.18s",
+          boxShadow: "var(--shadow-card)",
         }}
           onMouseEnter={(e) => {
             (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border-active)";
@@ -78,20 +91,16 @@ export default function Navbar({ activePage }: { activePage?: string }) {
           <Search size={14} />
           <span>Search...</span>
           <kbd style={{
-            fontSize: 10, padding: "1px 6px", borderRadius: 4,
+            fontSize: 11, padding: "2px 6px", borderRadius: 5,
             border: "1px solid var(--border-active)",
             color: "var(--text-muted)", fontFamily: "monospace",
+            background: "var(--bg-primary)",
           }}>⌘K</kbd>
         </button>
 
-        <button style={{
-          width: 38, height: 38, borderRadius: 10,
-          border: "1px solid var(--border)",
-          background: "var(--bg-card)",
-          color: "var(--text-secondary)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          cursor: "pointer", transition: "all 0.18s", position: "relative",
-        }}
+        {/* Bell */}
+        <button
+          style={iconBtnStyle}
           onMouseEnter={(e) => {
             (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border-active)";
             (e.currentTarget as HTMLButtonElement).style.color = "var(--text-primary)";
@@ -101,26 +110,20 @@ export default function Navbar({ activePage }: { activePage?: string }) {
             (e.currentTarget as HTMLButtonElement).style.color = "var(--text-secondary)";
           }}
         >
-          <Bell size={16} />
+          <Bell size={15} />
           <span style={{
             position: "absolute", top: 8, right: 8,
             width: 7, height: 7, borderRadius: "50%",
             background: "var(--accent)",
-            border: "1.5px solid var(--bg-secondary)",
+            border: "2px solid var(--bg-secondary)",
           }} />
         </button>
 
+        {/* Theme toggle */}
         {mounted && (
           <button
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            style={{
-              width: 38, height: 38, borderRadius: 10,
-              border: "1px solid var(--border)",
-              background: "var(--bg-card)",
-              color: "var(--text-secondary)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              cursor: "pointer", transition: "all 0.18s",
-            }}
+            style={iconBtnStyle}
             onMouseEnter={(e) => {
               (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border-active)";
               (e.currentTarget as HTMLButtonElement).style.color = "var(--text-primary)";
@@ -134,14 +137,15 @@ export default function Navbar({ activePage }: { activePage?: string }) {
           </button>
         )}
 
+        {/* User */}
         <div style={{
-          width: 38, height: 38, borderRadius: 10,
-          border: "1px solid var(--border)",
-          background: "var(--accent-dim)",
+          width: 36, height: 36, borderRadius: 9,
+          background: "var(--accent)",
           display: "flex", alignItems: "center", justifyContent: "center",
-          cursor: "pointer", color: "var(--accent)",
+          cursor: "pointer", color: "var(--accent-fg)",
+          boxShadow: "0 2px 8px var(--accent-glow)",
         }}>
-          <User size={16} />
+          <User size={15} strokeWidth={2} />
         </div>
       </div>
     </header>

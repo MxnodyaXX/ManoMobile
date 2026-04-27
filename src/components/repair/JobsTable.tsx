@@ -96,7 +96,7 @@ export default function JobsTable({ filterStatus = "All", title }: JobsTableProp
               border: `1px solid ${searchFocused ? "var(--accent)" : "var(--border)"}`,
               borderRadius: 10, padding: "10px 14px 10px 36px",
               fontSize: 13.5, color: "var(--text-primary)",
-              outline: "none", fontFamily: "'DM Sans', sans-serif",
+              outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif",
               transition: "border-color 0.18s",
             }}
           />
@@ -112,7 +112,7 @@ export default function JobsTable({ filterStatus = "All", title }: JobsTableProp
             background: showFilters ? "var(--accent-dim)" : "var(--bg-card)",
             color: showFilters ? "var(--accent)" : "var(--text-secondary)",
             fontSize: 13.5, cursor: "pointer",
-            fontFamily: "'DM Sans', sans-serif",
+            fontFamily: "'Plus Jakarta Sans', sans-serif",
             transition: "all 0.18s",
           }}
         >
@@ -148,7 +148,7 @@ export default function JobsTable({ filterStatus = "All", title }: JobsTableProp
             <label style={{
               fontSize: 11, color: "var(--text-muted)", fontWeight: 600,
               letterSpacing: "0.06em", textTransform: "uppercase",
-              fontFamily: "'Syne', sans-serif", display: "block", marginBottom: 6,
+              fontFamily: "'Plus Jakarta Sans', sans-serif", display: "block", marginBottom: 6,
             }}>Priority</label>
             <div style={{ display: "flex", gap: 6 }}>
               {["All", "Low", "Normal", "High", "Urgent"].map(p => (
@@ -160,7 +160,7 @@ export default function JobsTable({ filterStatus = "All", title }: JobsTableProp
                     border: `1px solid ${priorityFilter === p ? "var(--accent-glow)" : "var(--border)"}`,
                     background: priorityFilter === p ? "var(--accent-dim)" : "transparent",
                     color: priorityFilter === p ? "var(--accent)" : "var(--text-secondary)",
-                    cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                    cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif",
                     transition: "all 0.15s",
                   }}
                 >{p}</button>
@@ -171,7 +171,7 @@ export default function JobsTable({ filterStatus = "All", title }: JobsTableProp
             <label style={{
               fontSize: 11, color: "var(--text-muted)", fontWeight: 600,
               letterSpacing: "0.06em", textTransform: "uppercase",
-              fontFamily: "'Syne', sans-serif", display: "block", marginBottom: 6,
+              fontFamily: "'Plus Jakarta Sans', sans-serif", display: "block", marginBottom: 6,
             }}>Brand</label>
             <div style={{ display: "flex", gap: 6 }}>
               {["All", "Apple", "Samsung", "Xiaomi", "Oppo", "OnePlus", "Huawei"].map(b => (
@@ -183,7 +183,7 @@ export default function JobsTable({ filterStatus = "All", title }: JobsTableProp
                     border: `1px solid ${brandFilter === b ? "var(--accent-glow)" : "var(--border)"}`,
                     background: brandFilter === b ? "var(--accent-dim)" : "transparent",
                     color: brandFilter === b ? "var(--accent)" : "var(--text-secondary)",
-                    cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                    cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif",
                     transition: "all 0.15s",
                   }}
                 >{b}</button>
@@ -196,7 +196,7 @@ export default function JobsTable({ filterStatus = "All", title }: JobsTableProp
               padding: "6px 14px", borderRadius: 8, fontSize: 12,
               border: "1px solid var(--border)", background: "transparent",
               color: "var(--text-muted)", cursor: "pointer",
-              fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s",
+              fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s",
             }}
           >Clear</button>
         </div>
@@ -213,17 +213,17 @@ export default function JobsTable({ filterStatus = "All", title }: JobsTableProp
               {["Job ID", "Customer", "Device", "Issue", "Technician", "Status", "Priority", "Est. Cost", "Balance", "Date"].map(h => (
                 <th key={h} style={{
                   padding: "12px 16px", textAlign: "left",
-                  fontSize: 10.5, color: "var(--text-muted)",
+                  fontSize: 11.5, color: "var(--text-secondary)",
                   fontWeight: 600, letterSpacing: "0.07em",
                   textTransform: "uppercase", whiteSpace: "nowrap",
-                  fontFamily: "'Syne', sans-serif",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
                   background: "var(--bg-secondary)",
                 }}>{h}</th>
               ))}
               <th style={{
                 padding: "12px 16px",
                 background: "var(--bg-secondary)",
-                fontSize: 10.5, color: "var(--text-muted)",
+                fontSize: 11.5, color: "var(--text-secondary)",
               }}></th>
             </tr>
           </thead>
@@ -254,7 +254,7 @@ export default function JobsTable({ filterStatus = "All", title }: JobsTableProp
                   <td style={{ padding: "14px 16px" }}>
                     <span style={{
                       fontSize: 12, fontWeight: 600,
-                      color: "var(--accent)", fontFamily: "'Syne', sans-serif",
+                      color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif",
                     }}>{job.id}</span>
                   </td>
                   <td style={{ padding: "14px 16px" }}>

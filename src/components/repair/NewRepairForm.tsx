@@ -104,8 +104,8 @@ function StepIndicator({ current }: { current: number }) {
                   background: isDone ? "var(--accent)" : isActive ? "var(--accent)" : "var(--bg-card)",
                   border: `2px solid ${isDone || isActive ? "var(--accent)" : "var(--border)"}`,
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  color: isDone || isActive ? "#0a0a0f" : "var(--text-secondary)",
-                  fontWeight: 700, fontSize: 14, fontFamily: "'Syne', sans-serif",
+                  color: isDone || isActive ? "var(--accent-fg)" : "var(--text-secondary)",
+                  fontWeight: 700, fontSize: 14, fontFamily: "'Plus Jakarta Sans', sans-serif",
                   transition: "all 0.2s",
                   flexShrink: 0,
                 }}
@@ -113,7 +113,7 @@ function StepIndicator({ current }: { current: number }) {
                 {isDone ? "✓" : step.num}
               </div>
               <span style={{
-                fontSize: 11, fontFamily: "'DM Sans', sans-serif",
+                fontSize: 11, fontFamily: "'Plus Jakarta Sans', sans-serif",
                 color: isActive ? "var(--accent)" : isDone ? "var(--text-primary)" : "var(--text-secondary)",
                 fontWeight: isActive ? 600 : 400, whiteSpace: "nowrap",
               }}>
@@ -139,19 +139,19 @@ function StepIndicator({ current }: { current: number }) {
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "9px 12px", borderRadius: 8,
   border: "1px solid var(--border)", background: "var(--bg-card)",
-  color: "var(--text-primary)", fontSize: 13,
-  fontFamily: "'DM Sans', sans-serif", outline: "none",
+  color: "var(--text-primary)", fontSize: 13.5,
+  fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none",
   transition: "border-color 0.15s", boxSizing: "border-box",
 };
 
 const labelStyle: React.CSSProperties = {
-  fontSize: 12, fontWeight: 600, fontFamily: "'Syne', sans-serif",
-  color: "var(--text-secondary)", marginBottom: 4, display: "block",
-  letterSpacing: "0.04em", textTransform: "uppercase",
+  fontSize: 12, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif",
+  color: "var(--text-secondary)", marginBottom: 5, display: "block",
+  letterSpacing: "0.06em", textTransform: "uppercase",
 };
 
 const sectionHeaderStyle: React.CSSProperties = {
-  fontSize: 13, fontWeight: 700, fontFamily: "'Syne', sans-serif",
+  fontSize: 13, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif",
   color: "var(--accent)", marginBottom: 14, paddingBottom: 8,
   borderBottom: "1px solid var(--border)", letterSpacing: "0.02em",
 };
@@ -164,7 +164,7 @@ const panelStyle: React.CSSProperties = {
 const checkboxItemStyle = (checked: boolean): React.CSSProperties => ({
   display: "flex", alignItems: "center", gap: 8, padding: "7px 10px",
   borderRadius: 7, border: `1px solid ${checked ? "var(--accent)" : "var(--border)"}`,
-  background: checked ? "rgba(var(--accent-rgb, 180,255,100), 0.08)" : "transparent",
+  background: checked ? "rgba(var(--accent-rgb, 232,232,232), 0.08)" : "transparent",
   cursor: "pointer", transition: "all 0.15s", userSelect: "none",
 });
 
@@ -174,7 +174,7 @@ function Step1({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
   const dealer = DEALERS.find((d) => d.id.toString() === data.dealerId);
 
   return (
-    <div style={{ display: "flex", gap: 20, height: "55%" }}>
+    <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
       {/* Left: Dealer */}
       <div style={panelStyle}>
         <div style={sectionHeaderStyle}>🏪 Dealer Information</div>
@@ -195,17 +195,17 @@ function Step1({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
         <div style={{ display: "flex", flexDirection: "column", gap: 12, opacity: dealer ? 1 : 0.4, transition: "opacity 0.2s" }}>
           <div>
             <label style={labelStyle}>Address</label>
-            <input readOnly style={{ ...inputStyle, background: "var(--bg)" }} value={dealer?.address ?? ""} placeholder="Select dealer above" />
+            <input readOnly style={{ ...inputStyle, background: "var(--bg-primary)" }} value={dealer?.address ?? ""} placeholder="Select dealer above" />
           </div>
           <div>
             <label style={labelStyle}>Contact Number</label>
-            <input readOnly style={{ ...inputStyle, background: "var(--bg)" }} value={dealer?.contact ?? ""} placeholder="—" />
+            <input readOnly style={{ ...inputStyle, background: "var(--bg-primary)" }} value={dealer?.contact ?? ""} placeholder="—" />
           </div>
           <div>
             <label style={labelStyle}>Remarks</label>
             <textarea
               readOnly
-              style={{ ...inputStyle, background: "var(--bg)", resize: "none", minHeight: 64 }}
+              style={{ ...inputStyle, background: "var(--bg-primary)", resize: "none", minHeight: 64 }}
               value={dealer?.remarks ?? ""}
             />
           </div>
@@ -266,7 +266,7 @@ function Step2({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
     list.includes(item) ? list.filter((i) => i !== item) : [...list, item];
 
   return (
-    <div style={{ display: "flex", gap: 20, height: "100%" }}>
+    <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
       {/* Left: Device Info & Received Items */}
       <div style={panelStyle}>
         <div style={sectionHeaderStyle}>📱 Device Information</div>
@@ -310,9 +310,9 @@ function Step2({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
                   display: "flex", alignItems: "center", justifyContent: "center",
                   flexShrink: 0, transition: "all 0.15s",
                 }}>
-                  {checked && <span style={{ color: "#0a0a0f", fontSize: 10, fontWeight: 700 }}>✓</span>}
+                  {checked && <span style={{ color: "var(--accent-fg)", fontSize: 10, fontWeight: 700 }}>✓</span>}
                 </div>
-                <span style={{ fontSize: 12, fontFamily: "'DM Sans', sans-serif", color: "var(--text-primary)" }}>{item}</span>
+                <span style={{ fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)" }}>{item}</span>
               </div>
             );
           })}
@@ -339,7 +339,7 @@ function Step2({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
                 }}>
                   {checked && <span style={{ color: "#fff", fontSize: 10, fontWeight: 700 }}>✓</span>}
                 </div>
-                <span style={{ fontSize: 12, fontFamily: "'DM Sans', sans-serif", color: "var(--text-primary)" }}>{fault}</span>
+                <span style={{ fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)" }}>{fault}</span>
               </div>
             );
           })}
@@ -367,7 +367,7 @@ function Step3({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
   const balance = estimated - advance;
 
   return (
-    <div style={{ display: "flex", gap: 20, height: "100%" }}>
+    <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
       {/* Left: Financials */}
       <div style={panelStyle}>
         <div style={sectionHeaderStyle}>💰 Cost & Payment</div>
@@ -412,23 +412,23 @@ function Step3({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
           {/* Balance Summary Card */}
           <div style={{
             marginTop: 8, padding: "16px 18px", borderRadius: 10,
-            background: "var(--bg)", border: "1px solid var(--border)",
+            background: "var(--bg-primary)", border: "1px solid var(--border)",
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-              <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'DM Sans', sans-serif" }}>Estimated Cost</span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Syne', sans-serif" }}>
+              <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Estimated Cost</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                 LKR {estimated.toLocaleString("en-LK", { minimumFractionDigits: 2 })}
               </span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-              <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'DM Sans', sans-serif" }}>Advance Paid</span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#4ade80", fontFamily: "'Syne', sans-serif" }}>
+              <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Advance Paid</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                 − LKR {advance.toLocaleString("en-LK", { minimumFractionDigits: 2 })}
               </span>
             </div>
             <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, display: "flex", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Syne', sans-serif" }}>Balance Due</span>
-              <span style={{ fontSize: 15, fontWeight: 700, color: balance > 0 ? "var(--accent)" : "#4ade80", fontFamily: "'Syne', sans-serif" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Balance Due</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: balance > 0 ? "var(--accent)" : "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                 LKR {balance.toLocaleString("en-LK", { minimumFractionDigits: 2 })}
               </span>
             </div>
@@ -453,9 +453,9 @@ function Step3({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
                     style={{
                       padding: "7px 18px", borderRadius: 7, border: `1px solid ${isActive ? colors[p] : "var(--border)"}`,
                       background: isActive ? colors[p] : "transparent",
-                      color: isActive ? "#0a0a0f" : "var(--text-secondary)",
+                      color: isActive ? "var(--accent-fg)" : "var(--text-secondary)",
                       fontWeight: isActive ? 700 : 400, fontSize: 12, cursor: "pointer",
-                      fontFamily: "'Syne', sans-serif", transition: "all 0.15s",
+                      fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s",
                     }}
                   >
                     {p}
@@ -477,10 +477,10 @@ function Step3({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
 
           <div style={{
             padding: "12px 14px", borderRadius: 8,
-            background: "rgba(var(--accent-rgb, 180,255,100), 0.06)",
+            background: "rgba(var(--accent-rgb, 232,232,232), 0.06)",
             border: "1px dashed var(--accent)",
           }}>
-            <p style={{ margin: 0, fontSize: 12, fontFamily: "'DM Sans', sans-serif", color: "var(--text-secondary)", lineHeight: 1.6 }}>
+            <p style={{ margin: 0, fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-secondary)", lineHeight: 1.6 }}>
               💡 A job card will be auto-generated with a unique reference number upon submission. The customer will be notified via SMS if a contact number is provided.
             </p>
           </div>
@@ -494,7 +494,7 @@ function Step3({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
 
 function Step4({ data, onChange }: { data: FormData; onChange: (d: Partial<FormData>) => void }) {
   return (
-    <div style={{ display: "flex", gap: 20, height: "100%" }}>
+    <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
       <div style={{ ...panelStyle, flex: 1.3 }}>
         <div style={sectionHeaderStyle}>🛠️ Available Repairmen</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -508,7 +508,7 @@ function Step4({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
                 style={{
                   display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
                   borderRadius: 10, border: `1px solid ${isSelected ? "var(--accent)" : "var(--border)"}`,
-                  background: isSelected ? "rgba(var(--accent-rgb, 180,255,100), 0.06)" : "var(--bg)",
+                  background: isSelected ? "rgba(var(--accent-rgb, 232,232,232), 0.06)" : "var(--bg)",
                   cursor: canSelect ? "pointer" : "not-allowed",
                   opacity: canSelect ? 1 : 0.5, transition: "all 0.15s",
                 }}
@@ -518,16 +518,16 @@ function Step4({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
                   background: isSelected ? "var(--accent)" : "var(--border)",
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontSize: 18, fontWeight: 700, flexShrink: 0,
-                  color: isSelected ? "#0a0a0f" : "var(--text-secondary)",
-                  fontFamily: "'Syne', sans-serif",
+                  color: isSelected ? "var(--accent-fg)" : "var(--text-secondary)",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
                 }}>
                   {r.name.charAt(0)}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, fontFamily: "'Syne', sans-serif", color: "var(--text-primary)", marginBottom: 3 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)", marginBottom: 3 }}>
                     {r.name}
                   </div>
-                  <div style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'DM Sans', sans-serif" }}>
+                  <div style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                     {r.speciality} · {r.activeJobs} active job{r.activeJobs !== 1 ? "s" : ""}
                   </div>
                 </div>
@@ -535,7 +535,7 @@ function Step4({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
                   padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600,
                   background: r.available ? "rgba(74, 222, 128, 0.12)" : "rgba(239, 68, 68, 0.12)",
                   color: r.available ? "#4ade80" : "#ef4444",
-                  fontFamily: "'Syne', sans-serif",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
                 }}>
                   {r.available ? "Available" : "Busy"}
                 </div>
@@ -543,7 +543,7 @@ function Step4({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
                   <div style={{
                     width: 22, height: 22, borderRadius: "50%", background: "var(--accent)",
                     display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 12, color: "#0a0a0f", fontWeight: 700,
+                    fontSize: 12, color: "var(--accent-fg)", fontWeight: 700,
                   }}>✓</div>
                 )}
               </div>
@@ -568,20 +568,20 @@ function Step4({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
           {data.assignedRepairman && (
             <div style={{
               padding: "14px 16px", borderRadius: 10,
-              background: "rgba(var(--accent-rgb, 180,255,100), 0.06)",
+              background: "rgba(var(--accent-rgb, 232,232,232), 0.06)",
               border: "1px solid var(--accent)",
             }}>
               {(() => {
                 const r = REPAIRMEN.find((rm) => rm.id.toString() === data.assignedRepairman);
                 return r ? (
                   <>
-                    <div style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'DM Sans', sans-serif", marginBottom: 6 }}>
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 6 }}>
                       Assigned to
                     </div>
-                    <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "'Syne', sans-serif", color: "var(--text-primary)", marginBottom: 4 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)", marginBottom: 4 }}>
                       {r.name}
                     </div>
-                    <div style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'DM Sans', sans-serif" }}>
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                       {r.speciality}
                     </div>
                   </>
@@ -592,9 +592,9 @@ function Step4({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
 
           <div style={{
             marginTop: "auto", padding: "14px 16px", borderRadius: 10,
-            background: "var(--bg)", border: "1px solid var(--border)",
+            background: "var(--bg-primary)", border: "1px solid var(--border)",
           }}>
-            <div style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Syne', sans-serif", color: "var(--text-secondary)", marginBottom: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-secondary)", marginBottom: 10 }}>
               REPAIR SUMMARY
             </div>
             {[
@@ -602,8 +602,8 @@ function Step4({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
               ["Completion", data.estimatedCompletion || "Not set"],
             ].map(([k, v]) => (
               <div key={k} style={{ display: "flex", justifyContent: "space-between", marginBottom: 7 }}>
-                <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'DM Sans', sans-serif" }}>{k}</span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Syne', sans-serif" }}>{v}</span>
+                <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{k}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{v}</span>
               </div>
             ))}
           </div>
@@ -648,18 +648,18 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
         height: "100%", gap: 16, textAlign: "center",
       }}>
         <div style={{ fontSize: 56 }}>✅</div>
-        <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Syne', sans-serif", color: "var(--text-primary)" }}>
+        <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)" }}>
           Repair Job Created!
         </div>
-        <div style={{ fontSize: 14, color: "var(--text-secondary)", fontFamily: "'DM Sans', sans-serif" }}>
+        <div style={{ fontSize: 14, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
           Job card has been generated and repairman notified.
         </div>
         <button
           onClick={() => { setForm(INITIAL); setStep(1); setSubmitted(false); }}
           style={{
             marginTop: 10, padding: "10px 28px", borderRadius: 8, border: "none",
-            background: "var(--accent)", color: "#0a0a0f", fontWeight: 700, fontSize: 14,
-            cursor: "pointer", fontFamily: "'Syne', sans-serif",
+            background: "var(--accent)", color: "var(--accent-fg)", fontWeight: 700, fontSize: 14,
+            cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif",
           }}
         >
           New Repair
@@ -672,9 +672,9 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
     <div
       style={{
         display: "flex", flexDirection: "column",
-        height: "100vh", maxHeight: "100vh",
-        background: "var(--bg)", overflow: "hidden",
-        fontFamily: "'DM Sans', sans-serif",
+        flex: 1, minHeight: 0,
+        background: "var(--bg-primary)",
+        fontFamily: "'Plus Jakarta Sans', sans-serif",
       }}
     >
       
@@ -705,7 +705,7 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
             padding: "9px 22px", borderRadius: 8, border: "1px solid var(--border)",
             background: "transparent", color: step === 1 ? "var(--border)" : "var(--text-secondary)",
             cursor: step === 1 ? "not-allowed" : "pointer", fontSize: 13,
-            fontFamily: "'Syne', sans-serif", fontWeight: 600, transition: "all 0.15s",
+            fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 600, transition: "all 0.15s",
           }}
         >
           ← Back
@@ -728,9 +728,9 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
             style={{
               padding: "9px 22px", borderRadius: 8, border: "none",
               background: canProceed() ? "var(--accent)" : "var(--border)",
-              color: canProceed() ? "#0a0a0f" : "var(--text-secondary)",
+              color: canProceed() ? "var(--accent-fg)" : "var(--text-secondary)",
               cursor: canProceed() ? "pointer" : "not-allowed",
-              fontSize: 13, fontFamily: "'Syne', sans-serif", fontWeight: 700,
+              fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 700,
               transition: "all 0.15s",
             }}
           >
@@ -741,8 +741,8 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
             onClick={handleSubmit}
             style={{
               padding: "9px 24px", borderRadius: 8, border: "none",
-              background: "var(--accent)", color: "#0a0a0f",
-              cursor: "pointer", fontSize: 13, fontFamily: "'Syne', sans-serif",
+              background: "var(--accent)", color: "var(--accent-fg)",
+              cursor: "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif",
               fontWeight: 700,
             }}
           >

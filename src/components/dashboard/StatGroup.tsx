@@ -15,12 +15,13 @@ export default function StatGroup({
       style={{
         background: "var(--bg-card)",
         border: "1px solid var(--border)",
-        borderRadius: 18,
+        borderRadius: 16,
         padding: "20px",
         display: "flex",
         flexDirection: "column",
         gap: 14,
-        transition: "border-color 0.2s",
+        transition: "border-color 0.2s, box-shadow 0.2s",
+        boxShadow: "var(--shadow-card)",
       }}
       onMouseEnter={(e) => {
         (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border-active)";
@@ -29,13 +30,12 @@ export default function StatGroup({
         (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border)";
       }}
     >
-      {/* Group heading + date label */}
       {(title || dateLabel) && (
         <div style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          paddingBottom: 10,
+          paddingBottom: 12,
           borderBottom: "1px solid var(--border)",
         }}>
           {title && (
@@ -43,6 +43,8 @@ export default function StatGroup({
               fontSize: 13,
               color: "var(--text-secondary)",
               letterSpacing: "0.02em",
+              textTransform: "uppercase",
+              fontWeight: 700,
             }}>
               {title}
             </p>
@@ -50,14 +52,12 @@ export default function StatGroup({
           {dateLabel && (
             <span style={{
               fontSize: 11,
-              fontWeight: 500,
+              fontWeight: 600,
               color: "var(--accent)",
               background: "var(--accent-dim)",
               border: "1px solid var(--accent-glow)",
               padding: "3px 10px",
               borderRadius: 100,
-              fontFamily: "'DM Sans', sans-serif",
-              letterSpacing: "0.01em",
               whiteSpace: "nowrap",
             }}>
               {dateLabel}
@@ -65,7 +65,6 @@ export default function StatGroup({
           )}
         </div>
       )}
-
       {children}
     </div>
   );
