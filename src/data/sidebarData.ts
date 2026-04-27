@@ -1,4 +1,5 @@
 import {
+  Home,
   Wrench,
   DollarSign,
   Boxes,
@@ -7,6 +8,7 @@ import {
 } from "lucide-react";
 
 export const sidebarData = [
+  { title: "Home", icon: Home },
   { title: "Repair Management", icon: Wrench },
   { title: "Sales Management", icon: DollarSign },
   { title: "Inventory Management", icon: Boxes },

@@ -6,9 +6,15 @@ import { roleMenus } from "@/data/sidebarRoles";
 import { motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Smartphone } from "lucide-react";
 
-export default function Sidebar() {
+type ActivePage = "Home" | "Repair Management" | "Sales Management" | "Inventory Management" | "Customer Management" | "Admin Control";
+
+interface SidebarProps {
+  activePage: ActivePage;
+  onNavigate: (page: ActivePage) => void;
+}
+
+export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const [active, setActive] = useState("Repair Management");
   const userRole = "admin";
 
   const menuItems = sidebarData.filter((item) =>
@@ -76,11 +82,11 @@ export default function Sidebar() {
         )}
         {menuItems.map((item, i) => {
           const Icon = item.icon;
-          const isActive = active === item.title;
+          const isActive = activePage === item.title;
           return (
             <button
               key={i}
-              onClick={() => setActive(item.title)}
+              onClick={() => onNavigate(item.title as ActivePage)}
               style={{
                 display: "flex",
                 alignItems: "center",

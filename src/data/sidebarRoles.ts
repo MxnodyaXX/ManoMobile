@@ -1,5 +1,6 @@
 export const roleMenus: any = {
   admin: [
+    "Home",
     "Repair Management",
     "Sales Management",
     "Inventory Management",

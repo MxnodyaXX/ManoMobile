@@ -4,10 +4,21 @@ import { useTheme } from "next-themes";
 import { Bell, Search, Sun, Moon, User } from "lucide-react";
 import { useState, useEffect } from "react";
 
-export default function Navbar() {
+const pageTitles: Record<string, { title: string; sub: string }> = {
+  "Home": { title: "Dashboard", sub: "Overview" },
+  "Repair Management": { title: "Repair Management", sub: "Jobs & Tickets" },
+  "Sales Management": { title: "Sales Management", sub: "Transactions" },
+  "Inventory Management": { title: "Inventory", sub: "Stock & Parts" },
+  "Customer Management": { title: "Customers", sub: "Profiles" },
+  "Admin Control": { title: "Admin Control", sub: "Settings" },
+};
+
+export default function Navbar({ activePage }: { activePage?: string }) {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  const pageInfo = pageTitles[activePage || "Home"] || pageTitles["Home"];
 
   return (
     <header style={{
@@ -23,10 +34,10 @@ export default function Navbar() {
       {/* Breadcrumb + live badge */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span className="heading" style={{ fontSize: 16, color: "var(--text-primary)" }}>
-          Dashboard
+          {pageInfo.title}
         </span>
         <span style={{ color: "var(--text-muted)", fontSize: 13 }}>/</span>
-        <span style={{ color: "var(--text-secondary)", fontSize: 13 }}>Overview</span>
+        <span style={{ color: "var(--text-secondary)", fontSize: 13 }}>{pageInfo.sub}</span>
         <div style={{
           display: "flex", alignItems: "center", gap: 5,
           marginLeft: 8, padding: "3px 10px",
@@ -46,7 +57,6 @@ export default function Navbar() {
 
       {/* Actions */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {/* Search */}
         <button style={{
           display: "flex", alignItems: "center", gap: 8,
           padding: "8px 14px", borderRadius: 10,
@@ -74,7 +84,6 @@ export default function Navbar() {
           }}>⌘K</kbd>
         </button>
 
-        {/* Bell */}
         <button style={{
           width: 38, height: 38, borderRadius: 10,
           border: "1px solid var(--border)",
@@ -101,7 +110,6 @@ export default function Navbar() {
           }} />
         </button>
 
-        {/* Theme toggle */}
         {mounted && (
           <button
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
@@ -126,7 +134,6 @@ export default function Navbar() {
           </button>
         )}
 
-        {/* Avatar */}
         <div style={{
           width: 38, height: 38, borderRadius: 10,
           border: "1px solid var(--border)",
