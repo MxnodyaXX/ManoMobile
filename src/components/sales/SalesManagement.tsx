@@ -1,32 +1,27 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Briefcase, AlertCircle, Clock, CheckSquare, LayoutGrid } from "lucide-react";
-import NewRepairForm from "./NewRepairForm";
-import JobsTable, { JobStatus } from "./JobsTable";
+import { ShoppingBag, Smartphone, MoreHorizontal } from "lucide-react";
+import AccessorySales from "./AccessorySales";
 
-type RepairSection = "New Repair" | "Non-Issued Jobs" | "Issued Jobs" | "Pending Jobs" | "All Jobs";
+type SalesSection = "Accessories Sales" | "Mobile Sales" | "Others";
 
-const sections: { id: RepairSection; icon: any; label: string; status?: JobStatus | "All" }[] = [
-  { id: "New Repair",     icon: Plus,        label: "New Repair" },
-  { id: "Non-Issued Jobs", icon: Clock,       label: "Non-Issued Jobs",  status: "Non-Issued" },
-  { id: "Issued Jobs",    icon: Briefcase,   label: "Issued Jobs",       status: "Issued" },
-  { id: "Pending Jobs",   icon: AlertCircle, label: "Pending Jobs",      status: "Pending" },
-  { id: "All Jobs",       icon: LayoutGrid,  label: "All Jobs",          status: "All" },
+const sections: { id: SalesSection; icon: any; label: string }[] = [
+  { id: "Accessories Sales", icon: ShoppingBag,    label: "Accessories Sales" },
+  { id: "Mobile Sales",      icon: Smartphone,     label: "Mobile Sales" },
+  { id: "Others",            icon: MoreHorizontal, label: "Others" },
 ];
 
-const sectionDescriptions: Record<RepairSection, string> = {
-  "New Repair": "Register a new device repair job",
-  "Non-Issued Jobs": "Jobs that have been logged but not yet assigned",
-  "Issued Jobs": "Jobs currently assigned to a technician",
-  "Pending Jobs": "Jobs awaiting parts, approval, or follow-up",
-  "All Jobs": "Complete list of all repair jobs",
+const sectionDescriptions: Record<SalesSection, string> = {
+  "Accessories Sales": "Sell phone cases, chargers, screen protectors and more",
+  "Mobile Sales":      "Process handset and device sales transactions",
+  "Others":            "Add miscellaneous items like photocopies, stationery, and small goods",
 };
 
-export default function RepairManagement() {
-  const [active, setActive] = useState<RepairSection>("New Repair");
+export default function SalesManagement() {
+  const [active, setActive] = useState<SalesSection>("Accessories Sales");
 
-  const activeSection = sections.find(s => s.id === active)!;
+  const activeSection = sections.find((s) => s.id === active)!;
   const ActiveIcon = activeSection.icon;
 
   return (
@@ -36,10 +31,10 @@ export default function RepairManagement() {
       <div className="fade-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
         <div>
           <h1 className="heading-xl" style={{ fontSize: 24, color: "var(--text-primary)" }}>
-            Repair Management
+            Sales Management
           </h1>
           <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 5 }}>
-            Manage repair jobs, track status, and assign technicians.
+            Process sales, manage transactions, and generate receipts.
           </p>
         </div>
 
@@ -115,13 +110,36 @@ export default function RepairManagement() {
 
       {/* Content */}
       <div className="fade-up fade-up-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-        {active === "New Repair" ? (
-          <NewRepairForm />
-        ) : (
-          <JobsTable
-            title={active}
-            filterStatus={activeSection.status as JobStatus | "All"}
-          />
+        {active === "Accessories Sales" && <AccessorySales />}
+
+        {active === "Mobile Sales" && (
+          <div style={{
+            flex: 1, display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center", gap: 10,
+          }}>
+            <div style={{ fontSize: 36 }}>📱</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              Mobile Sales
+            </div>
+            <div style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              Coming soon — handset & device sales
+            </div>
+          </div>
+        )}
+
+        {active === "Others" && (
+          <div style={{
+            flex: 1, display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center", gap: 10,
+          }}>
+            <div style={{ fontSize: 36 }}>🗂️</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              Others
+            </div>
+            <div style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              Coming soon — photocopies, stationery, and miscellaneous items
+            </div>
+          </div>
         )}
       </div>
     </div>

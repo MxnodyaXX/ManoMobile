@@ -9,6 +9,7 @@ import InfoCard from "@/components/dashboard/InfoCard";
 import ChartCard from "@/components/dashboard/ChartCard";
 import FilterBar from "@/components/dashboard/FilterBar";
 import RepairManagement from "@/components/repair/RepairManagement";
+import SalesManagement from "@/components/sales/SalesManagement";
 import { getDateLabel } from "@/utils/dataLabel";
 import {
   DollarSign, ShoppingCart, Wrench,
@@ -31,14 +32,16 @@ export default function Home() {
         <Navbar activePage={activePage} />
 
         <main style={{
-          flex: 1,
-          overflowY: activePage === "Repair Management" ? "hidden" : "auto",
-          padding: activePage === "Repair Management" ? "28px 28px 0" : "28px 28px 40px",
+          flex: 1, position: "relative",
+          overflowY: activePage === "Repair Management" || activePage === "Sales Management" ? "hidden" : "auto",
+          padding: activePage === "Repair Management" || activePage === "Sales Management" ? "28px 28px 0" : "28px 28px 40px",
           display: "flex", flexDirection: "column", gap: 20,
         }}>
 
           {activePage === "Repair Management" ? (
             <RepairManagement />
+          ) : activePage === "Sales Management" ? (
+            <SalesManagement />
           ) : (
             <>
               <div className="fade-up" style={{ marginBottom: 4 }}>
