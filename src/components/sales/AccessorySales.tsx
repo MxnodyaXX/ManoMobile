@@ -569,7 +569,7 @@ function Step1({
   const stockColor = (s: number) => s > 20 ? "#4ade80" : s > 5 ? "#f59e0b" : "#ef4444";
 
   return (
-    <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
+    <div style={{ display: "flex", gap: 0, flex: 1, minHeight: 0 }}>
 
       {/* ── Left: Search + Product List ── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, minHeight: 0 }}>
@@ -583,7 +583,7 @@ function Step1({
             onChange={(e) => setBarcodeVal(e.target.value)}
           />
           <input
-            style={{ ...inputStyle, flex: 1 }}
+            style={{ ...inputStyle, flex: "0 0 900px" }}
             placeholder="Enter Item Code or Name"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -625,10 +625,10 @@ function Step1({
 
         {/* Product list */}
         <div style={{
-          flex: 1, overflowY: "auto", display: "flex",
-          flexDirection: viewMode === "list" ? "column" : "row",
-          flexWrap: viewMode === "grid" ? "wrap" : "nowrap",
-          gap: 8, paddingRight: 4, minHeight: 0,
+          flex: 1, overflowY: "auto", minHeight: 0, paddingRight: 4,
+          ...(viewMode === "grid"
+            ? { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, alignContent: "flex-start" }
+            : { display: "flex", flexDirection: "column", gap: 8 }),
         }}>
           {filtered.length === 0 && (
             <div style={{
@@ -649,10 +649,10 @@ function Step1({
                 <div
                   key={p.id}
                   style={{
-                    flex: "0 0 calc(16.55% - 6px)", padding: "14px 16px", borderRadius: 10,
+                    height: 130, padding: "14px 16px", borderRadius: 10,
                     border: `1px solid ${inCart ? "var(--accent)" : "var(--border)"}`,
                     background: inCart ? "rgba(var(--accent-rgb,232,232,232),0.04)" : "var(--bg-card)",
-                    display: "flex", flexDirection: "column", gap: 8,
+                    display: "flex", flexDirection: "column", gap: 8, boxSizing: "border-box", overflow: "hidden",
                   }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -664,6 +664,8 @@ function Step1({
                       fontSize: 10, padding: "2px 7px", borderRadius: 5,
                       background: "var(--accent-dim)", color: "var(--accent)",
                       fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 600,
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      maxWidth: 90, flexShrink: 0,
                     }}>{p.category}</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -824,7 +826,7 @@ function Step1({
       </div>
 
       {/* ── Right panel ── */}
-      <div style={{ width: 300, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", paddingRight: 2 }}>
+      <div style={{ width: 350, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", paddingRight: 2 }}>
 
         {/* Bill Summary */}
         <div style={{
