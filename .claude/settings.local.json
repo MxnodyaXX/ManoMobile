@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npm install *)",
       "Read(//mnt/c/Users/mxnod/AppData/Local/Temp/claude/c--Users-mxnod-OneDrive-Desktop-manomobile-fixed/12bec8d8-5759-455f-a4e3-cab2e57dfacf/tasks/**)",
-      "Read(//mnt/c/Users/mxnod/OneDrive/Desktop/manomobile-fixed/node_modules/react-barcode/lib/**)"
+      "Read(//mnt/c/Users/mxnod/OneDrive/Desktop/manomobile-fixed/node_modules/react-barcode/lib/**)",
+      "Bash(npx tsc *)"
     ]
   }
 }

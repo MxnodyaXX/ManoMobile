@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ShoppingBag, Smartphone, MoreHorizontal } from "lucide-react";
 import AccessorySales from "./AccessorySales";
+import MobileSales from "./MobileSales";
 
 type SalesSection = "Accessories Sales" | "Mobile Sales" | "Others";
 
@@ -112,20 +113,7 @@ export default function SalesManagement() {
       <div className="fade-up fade-up-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {active === "Accessories Sales" && <AccessorySales />}
 
-        {active === "Mobile Sales" && (
-          <div style={{
-            flex: 1, display: "flex", flexDirection: "column",
-            alignItems: "center", justifyContent: "center", gap: 10,
-          }}>
-            <div style={{ fontSize: 36 }}>📱</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-              Mobile Sales
-            </div>
-            <div style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-              Coming soon — handset & device sales
-            </div>
-          </div>
-        )}
+        {active === "Mobile Sales" && <MobileSales />}
 
         {active === "Others" && (
           <div style={{
