@@ -1556,12 +1556,13 @@ function Step2({
                 <div style={{ fontSize: 8, fontWeight: 700, color: "#6b7280", letterSpacing: "0.14em", textTransform: "uppercase" as const, marginBottom: 8 }}>Items</div>
                 <table style={{ width: "100%", borderCollapse: "collapse" as const, fontSize: 9.5 }}>
                   <colgroup>
-                    <col style={{ width: "28%" }} />
-                    <col style={{ width: "18%" }} />
-                    <col style={{ width: "7%" }} />
+                    <col style={{ width: "24%" }} />
                     <col style={{ width: "15%" }} />
-                    <col style={{ width: "16%" }} />
-                    <col style={{ width: "16%" }} />
+                    <col style={{ width: "7%" }} />
+                    <col style={{ width: "14%" }} />
+                    <col style={{ width: "14%" }} />
+                    <col style={{ width: "14%" }} />
+                    <col style={{ width: "12%" }} />
                   </colgroup>
                   <thead>
                     <tr style={{ borderBottom: "1.5px solid #111827" }}>
@@ -1569,6 +1570,7 @@ function Step2({
                       <th style={{ textAlign: "left" as const, padding: "4px 6px 5px", fontWeight: 700, color: "#111827" }}>Brand</th>
                       <th style={{ textAlign: "center" as const, padding: "4px 6px 5px", fontWeight: 700, color: "#111827" }}>Qty</th>
                       <th style={{ textAlign: "right" as const, padding: "4px 6px 5px", fontWeight: 700, color: "#111827" }}>Unit Price</th>
+                      <th style={{ textAlign: "right" as const, padding: "4px 6px 5px", fontWeight: 700, color: "#111827" }}>Discount</th>
                       <th style={{ textAlign: "right" as const, padding: "4px 6px 5px", fontWeight: 700, color: "#111827" }}>Amount</th>
                       <th style={{ textAlign: "center" as const, padding: "4px 0 5px 6px", fontWeight: 700, color: "#111827" }}>Warranty</th>
                     </tr>
@@ -1582,6 +1584,7 @@ function Step2({
                           <td style={{ padding: "5px 6px", color: "#6b7280" }}>{c.product.brand}</td>
                           <td style={{ padding: "5px 6px", textAlign: "center" as const, color: "#374151" }}>{c.qty}</td>
                           <td style={{ padding: "5px 6px", textAlign: "right" as const, color: "#374151" }}>Rs.{c.product.sellingPrice.toLocaleString()}</td>
+                          <td style={{ padding: "5px 6px", textAlign: "right" as const, color: "#9ca3af" }}>—</td>
                           <td style={{ padding: "5px 6px", textAlign: "right" as const, fontWeight: 700, color: "#111827" }}>Rs.{(c.product.sellingPrice * c.qty).toLocaleString()}</td>
                           <td style={{ padding: "5px 0 5px 6px", textAlign: "center" as const, fontWeight: w && w !== "None" ? 700 : 400, color: w && w !== "None" ? "#111827" : "#9ca3af" }}>{w && w !== "None" ? w : "—"}</td>
                         </tr>
@@ -1595,7 +1598,7 @@ function Step2({
                   <div style={{ width: 230 }}>
                     {[
                       { label: "Subtotal", value: `Rs.${subtotal.toLocaleString()}`, show: true },
-                      { label: "Discount", value: `− Rs.${discountAmt.toLocaleString()}`, show: discountAmt > 0 },
+                      { label: "Discount", value: `(Rs.${discountAmt.toLocaleString()})`, show: discountAmt > 0 },
                       { label: "Received", value: `Rs.${payReceivedAmt.toLocaleString()}`, show: payReceivedAmt > 0 },
                       { label: "Change", value: `Rs.${Math.max(0, payReceivedAmt - total).toLocaleString()}`, show: payReceivedAmt > 0 },
                       { label: "Advance", value: `Rs.${advanceAmt.toLocaleString()}`, show: payMethod === "Credit" && advanceAmt > 0 },

@@ -10,6 +10,9 @@ import ChartCard from "@/components/dashboard/ChartCard";
 import FilterBar from "@/components/dashboard/FilterBar";
 import RepairManagement from "@/components/repair/RepairManagement";
 import SalesManagement from "@/components/sales/SalesManagement";
+import InventoryManagement from "@/components/inventory/InventoryManagement";
+import AdminControl from "@/components/admin/AdminControl";
+import { InventoryProvider } from "@/contexts/InventoryContext";
 import { getDateLabel } from "@/utils/dataLabel";
 import {
   DollarSign, ShoppingCart, Wrench,
@@ -25,6 +28,7 @@ export default function Home() {
   const dateLabel = getDateLabel(filter);
 
   return (
+    <InventoryProvider>
     <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
       <Sidebar activePage={activePage} onNavigate={setActivePage} />
 
@@ -33,8 +37,8 @@ export default function Home() {
 
         <main style={{
           flex: 1, position: "relative",
-          overflowY: activePage === "Repair Management" || activePage === "Sales Management" ? "hidden" : "auto",
-          padding: activePage === "Repair Management" || activePage === "Sales Management" ? "28px 28px 0" : "28px 28px 40px",
+          overflowY: activePage === "Repair Management" || activePage === "Sales Management" || activePage === "Inventory Management" || activePage === "Admin Control" ? "hidden" : "auto",
+          padding: activePage === "Repair Management" || activePage === "Sales Management" || activePage === "Inventory Management" || activePage === "Admin Control" ? "28px 28px 0" : "28px 28px 40px",
           display: "flex", flexDirection: "column", gap: 20,
         }}>
 
@@ -42,6 +46,10 @@ export default function Home() {
             <RepairManagement />
           ) : activePage === "Sales Management" ? (
             <SalesManagement />
+          ) : activePage === "Inventory Management" ? (
+            <InventoryManagement />
+          ) : activePage === "Admin Control" ? (
+            <AdminControl />
           ) : (
             <>
               <div className="fade-up" style={{ marginBottom: 4 }}>
@@ -98,5 +106,6 @@ export default function Home() {
         </main>
       </div>
     </div>
+    </InventoryProvider>
   );
 }

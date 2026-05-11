@@ -4,7 +4,13 @@
       "Bash(npm install *)",
       "Read(//mnt/c/Users/mxnod/AppData/Local/Temp/claude/c--Users-mxnod-OneDrive-Desktop-manomobile-fixed/12bec8d8-5759-455f-a4e3-cab2e57dfacf/tasks/**)",
       "Read(//mnt/c/Users/mxnod/OneDrive/Desktop/manomobile-fixed/node_modules/react-barcode/lib/**)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(Get-ChildItem -Path \"d:\\\\Mano Mobile\\\\ManoMobile\\\\src\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)",
+      "Bash(New-Item -ItemType Directory -Force -Path \"d:\\\\Mano Mobile\\\\ManoMobile\\\\src\\\\components\\\\inventory\")",
+      "Bash(Out-Null)",
+      "Bash(Write-Host \"done\")"
     ]
   }
 }

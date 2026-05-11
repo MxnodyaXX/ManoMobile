@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Search, Trash2, Plus, Minus, X } from "lucide-react";
+import { Search, Trash2, Plus, Minus, X, Printer } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import Barcode from "react-barcode";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -197,7 +199,7 @@ function CardPaymentModal({
             </div>
             {overallDiscount > 0 && (
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 4 }}>
-                <span>Discount</span><span style={{ color: "#ef4444", fontWeight: 600 }}>− {fmt(overallDiscount)}</span>
+                <span>Discount</span><span style={{ color: "#ef4444", fontWeight: 600 }}>({fmt(overallDiscount)})</span>
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 800, fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 6 }}>
@@ -459,6 +461,278 @@ function CreditCustomerModal({
             >
               {selected ? `Assign Credit · ${selected.name}` : "Select a customer"}
             </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// ─── Mobile Print Preview Modal ──────────────────────────────────────────────
+
+function MobilePrintPreviewModal({
+  invoiceNo, phoneCart, accessoryCart, customer,
+  paymentMethod, cardRef, creditCustomer,
+  subtotal, overallDiscount, total,
+  onDone,
+}: {
+  invoiceNo: string;
+  phoneCart: PhoneCartItem[];
+  accessoryCart: AccessoryCartItem[];
+  customer: { name: string; phone: string; whatsapp: string; email: string; nic: string };
+  paymentMethod: string;
+  cardRef?: string;
+  creditCustomer?: CreditCustomer | null;
+  subtotal: number;
+  overallDiscount: number;
+  total: number;
+  onDone: () => void;
+}) {
+  const receiptRef = useRef<HTMLDivElement>(null);
+  const today = new Date().toLocaleDateString("en-LK", { year: "numeric", month: "long", day: "numeric" });
+
+  const handlePrint = () => {
+    if (!receiptRef.current) return;
+    const printDiv = document.createElement("div");
+    printDiv.id = "__mp__";
+    printDiv.innerHTML = receiptRef.current.outerHTML;
+    document.body.appendChild(printDiv);
+
+    const styleEl = document.createElement("style");
+    styleEl.id = "__mp_style__";
+    styleEl.textContent = `
+      @page { size: A5 landscape; margin: 10mm; }
+      #__mp__ { display: none; }
+      @media print {
+        body { visibility: hidden; }
+        #__mp__ {
+          display: block !important;
+          visibility: visible;
+          position: fixed;
+          left: 0; top: 0;
+          width: 100%;
+        }
+        #__mp__ * { visibility: visible; }
+      }
+    `;
+    document.head.appendChild(styleEl);
+    window.print();
+    setTimeout(() => {
+      document.getElementById("__mp__")?.remove();
+      document.getElementById("__mp_style__")?.remove();
+    }, 1000);
+  };
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 9999,
+        background: "rgba(0,0,0,0.72)",
+        backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, gap: 16,
+      }}
+    >
+      {/* Toolbar */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.7)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          Print Invoice — A5 Landscape
+        </div>
+        <div style={{ flex: 1 }} />
+        <button
+          onClick={handlePrint}
+          style={{
+            display: "flex", alignItems: "center", gap: 7,
+            padding: "9px 22px", borderRadius: 9, border: "none",
+            background: "#ffffff", color: "#111827",
+            fontWeight: 700, fontSize: 13, cursor: "pointer",
+            fontFamily: "'Plus Jakarta Sans', sans-serif",
+          }}
+        >
+          <Printer size={15} /> Print
+        </button>
+        <button
+          onClick={onDone}
+          style={{
+            padding: "9px 22px", borderRadius: 9,
+            border: "1px solid rgba(255,255,255,0.2)", background: "transparent",
+            color: "rgba(255,255,255,0.7)", fontWeight: 600, fontSize: 13,
+            cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif",
+          }}
+        >
+          Skip &amp; Done
+        </button>
+      </div>
+
+      {/* A5 Preview */}
+      <div style={{ overflowY: "auto", maxHeight: "calc(100vh - 130px)", borderRadius: 8 }}>
+        <div
+          ref={receiptRef}
+          style={{
+            background: "#ffffff", borderRadius: 6, border: "1px solid #d1d5db",
+            overflow: "hidden", boxShadow: "0 4px 32px rgba(0,0,0,0.4)",
+            fontFamily: "Arial, Helvetica, sans-serif", color: "#111827",
+            width: 740,
+          }}
+        >
+          {/* Top accent bar */}
+          <div style={{ height: 4, background: "#111827" }} />
+
+          {/* Row 1: Branding + Invoice ref  |  Customer Info */}
+          <div style={{ display: "flex", borderBottom: "1.5px solid #111827" }}>
+
+            {/* Left — Branding */}
+            <div style={{ flex: "0 0 52%", padding: "14px 18px 12px", borderRight: "1px solid #d1d5db" }}>
+              <div style={{ fontSize: 17, fontWeight: 900, letterSpacing: "0.12em", color: "#111827", lineHeight: 1 }}>MANO MOBILE</div>
+              <div style={{ fontSize: 8, letterSpacing: "0.22em", color: "#6b7280", marginTop: 3, marginBottom: 10 }}>MANAGEMENT SUITE</div>
+              <div style={{ fontSize: 9.5, color: "#374151", lineHeight: 1.65 }}>
+                <div>123 Main Street, Colombo 03</div>
+                <div>Tel: 0112 345 678</div>
+                <div>mano@manomobile.lk</div>
+              </div>
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+                <div>
+                  <div style={{ fontSize: 8, fontWeight: 700, color: "#6b7280", letterSpacing: "0.14em", textTransform: "uppercase" as const }}>Invoice No.</div>
+                  <div style={{ fontSize: 12, fontWeight: 900, color: "#111827", letterSpacing: "0.06em", marginTop: 1 }}>{invoiceNo}</div>
+                </div>
+                <div style={{ textAlign: "right" as const }}>
+                  <div style={{ fontSize: 8, fontWeight: 700, color: "#6b7280", letterSpacing: "0.14em", textTransform: "uppercase" as const }}>Date</div>
+                  <div style={{ fontSize: 9, color: "#374151", marginTop: 1 }}>{today}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right — Customer + Payment */}
+            <div style={{ flex: 1, padding: "14px 18px 12px" }}>
+              <div style={{ fontSize: 8, fontWeight: 700, color: "#6b7280", letterSpacing: "0.14em", textTransform: "uppercase" as const, marginBottom: 8 }}>Bill To</div>
+              {customer.name ? (
+                <div style={{ fontSize: 10, lineHeight: 1.7 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{customer.name}</div>
+                  {customer.phone && <div style={{ color: "#374151" }}>Tel: {customer.phone}</div>}
+                  {customer.whatsapp && customer.whatsapp !== customer.phone && <div style={{ color: "#374151" }}>WhatsApp: {customer.whatsapp}</div>}
+                  {customer.nic   && <div style={{ color: "#374151" }}>NIC: {customer.nic}</div>}
+                  {customer.email && <div style={{ color: "#374151" }}>{customer.email}</div>}
+                </div>
+              ) : (
+                <div style={{ fontSize: 10, color: "#9ca3af", fontStyle: "italic" as const }}>Walk-in customer</div>
+              )}
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e5e7eb" }}>
+                <div style={{ fontSize: 8, fontWeight: 700, color: "#6b7280", letterSpacing: "0.14em", textTransform: "uppercase" as const, marginBottom: 3 }}>Payment Method</div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: paymentMethod === "Credit" ? "#dc2626" : "#111827" }}>{paymentMethod}</div>
+                {cardRef && (
+                  <div style={{ fontSize: 9, color: "#6b7280", marginTop: 2 }}>Ref: <span style={{ fontWeight: 700, color: "#374151" }}>{cardRef}</span></div>
+                )}
+                {creditCustomer && (
+                  <div style={{ fontSize: 9, color: "#dc2626", marginTop: 2 }}>Credit A/C: {creditCustomer.name}</div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Row 2: Items */}
+          <div style={{ padding: "12px 18px", borderBottom: "1.5px solid #111827" }}>
+            <div style={{ fontSize: 8, fontWeight: 700, color: "#6b7280", letterSpacing: "0.14em", textTransform: "uppercase" as const, marginBottom: 8 }}>Purchased Items</div>
+            <table style={{ width: "100%", borderCollapse: "collapse" as const, fontSize: 9.5 }}>
+              <colgroup>
+                <col style={{ width: "26%" }} />
+                <col style={{ width: "24%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "14%" }} />
+              </colgroup>
+              <thead>
+                <tr style={{ borderBottom: "1.5px solid #111827" }}>
+                  <th style={{ textAlign: "left" as const, padding: "4px 6px 5px 0", fontWeight: 700, color: "#111827" }}>Item</th>
+                  <th style={{ textAlign: "left" as const, padding: "4px 6px 5px", fontWeight: 700, color: "#111827" }}>IMEI / Code</th>
+                  <th style={{ textAlign: "center" as const, padding: "4px 6px 5px", fontWeight: 700, color: "#111827" }}>Qty</th>
+                  <th style={{ textAlign: "right" as const, padding: "4px 6px 5px", fontWeight: 700, color: "#111827" }}>Unit Price</th>
+                  <th style={{ textAlign: "right" as const, padding: "4px 6px 5px", fontWeight: 700, color: "#111827" }}>Discount</th>
+                  <th style={{ textAlign: "right" as const, padding: "4px 0 5px 6px", fontWeight: 700, color: "#111827" }}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {phoneCart.map(pc => {
+                  const disc = parseFloat(pc.discount) || 0;
+                  const net  = Math.max(0, (parseFloat(pc.sellingPrice) || 0) - disc);
+                  return (
+                    <tr key={pc.phone.imei} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                      <td style={{ padding: "5px 6px 5px 0", fontWeight: 600, color: "#111827" }}>
+                        {pc.phone.name}
+                        <div style={{ fontSize: 8, color: "#6b7280", fontWeight: 400, marginTop: 1 }}>{pc.phone.color} · {pc.phone.storage}</div>
+                      </td>
+                      <td style={{ padding: "5px 6px", fontFamily: "monospace", fontSize: 8.5, color: "#6b7280" }}>{pc.phone.imei}</td>
+                      <td style={{ padding: "5px 6px", textAlign: "center" as const, color: "#374151" }}>1</td>
+                      <td style={{ padding: "5px 6px", textAlign: "right" as const, color: "#374151" }}>Rs.{(parseFloat(pc.sellingPrice) || 0).toLocaleString()}</td>
+                      <td style={{ padding: "5px 6px", textAlign: "right" as const, color: disc > 0 ? "#dc2626" : "#9ca3af" }}>{disc > 0 ? `(Rs.${disc.toLocaleString()})` : "—"}</td>
+                      <td style={{ padding: "5px 0 5px 6px", textAlign: "right" as const, fontWeight: 700, color: "#111827" }}>Rs.{net.toLocaleString()}</td>
+                    </tr>
+                  );
+                })}
+                {accessoryCart.map(item => {
+                  const disc = parseFloat(item.discount) || 0;
+                  const net  = item.price * item.qty - disc;
+                  return (
+                    <tr key={item.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                      <td style={{ padding: "5px 6px 5px 0", fontWeight: 600, color: "#111827" }}>{item.name}</td>
+                      <td style={{ padding: "5px 6px", fontFamily: "monospace", fontSize: 8.5, color: "#6b7280" }}>{item.code}</td>
+                      <td style={{ padding: "5px 6px", textAlign: "center" as const, color: "#374151" }}>{item.qty}</td>
+                      <td style={{ padding: "5px 6px", textAlign: "right" as const, color: "#374151" }}>Rs.{item.price.toLocaleString()}</td>
+                      <td style={{ padding: "5px 6px", textAlign: "right" as const, color: disc > 0 ? "#dc2626" : "#9ca3af" }}>{disc > 0 ? `(Rs.${disc.toLocaleString()})` : "—"}</td>
+                      <td style={{ padding: "5px 0 5px 6px", textAlign: "right" as const, fontWeight: 700, color: "#111827" }}>Rs.{net.toLocaleString()}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {/* Totals */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+              <div style={{ width: 220 }}>
+                {[
+                  { label: "Subtotal", value: `Rs.${subtotal.toLocaleString()}`, show: true },
+                  { label: "Discount", value: `(Rs.${overallDiscount.toLocaleString()})`, show: overallDiscount > 0 },
+                ].filter(r => r.show).map(r => (
+                  <div key={r.label} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 9.5, borderBottom: "1px solid #f3f4f6" }}>
+                    <span style={{ color: "#6b7280" }}>{r.label}</span>
+                    <span style={{ color: "#374151" }}>{r.value}</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", marginTop: 2, borderTop: "1.5px solid #111827", fontSize: 11, fontWeight: 700, color: "#111827" }}>
+                  <span>TOTAL</span>
+                  <span>Rs.{total.toLocaleString()}</span>
+                </div>
+                {paymentMethod === "Credit" && (
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 9.5, fontWeight: 700, color: "#dc2626" }}>
+                    <span>Balance Due</span>
+                    <span>Rs.{total.toLocaleString()}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Row 3: Terms | QR + Barcode */}
+          <div style={{ display: "flex" }}>
+            <div style={{ flex: "0 0 52%", padding: "10px 18px 12px", borderRight: "1px solid #d1d5db" }}>
+              <div style={{ fontSize: 8, fontWeight: 700, color: "#6b7280", letterSpacing: "0.14em", textTransform: "uppercase" as const, marginBottom: 6 }}>Terms &amp; Conditions</div>
+              <div style={{ fontSize: 8.5, color: "#374151", lineHeight: 1.75 }}>
+                <div>• All sales are final. No refunds after 7 days.</div>
+                <div>• Warranty valid only with this receipt.</div>
+                <div>• Physical damage not covered under warranty.</div>
+                <div>• Device IMEI is verified at point of sale.</div>
+                <div>• Queries: 0112 345 678</div>
+              </div>
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e5e7eb", fontSize: 8.5, color: "#6b7280" }}>
+                Issued by: <span style={{ fontWeight: 700, color: "#111827" }}>Admin</span>
+              </div>
+            </div>
+            <div style={{ flex: 1, padding: "10px 18px 12px", display: "flex", alignItems: "center", justifyContent: "space-evenly", gap: 6 }}>
+              <QRCodeSVG value={invoiceNo} size={72} level="M" />
+              <Barcode value={invoiceNo} width={1.2} height={58} fontSize={8} margin={0} background="#ffffff" lineColor="#111111" displayValue />
+            </div>
           </div>
         </div>
       </div>
@@ -986,10 +1260,12 @@ export default function MobileSales() {
   const [overallDiscount, setOverallDiscount] = useState("");
   const [paymentMethod,   setPaymentMethod]   = useState<"" | "Cash" | "Card" | "Credit">("");
   const [customer,        setCustomer]        = useState({ name: "", phone: "", whatsapp: "", email: "", nic: "" });
-  const [completed,            setCompleted]            = useState(false);
-  const [showCardModal,        setShowCardModal]        = useState(false);
-  const [showCreditModal,      setShowCreditModal]      = useState(false);
+  const [completed,              setCompleted]              = useState(false);
+  const [showCardModal,          setShowCardModal]          = useState(false);
+  const [showCreditModal,        setShowCreditModal]        = useState(false);
   const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<CreditCustomer | null>(null);
+  const [showPrintPreview,       setShowPrintPreview]       = useState(false);
+  const [confirmedCardRef,       setConfirmedCardRef]       = useState("");
 
   const invoiceNo = useMemo(() => {
     const now = new Date();
@@ -1097,6 +1373,7 @@ export default function MobileSales() {
     setCustomer({ name: "", phone: "", whatsapp: "", email: "", nic: "" });
     setSelectedCreditCustomer(null);
     setShowCardModal(false); setShowCreditModal(false);
+    setShowPrintPreview(false); setConfirmedCardRef("");
     setCompleted(false);
   };
 
@@ -1145,7 +1422,7 @@ export default function MobileSales() {
           subtotal={subtotal}
           overallDiscount={parseFloat(overallDiscount) || 0}
           total={total}
-          onConfirm={() => { setShowCardModal(false); setCompleted(true); }}
+          onConfirm={(ref) => { setConfirmedCardRef(ref); setShowCardModal(false); setShowPrintPreview(true); }}
           onCancel={() => setShowCardModal(false)}
         />
       )}
@@ -1156,6 +1433,22 @@ export default function MobileSales() {
           total={total}
           onConfirm={c => { setSelectedCreditCustomer(c); setPaymentMethod("Credit"); setShowCreditModal(false); }}
           onCancel={() => setShowCreditModal(false)}
+        />
+      )}
+
+      {showPrintPreview && (
+        <MobilePrintPreviewModal
+          invoiceNo={invoiceNo}
+          phoneCart={phoneCart}
+          accessoryCart={accessoryCart}
+          customer={customer}
+          paymentMethod={paymentMethod}
+          cardRef={confirmedCardRef || undefined}
+          creditCustomer={selectedCreditCustomer}
+          subtotal={subtotal}
+          overallDiscount={parseFloat(overallDiscount) || 0}
+          total={total}
+          onDone={() => { setShowPrintPreview(false); setCompleted(true); }}
         />
       )}
 
@@ -1440,7 +1733,7 @@ export default function MobileSales() {
           onClick={() => {
             if (!canComplete) return;
             if (paymentMethod === "Card") { setShowCardModal(true); return; }
-            setCompleted(true);
+            setShowPrintPreview(true);
           }}
           disabled={!canComplete}
           style={{
