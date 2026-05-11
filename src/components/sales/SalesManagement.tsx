@@ -1,22 +1,25 @@
 "use client";
 
 import { useState } from "react";
-import { ShoppingBag, Smartphone, MoreHorizontal } from "lucide-react";
+import { ShoppingBag, Smartphone, MoreHorizontal, Wrench } from "lucide-react";
 import AccessorySales from "./AccessorySales";
 import MobileSales from "./MobileSales";
 import OtherSales from "./OtherSales";
+import RepairSales from "./RepairSales";
 
-type SalesSection = "Accessories Sales" | "Mobile Sales" | "Others";
+type SalesSection = "Accessories Sales" | "Mobile Sales" | "Others" | "Repair Sales";
 
 const sections: { id: SalesSection; icon: any; label: string }[] = [
   { id: "Accessories Sales", icon: ShoppingBag,    label: "Accessories Sales" },
   { id: "Mobile Sales",      icon: Smartphone,     label: "Mobile Sales" },
+  { id: "Repair Sales",      icon: Wrench,         label: "Repair Sales" },
   { id: "Others",            icon: MoreHorizontal, label: "Others" },
 ];
 
 const sectionDescriptions: Record<SalesSection, string> = {
   "Accessories Sales": "Sell phone cases, chargers, screen protectors and more",
   "Mobile Sales":      "Process handset and device sales transactions",
+  "Repair Sales":      "Generate invoices for completed repair jobs",
   "Others":            "Add miscellaneous items like photocopies, stationery, and small goods",
 };
 
@@ -115,6 +118,8 @@ export default function SalesManagement() {
         {active === "Accessories Sales" && <AccessorySales />}
 
         {active === "Mobile Sales" && <MobileSales />}
+
+        {active === "Repair Sales" && <RepairSales />}
 
         {active === "Others" && <OtherSales />}
       </div>

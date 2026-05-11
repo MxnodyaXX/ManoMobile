@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Plus, Trash2, X, Printer } from "lucide-react";
+import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
 import { QRCodeSVG } from "qrcode.react";
 import Barcode from "react-barcode";
 
@@ -15,25 +16,6 @@ interface OtherSaleItem {
   qty: number;
   discount: number;
 }
-
-interface CreditCustomer {
-  id: number;
-  name: string;
-  phone: string;
-  nic: string;
-  creditLimit: number;
-  usedCredit: number;
-}
-
-// ─── Data ─────────────────────────────────────────────────────────────────────
-
-const CREDIT_CUSTOMERS: CreditCustomer[] = [
-  { id: 1, name: "Kasun Perera",       phone: "0771234567", nic: "199012345678", creditLimit: 50000,  usedCredit: 12000 },
-  { id: 2, name: "Nimal Silva",        phone: "0712345678", nic: "198534567890", creditLimit: 100000, usedCredit: 45000 },
-  { id: 3, name: "Amal Fernando",      phone: "0751234567", nic: "200134567890", creditLimit: 75000,  usedCredit: 0     },
-  { id: 4, name: "Sunil Bandara",      phone: "0761234567", nic: "197845678901", creditLimit: 150000, usedCredit: 80000 },
-  { id: 5, name: "Dilani Jayawardena", phone: "0779876543", nic: "199567890123", creditLimit: 60000,  usedCredit: 10000 },
-];
 
 // ─── Shared Styles ────────────────────────────────────────────────────────────
 
@@ -138,97 +120,6 @@ function CardPaymentModal({
   );
 }
 
-// ─── Credit Customer Modal ────────────────────────────────────────────────────
-
-function CreditCustomerModal({ customers, total, onConfirm, onCancel }: {
-  customers: CreditCustomer[];
-  total: number;
-  onConfirm: (c: CreditCustomer) => void;
-  onCancel: () => void;
-}) {
-  const [search,   setSearch]   = useState("");
-  const [selected, setSelected] = useState<CreditCustomer | null>(null);
-
-  const filtered = customers.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search) || c.nic.includes(search)
-  );
-  const avail    = (c: CreditCustomer) => c.creditLimit - c.usedCredit;
-  const canAfford = (c: CreditCustomer) => avail(c) >= total;
-
-  const thStyle: React.CSSProperties = { padding: "10px 14px", fontSize: 11, fontWeight: 700, textAlign: "left", color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: "0.05em", textTransform: "uppercase" as const, borderBottom: "1px solid var(--border)", background: "var(--bg-card)", position: "sticky" as const, top: 0, whiteSpace: "nowrap" as const };
-  const tdStyle: React.CSSProperties = { padding: "11px 14px", fontSize: 13, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", borderBottom: "1px solid var(--border)", verticalAlign: "middle" };
-
-  if (typeof document === "undefined") return null;
-  return createPortal(
-    <div onClick={onCancel} style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 760, background: "var(--bg-card)", borderRadius: 16, border: "1px solid var(--border)", boxShadow: "0 32px 80px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", overflow: "hidden", maxHeight: "calc(100vh - 80px)" }}>
-        <div style={{ padding: "16px 22px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Credit Customer</div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 2 }}>Only registered credit customers can purchase on credit</div>
-          </div>
-          <button onClick={onCancel} style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)" }}><X size={14} /></button>
-        </div>
-        <div style={{ padding: "12px 22px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, phone, or NIC..." style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none", boxSizing: "border-box" }} />
-        </div>
-        <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={{ ...thStyle, width: 40 }} />
-                <th style={thStyle}>Name</th>
-                <th style={thStyle}>Phone</th>
-                <th style={thStyle}>NIC</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Credit Limit</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Used</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Available</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr><td colSpan={7} style={{ ...tdStyle, textAlign: "center", padding: "28px 0", color: "var(--text-muted)" }}>No registered credit customer found</td></tr>
-              ) : filtered.map(c => {
-                const av = avail(c);
-                const afford = canAfford(c);
-                const isSel  = selected?.id === c.id;
-                return (
-                  <tr key={c.id} onClick={() => afford && setSelected(c)} style={{ cursor: afford ? "pointer" : "not-allowed", opacity: afford ? 1 : 0.45, background: isSel ? "rgba(var(--accent-rgb),0.07)" : "transparent", transition: "background 0.1s" }}>
-                    <td style={tdStyle}><input type="radio" checked={isSel} disabled={!afford} onChange={() => setSelected(c)} onClick={e => e.stopPropagation()} style={{ cursor: afford ? "pointer" : "not-allowed", accentColor: "var(--accent)" }} /></td>
-                    <td style={{ ...tdStyle, fontWeight: 600 }}>{c.name}</td>
-                    <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{c.phone}</td>
-                    <td style={{ ...tdStyle, color: "var(--text-secondary)", fontFamily: "monospace", fontSize: 12 }}>{c.nic}</td>
-                    <td style={{ ...tdStyle, textAlign: "right" }}>{fmt(c.creditLimit)}</td>
-                    <td style={{ ...tdStyle, textAlign: "right", color: c.usedCredit > 0 ? "#f59e0b" : "var(--text-secondary)" }}>{fmt(c.usedCredit)}</td>
-                    <td style={{ ...tdStyle, textAlign: "right", fontWeight: 700, color: afford ? "#4ade80" : "#ef4444" }}>
-                      {fmt(av)}
-                      {!afford && <div style={{ fontSize: 10, color: "#ef4444", fontWeight: 400 }}>Insufficient</div>}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ padding: "14px 22px", borderTop: "1px solid var(--border)", flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--bg-card)" }}>
-          <div style={{ fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-            <span style={{ color: "var(--text-secondary)" }}>Required: </span>
-            <span style={{ fontWeight: 700, color: "var(--accent)" }}>{fmt(total)}</span>
-            {selected && <span style={{ color: "var(--text-muted)", marginLeft: 12 }}>· {selected.name} selected</span>}
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={onCancel} style={{ padding: "9px 20px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
-            <button onClick={() => selected && onConfirm(selected)} disabled={!selected} style={{ padding: "9px 22px", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 700, cursor: selected ? "pointer" : "not-allowed", background: selected ? "var(--accent)" : "var(--border)", color: selected ? "var(--accent-fg)" : "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-              {selected ? `Assign Credit · ${selected.name}` : "Select a customer"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-}
-
 // ─── Print Preview Modal ──────────────────────────────────────────────────────
 
 function OthersPrintPreviewModal({
@@ -240,7 +131,7 @@ function OthersPrintPreviewModal({
   customer: { name: string; phone: string; whatsapp: string; email: string; nic: string };
   paymentMethod: string;
   cardRef?: string;
-  creditCustomer?: CreditCustomer | null;
+  creditCustomer?: POSCreditCustomer | null;
   subtotal: number;
   overallDiscount: number;
   total: number;
@@ -556,11 +447,11 @@ export default function OtherSales() {
 
   // Payment
   const [paymentMethod,          setPaymentMethod]          = useState<"" | "Cash" | "Card" | "Credit">("");
-  const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<CreditCustomer | null>(null);
+  const [creditCustomers,        setCreditCustomers]        = useState<POSCreditCustomer[]>(INITIAL_POS_CREDIT_CUSTOMERS);
+  const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<POSCreditCustomer | null>(null);
 
   // Modals
   const [showCardModal,    setShowCardModal]    = useState(false);
-  const [showCreditModal,  setShowCreditModal]  = useState(false);
   const [showPrintPreview, setShowPrintPreview] = useState(false);
   const [confirmedCardRef, setConfirmedCardRef] = useState("");
   const [completed,        setCompleted]        = useState(false);
@@ -604,7 +495,7 @@ export default function OtherSales() {
     setItems([]); setItemName(""); setUnitPrice(""); setQty("1"); setItemDiscount(""); setFormError("");
     setCustomer({ name: "", phone: "", whatsapp: "", email: "", nic: "" });
     setOverallDiscount(""); setPaymentMethod(""); setSelectedCreditCustomer(null);
-    setShowCardModal(false); setShowCreditModal(false);
+    setShowCardModal(false);
     setShowPrintPreview(false); setConfirmedCardRef(""); setCompleted(false);
   };
 
@@ -633,13 +524,6 @@ export default function OtherSales() {
           subtotal={subtotal} overallDiscount={overallAmt} total={total}
           onConfirm={ref => { setConfirmedCardRef(ref); setShowCardModal(false); setShowPrintPreview(true); }}
           onCancel={() => setShowCardModal(false)}
-        />
-      )}
-      {showCreditModal && (
-        <CreditCustomerModal
-          customers={CREDIT_CUSTOMERS} total={total}
-          onConfirm={c => { setSelectedCreditCustomer(c); setPaymentMethod("Credit"); setShowCreditModal(false); }}
-          onCancel={() => setShowCreditModal(false)}
         />
       )}
       {showPrintPreview && (
@@ -804,22 +688,21 @@ export default function OtherSales() {
             <button
               key={m}
               onClick={() => {
-                if (m === "Credit") { setShowCreditModal(true); }
-                else { setPaymentMethod(paymentMethod === m ? "" : m); if (paymentMethod !== m) setSelectedCreditCustomer(null); }
+                setPaymentMethod(paymentMethod === m ? "" : m);
+                if (paymentMethod !== m && m !== "Credit") setSelectedCreditCustomer(null);
               }}
               style={{ flex: 1, padding: "8px 0", borderRadius: 7, fontSize: 12, fontWeight: 600, border: `1px solid ${paymentMethod === m ? "var(--border-active)" : "var(--border)"}`, background: paymentMethod === m ? "var(--accent-dim)" : "transparent", color: paymentMethod === m ? "var(--accent)" : "var(--text-secondary)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s" }}
             >{m}</button>
           ))}
         </div>
 
-        {selectedCreditCustomer && (
-          <div style={{ marginBottom: 10, padding: "8px 10px", borderRadius: 7, background: "rgba(74,222,128,0.07)", border: "1px solid rgba(74,222,128,0.2)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{selectedCreditCustomer.name}</div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Available: {fmt(selectedCreditCustomer.creditLimit - selectedCreditCustomer.usedCredit)}</div>
-            </div>
-            <button onClick={() => { setPaymentMethod(""); setSelectedCreditCustomer(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", display: "flex", padding: 2 }}><X size={13} /></button>
-          </div>
+        {paymentMethod === "Credit" && (
+          <CreditCustomerPicker
+            customers={creditCustomers}
+            selected={selectedCreditCustomer}
+            onSelect={(c) => { setSelectedCreditCustomer(c); if (c) setPaymentMethod("Credit"); }}
+            onNewCustomer={(c) => { setCreditCustomers(prev => [...prev, c]); setSelectedCreditCustomer(c); }}
+          />
         )}
 
         <button

@@ -12,6 +12,7 @@ import RepairManagement from "@/components/repair/RepairManagement";
 import SalesManagement from "@/components/sales/SalesManagement";
 import InventoryManagement from "@/components/inventory/InventoryManagement";
 import AdminControl from "@/components/admin/AdminControl";
+import CustomerManagement from "@/components/customer/CustomerManagement";
 import { InventoryProvider } from "@/contexts/InventoryContext";
 import { getDateLabel } from "@/utils/dataLabel";
 import {
@@ -37,8 +38,8 @@ export default function Home() {
 
         <main style={{
           flex: 1, position: "relative",
-          overflowY: activePage === "Repair Management" || activePage === "Sales Management" || activePage === "Inventory Management" || activePage === "Admin Control" ? "hidden" : "auto",
-          padding: activePage === "Repair Management" || activePage === "Sales Management" || activePage === "Inventory Management" || activePage === "Admin Control" ? "28px 28px 0" : "28px 28px 40px",
+          overflowY: activePage === "Repair Management" || activePage === "Sales Management" || activePage === "Inventory Management" || activePage === "Admin Control" || activePage === "Customer Management" ? "hidden" : "auto",
+          padding: activePage === "Repair Management" || activePage === "Sales Management" || activePage === "Inventory Management" || activePage === "Admin Control" || activePage === "Customer Management" ? "28px 28px 0" : "28px 28px 40px",
           display: "flex", flexDirection: "column", gap: 20,
         }}>
 
@@ -50,6 +51,8 @@ export default function Home() {
             <InventoryManagement />
           ) : activePage === "Admin Control" ? (
             <AdminControl />
+          ) : activePage === "Customer Management" ? (
+            <CustomerManagement />
           ) : (
             <>
               <div className="fade-up" style={{ marginBottom: 4 }}>

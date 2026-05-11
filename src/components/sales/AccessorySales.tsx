@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Search, Grid3X3, List, Plus, Minus, Trash2, Eye, EyeOff, Tag, X } from "lucide-react";
+import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
 import { QRCodeSVG } from "qrcode.react";
 import Barcode from "react-barcode";
 
@@ -1071,6 +1072,8 @@ function Step2({
   const [sameAsPhone, setSameAsPhone] = useState(false);
   const [warranties, setWarranties]   = useState<Record<number, string>>({});
   const [printFormat, setPrintFormat] = useState<"POS" | "A5">("POS");
+  const [creditCustomers,       setCreditCustomers]       = useState<POSCreditCustomer[]>(INITIAL_POS_CREDIT_CUSTOMERS);
+  const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<POSCreditCustomer | null>(null);
   const receiptRef = useRef<HTMLDivElement>(null);
 
   const receiptNo   = useMemo(() => `ACC-${Date.now().toString().slice(-6)}`, []);
@@ -1337,55 +1340,20 @@ function Step2({
             </div>
           </div>
 
-          {/* Credit Profile */}
+          {/* Credit Customer Picker */}
           {payMethod === "Credit" && (
-            <div style={{
-              background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.2)",
-              borderRadius: 9, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8,
-            }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#ef4444", letterSpacing: "0.06em", textTransform: "uppercase", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                Credit Profile
-              </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                {customer.name || "—"}
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <div style={{ flex: 1, background: "var(--bg-card)", borderRadius: 7, padding: "8px 10px" }}>
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 2 }}>Outstanding</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#ef4444", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Rs. 15,000</div>
-                </div>
-                <div style={{ flex: 1, background: "var(--bg-card)", borderRadius: 7, padding: "8px 10px" }}>
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 2 }}>Max Limit</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Rs. 50,000</div>
-                </div>
-              </div>
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 4 }}>
-                  <span>Credit Used</span><span>30%</span>
-                </div>
-                <div style={{ height: 5, borderRadius: 3, background: "var(--border)", overflow: "hidden" }}>
-                  <div style={{ width: "30%", height: "100%", background: "#ef4444", borderRadius: 3 }} />
-                </div>
-              </div>
-              <div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-secondary)", letterSpacing: "0.06em", textTransform: "uppercase", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 5 }}>
-                  Recent Purchases
-                </div>
-                {[
-                  { item: "USB-C Charger",  date: "15 Apr", amount: 2800 },
-                  { item: "Tempered Glass", date: "10 Apr", amount: 350  },
-                  { item: "Phone Case",     date: "02 Apr", amount: 1200 },
-                ].map((p, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", fontSize: 11, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                    <div>
-                      <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>{p.item}</span>
-                      <span style={{ color: "var(--text-muted)", marginLeft: 5, fontSize: 10 }}>{p.date}</span>
-                    </div>
-                    <span style={{ color: "#ef4444", fontWeight: 600 }}>Rs. {p.amount.toLocaleString()}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <CreditCustomerPicker
+              customers={creditCustomers}
+              selected={selectedCreditCustomer}
+              onSelect={(c) => {
+                setSelectedCreditCustomer(c);
+                if (c) onPayMethod("Credit");
+              }}
+              onNewCustomer={(c) => {
+                setCreditCustomers(prev => [...prev, c]);
+                setSelectedCreditCustomer(c);
+              }}
+            />
           )}
 
           {/* Discount */}
