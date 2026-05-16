@@ -53,7 +53,7 @@ function CustomerDetailModal({ customer, onClose }: { customer: Customer; onClos
       style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: 480, boxShadow: "0 24px 64px rgba(0,0,0,0.45)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(480px, calc(100vw - 24px))", boxShadow: "0 24px 64px rgba(0,0,0,0.45)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -142,7 +142,7 @@ export default function AllCustomers() {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* Toolbar */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <div style={{ position: "relative", flex: 1, maxWidth: 360 }}>
           <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: searchFocused ? "var(--accent)" : "var(--text-muted)", transition: "color 0.18s", pointerEvents: "none" }} />
           <input
@@ -171,6 +171,7 @@ export default function AllCustomers() {
       </div>
 
       {/* Table */}
+      <div className="table-scroll">
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
@@ -223,6 +224,7 @@ export default function AllCustomers() {
             })}
           </tbody>
         </table>
+      </div>
       </div>
 
       {selected && <CustomerDetailModal customer={selected} onClose={() => setSelected(null)} />}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef } from "react";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { createPortal } from "react-dom";
 import { Plus, Trash2, X, Printer } from "lucide-react";
 import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
@@ -428,6 +429,7 @@ function OthersPrintPreviewModal({
 // ─── OtherSales Component ─────────────────────────────────────────────────────
 
 export default function OtherSales() {
+  const isMobile = useIsMobile();
   // Item form
   const [itemName,     setItemName]     = useState("");
   const [unitPrice,    setUnitPrice]    = useState("");
@@ -515,7 +517,7 @@ export default function OtherSales() {
   }
 
   return (
-    <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", flex: 1, minHeight: 0, overflowY: isMobile ? "auto" : undefined }}>
 
       {/* Modals */}
       {showCardModal && (
@@ -537,7 +539,7 @@ export default function OtherSales() {
       )}
 
       {/* ── Left: Sale Info ──────────────────────────────────────────────────── */}
-      <div style={{ flex: 1.4, display: "flex", flexDirection: "column", gap: 16, paddingRight: 20, borderRight: "1px solid var(--border)", minHeight: 0 }}>
+      <div style={{ flex: isMobile ? "none" : 1.4, display: "flex", flexDirection: "column", gap: 16, paddingRight: isMobile ? 0 : 20, paddingBottom: isMobile ? 16 : 0, borderRight: isMobile ? "none" : "1px solid var(--border)", borderBottom: isMobile ? "1px solid var(--border)" : "none", minHeight: 0 }}>
 
         <div style={{ ...sectionHead }}>Sale Info</div>
 
@@ -630,7 +632,7 @@ export default function OtherSales() {
       </div>
 
       {/* ── Right: Customer Info + Bill ──────────────────────────────────────── */}
-      <div style={{ width: 300, flexShrink: 0, display: "flex", flexDirection: "column", paddingLeft: 20, minHeight: 0, overflowY: "auto" }}>
+      <div style={{ width: isMobile ? "100%" : 300, flexShrink: 0, display: "flex", flexDirection: "column", paddingLeft: isMobile ? 0 : 20, paddingTop: isMobile ? 16 : 0, minHeight: 0, overflowY: "auto" }}>
 
         <div style={{ ...sectionHead, marginBottom: 12 }}>Customer Info</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>

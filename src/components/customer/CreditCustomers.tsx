@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { createPortal } from "react-dom";
 import {
   Search, CreditCard, AlertCircle, CheckCircle,
@@ -152,7 +153,7 @@ function RecordPaymentModal({ customer, onClose, onRecord }: {
       style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: 480, boxShadow: "0 24px 64px rgba(0,0,0,0.45)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(480px, calc(100vw - 24px))", boxShadow: "0 24px 64px rgba(0,0,0,0.45)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
@@ -250,7 +251,7 @@ function HistoryModal({ customer, onClose }: { customer: CreditCustomer; onClose
       style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: 560, maxHeight: "80vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.45)" }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(560px, calc(100vw - 24px))", maxHeight: "80vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.45)" }}>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
           <div>
@@ -376,7 +377,7 @@ function AddCreditCustomerModal({ nextId, onClose, onAdd }: {
       style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: 420, boxShadow: "0 24px 64px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(420px, calc(100vw - 24px))", boxShadow: "0 24px 64px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
@@ -433,6 +434,7 @@ function AddCreditCustomerModal({ nextId, onClose, onAdd }: {
 // ─── Credit Customers ─────────────────────────────────────────────────────────
 
 export default function CreditCustomers() {
+  const isMobile = useIsMobile();
   const [customers,     setCustomers]     = useState<CreditCustomer[]>(INITIAL_CREDIT);
   const [search,        setSearch]        = useState("");
   const [statusFilter,  setStatusFilter]  = useState<CreditStatus | "All">("All");
@@ -491,7 +493,7 @@ export default function CreditCustomers() {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* Stats row */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 12 }}>
         {stats.map(s => {
           const Icon = s.icon;
           return (
@@ -509,8 +511,8 @@ export default function CreditCustomers() {
       </div>
 
       {/* Toolbar */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ position: "relative", flex: 1, maxWidth: 360 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flex: "1 1 200px", maxWidth: 360 }}>
           <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: searchFocused ? "var(--accent)" : "var(--text-muted)", transition: "color 0.18s", pointerEvents: "none" }} />
           <input
             value={search} onChange={(e) => setSearch(e.target.value)}
@@ -551,6 +553,7 @@ export default function CreditCustomers() {
       </div>
 
       {/* Table */}
+      <div className="table-scroll">
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
@@ -639,6 +642,7 @@ export default function CreditCustomers() {
             })}
           </tbody>
         </table>
+      </div>
       </div>
 
       {payTarget  && <RecordPaymentModal customer={payTarget}  onClose={() => setPayTarget(null)}  onRecord={handleRecord} />}

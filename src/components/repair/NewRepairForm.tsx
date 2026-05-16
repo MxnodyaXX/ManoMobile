@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -170,11 +171,11 @@ const checkboxItemStyle = (checked: boolean): React.CSSProperties => ({
 
 // ─── Step 1: Dealer & Customer ────────────────────────────────────────────────
 
-function Step1({ data, onChange }: { data: FormData; onChange: (d: Partial<FormData>) => void }) {
+function Step1({ data, onChange, isMobile }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean }) {
   const dealer = DEALERS.find((d) => d.id.toString() === data.dealerId);
 
   return (
-    <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
       {/* Left: Dealer */}
       <div style={panelStyle}>
         <div style={sectionHeaderStyle}>🏪 Dealer Information</div>
@@ -261,12 +262,12 @@ function Step1({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
 
 // ─── Step 2: Device & Faults ──────────────────────────────────────────────────
 
-function Step2({ data, onChange }: { data: FormData; onChange: (d: Partial<FormData>) => void }) {
+function Step2({ data, onChange, isMobile }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean }) {
   const toggleItem = (list: string[], item: string) =>
     list.includes(item) ? list.filter((i) => i !== item) : [...list, item];
 
   return (
-    <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
       {/* Left: Device Info & Received Items */}
       <div style={panelStyle}>
         <div style={sectionHeaderStyle}>📱 Device Information</div>
@@ -295,7 +296,7 @@ function Step2({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
         </div>
 
         <div style={sectionHeaderStyle}>📦 Items Received With Device</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 6 }}>
           {RECEIVED_ITEMS.map((item) => {
             const checked = data.receivedItems.includes(item);
             return (
@@ -322,7 +323,7 @@ function Step2({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
       {/* Right: Faults */}
       <div style={panelStyle}>
         <div style={sectionHeaderStyle}>🔧 Device Faults</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 18 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 6, marginBottom: 18 }}>
           {COMMON_FAULTS.map((fault) => {
             const checked = data.faultCheckboxes.includes(fault);
             return (
@@ -361,13 +362,13 @@ function Step2({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
 
 // ─── Step 3: Costs & Job Info ─────────────────────────────────────────────────
 
-function Step3({ data, onChange }: { data: FormData; onChange: (d: Partial<FormData>) => void }) {
+function Step3({ data, onChange, isMobile }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean }) {
   const estimated = parseFloat(data.estimatedCost) || 0;
   const advance = parseFloat(data.advancePaid) || 0;
   const balance = estimated - advance;
 
   return (
-    <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
       {/* Left: Financials */}
       <div style={panelStyle}>
         <div style={sectionHeaderStyle}>💰 Cost & Payment</div>
@@ -492,9 +493,9 @@ function Step3({ data, onChange }: { data: FormData; onChange: (d: Partial<FormD
 
 // ─── Step 4: Assign Repairman ─────────────────────────────────────────────────
 
-function Step4({ data, onChange }: { data: FormData; onChange: (d: Partial<FormData>) => void }) {
+function Step4({ data, onChange, isMobile }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean }) {
   return (
-    <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
       <div style={{ ...panelStyle, flex: 1.3 }}>
         <div style={sectionHeaderStyle}>🛠️ Available Repairmen</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -626,6 +627,7 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<FormData>(INITIAL);
   const [submitted, setSubmitted] = useState(false);
+  const isMobile = useIsMobile();
 
   const update = (partial: Partial<FormData>) => setForm((f) => ({ ...f, ...partial }));
 
@@ -680,23 +682,25 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
       
 
       {/* Step Indicator */}
-      <div style={{ padding: "20px 28px 10px", flexShrink: 0 }}>
+      <div style={{ padding: isMobile ? "14px 16px 8px" : "20px 28px 10px", flexShrink: 0 }}>
         <StepIndicator current={step} />
       </div>
 
-      {/* Step Content — fills remaining space, no scroll */}
-      <div style={{ flex: 1, padding: "0 28px", minHeight: 0 }}>
-        {step === 1 && <Step1 data={form} onChange={update} />}
-        {step === 2 && <Step2 data={form} onChange={update} />}
-        {step === 3 && <Step3 data={form} onChange={update} />}
-        {step === 4 && <Step4 data={form} onChange={update} />}
+      {/* Step Content */}
+      <div style={{ flex: isMobile ? "none" : 1, padding: isMobile ? "0 16px" : "0 28px", minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>
+        {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} />}
+        {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} />}
+        {step === 3 && <Step3 data={form} onChange={update} isMobile={isMobile} />}
+        {step === 4 && <Step4 data={form} onChange={update} isMobile={isMobile} />}
       </div>
 
       {/* Footer Navigation */}
       <div style={{
-        padding: "14px 28px", borderTop: "1px solid var(--border)",
+        padding: isMobile ? "12px 16px" : "14px 28px",
+        borderTop: "1px solid var(--border)",
         background: "var(--bg-card)", flexShrink: 0,
         display: "flex", alignItems: "center", justifyContent: "space-between",
+        marginTop: isMobile ? 16 : 0,
       }}>
         <button
           onClick={() => setStep((s) => s - 1)}

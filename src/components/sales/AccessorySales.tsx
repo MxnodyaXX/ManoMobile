@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef } from "react";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { createPortal } from "react-dom";
 import { Search, Grid3X3, List, Plus, Minus, Trash2, Eye, EyeOff, Tag, X } from "lucide-react";
 import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
@@ -547,6 +548,7 @@ function Step1({
   onDiscount: (v: string) => void;
   onOpenSearch: () => void;
 }) {
+  const isMobile = useIsMobile();
   const [query, setQuery] = useState("");
   const [barcodeVal, setBarcodeVal] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
@@ -570,7 +572,7 @@ function Step1({
   const stockColor = (s: number) => s > 20 ? "#4ade80" : s > 5 ? "#f59e0b" : "#ef4444";
 
   return (
-    <div style={{ display: "flex", gap: 0, flex: 1, minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 0, flex: 1, minHeight: 0, overflowY: isMobile ? "auto" : undefined }}>
 
       {/* ── Left: Search + Product List ── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, minHeight: 0 }}>
@@ -827,7 +829,7 @@ function Step1({
       </div>
 
       {/* ── Right panel ── */}
-      <div style={{ width: 350, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", paddingRight: 2 }}>
+      <div style={{ width: isMobile ? "100%" : 350, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", paddingRight: 2, paddingTop: isMobile ? 12 : 0 }}>
 
         {/* Bill Summary */}
         <div style={{

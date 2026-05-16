@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python \"C:\\\\Users\\\\mxnod\\\\.claude\\\\skills\\\\ui-ux-pro-max\\\\scripts\\\\search.py\" \"dashboard analytics professional\" --stack nextjs)",
+      "Bash(python \"C:\\\\Users\\\\mxnod\\\\.claude\\\\skills\\\\ui-ux-pro-max\\\\scripts\\\\search.py\" \"animation micro-interaction hover focus\" --domain ux -n 2)",
+      "Bash(git checkout *)"
+    ]
+  }
+}

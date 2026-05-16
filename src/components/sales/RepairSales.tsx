@@ -509,7 +509,7 @@ export default function RepairSales() {
           />
         </div>
 
-        <div style={{ border: "1px solid var(--border)", borderRadius: 10, minHeight: 200, overflow: "hidden", background: "var(--bg-primary)" }}>
+        <div className="table-scroll" style={{ border: "1px solid var(--border)", borderRadius: 10, minHeight: 200, overflow: "hidden", background: "var(--bg-primary)" }}>
           {!selectedDealer ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: "var(--text-muted)", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
               Select a dealer to see their completed repairs

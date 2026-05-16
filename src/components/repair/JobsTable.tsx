@@ -460,7 +460,7 @@ function IssueJobModal({ job, onClose, onIssued }: {
       style={{ position: "fixed", inset: 0, zIndex: 1001, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: 720, maxHeight: "92vh", boxShadow: "0 24px 64px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(720px, calc(100vw - 24px))", maxHeight: "92vh", boxShadow: "0 24px 64px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
@@ -662,7 +662,7 @@ function RepairInvoicePreview({ data, onClose }: { data: IssueInvoiceData; onClo
       style={{ position: "fixed", inset: 0, zIndex: 1002, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: 780, maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.5)" }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(780px, calc(100vw - 24px))", maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.5)" }}>
 
         {/* Modal header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
@@ -806,7 +806,7 @@ function FinishJobModal({ job, onClose, onFinish }: {
       style={{ position: "fixed", inset: 0, zIndex: 1001, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: 520, boxShadow: "0 24px 64px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(520px, calc(100vw - 24px))", boxShadow: "0 24px 64px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
           <div>
@@ -984,6 +984,7 @@ export default function JobsTable({ filterStatus = "All" }: JobsTableProps) {
       )}
 
       {/* Table */}
+      <div className="table-scroll">
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
@@ -1060,6 +1061,7 @@ export default function JobsTable({ filterStatus = "All" }: JobsTableProps) {
             })}
           </tbody>
         </table>
+      </div>
       </div>
 
       {/* Modals */}

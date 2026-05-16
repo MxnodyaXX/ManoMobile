@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef } from "react";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { createPortal } from "react-dom";
 import { Search, Trash2, Plus, Minus, X, Printer } from "lucide-react";
 import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
@@ -1040,6 +1041,7 @@ function AccessorySearchPopup({
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function MobileSales() {
+  const isMobile = useIsMobile();
   const [imeiQuery,       setImeiQuery]       = useState("");
   const [imeiError,       setImeiError]       = useState(false);
   const [phoneCart,       setPhoneCart]       = useState<PhoneCartItem[]>([]);
@@ -1185,7 +1187,7 @@ export default function MobileSales() {
   }
 
   return (
-    <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", flex: 1, minHeight: 0, overflowY: isMobile ? "auto" : undefined }}>
 
       {showPhoneSearch && (
         <PhoneSearchPopup
@@ -1236,7 +1238,7 @@ export default function MobileSales() {
       )}
 
       {/* ── Col 1: Devices ───────────────────────────────────────────────────── */}
-      <div style={{ flex: 1.3, display: "flex", flexDirection: "column", gap: 14, paddingRight: 20, borderRight: "1px solid var(--border)", minHeight: 0 }}>
+      <div style={{ flex: isMobile ? "none" : 1.3, display: "flex", flexDirection: "column", gap: 14, paddingRight: isMobile ? 0 : 20, paddingBottom: isMobile ? 16 : 0, borderRight: isMobile ? "none" : "1px solid var(--border)", borderBottom: isMobile ? "1px solid var(--border)" : "none", minHeight: 0 }}>
 
         {/* IMEI search */}
         <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", gap: 6 }}>
@@ -1347,7 +1349,7 @@ export default function MobileSales() {
       </div>
 
       {/* ── Col 2: Accessories ───────────────────────────────────────────────── */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 14, padding: "0 20px", borderRight: "1px solid var(--border)", minHeight: 0 }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 14, padding: isMobile ? "16px 0" : "0 20px", borderRight: isMobile ? "none" : "1px solid var(--border)", borderBottom: isMobile ? "1px solid var(--border)" : "none", minHeight: 0 }}>
 
         <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
           <input
@@ -1404,7 +1406,7 @@ export default function MobileSales() {
       </div>
 
       {/* ── Col 3: Customer + Bill ────────────────────────────────────────────── */}
-      <div style={{ width: 300, flexShrink: 0, display: "flex", flexDirection: "column", paddingLeft: 20, minHeight: 0, overflowY: "auto" }}>
+      <div style={{ width: isMobile ? "100%" : 300, flexShrink: 0, display: "flex", flexDirection: "column", paddingLeft: isMobile ? 0 : 20, paddingTop: isMobile ? 16 : 0, minHeight: 0, overflowY: "auto" }}>
 
         <div style={{ ...sectionHead, marginBottom: 12 }}>Customer Info</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
