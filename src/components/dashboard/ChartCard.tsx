@@ -1,16 +1,7 @@
 "use client";
 
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-
-const data = [
-  { name: "Jan", value: 85 },
-  { name: "Feb", value: 140 },
-  { name: "Mar", value: 115 },
-  { name: "Apr", value: 190 },
-  { name: "May", value: 165 },
-  { name: "Jun", value: 240 },
-  { name: "Jul", value: 210 },
-];
+import { fmtRs } from "@/data/dashboardData";
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -22,8 +13,8 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
       }}>
         <p style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>{label}</p>
-        <p className="stat-number" style={{ fontSize: 22, color: "var(--text-primary)" }}>
-          {payload[0].value}
+        <p className="stat-number" style={{ fontSize: 18, color: "var(--text-primary)" }}>
+          {fmtRs(payload[0].value)}
         </p>
       </div>
     );
@@ -32,9 +23,17 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function ChartCard({
-  title, index = 0, color = "#6366f1",
+  title,
+  index = 0,
+  color = "#e8e8e8",
+  data,
+  badge,
 }: {
-  title: string; index?: number; color?: string;
+  title: string;
+  index?: number;
+  color?: string;
+  data?: { name: string; value: number }[];
+  badge?: string;
 }) {
   const gradientId = `grad-${title.replace(/\s+/g, "")}`;
 
@@ -61,15 +60,17 @@ export default function ChartCard({
           <h3 className="heading" style={{ fontSize: 15, color: "var(--text-primary)" }}>{title}</h3>
           <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 2, fontWeight: 500 }}>Last 7 months</p>
         </div>
-        <span style={{
-          fontSize: 12, fontWeight: 700, color: color,
-          background: `${color}15`,
-          border: `1px solid ${color}30`,
-          padding: "4px 12px", borderRadius: 100,
-          letterSpacing: "0.01em",
-        }}>
-          +18%
-        </span>
+        {badge && (
+          <span style={{
+            fontSize: 12, fontWeight: 700, color: color,
+            background: `${color}15`,
+            border: `1px solid ${color}30`,
+            padding: "4px 12px", borderRadius: 100,
+            letterSpacing: "0.01em",
+          }}>
+            {badge}
+          </span>
+        )}
       </div>
 
       <ResponsiveContainer width="100%" height={160}>
@@ -87,7 +88,12 @@ export default function ChartCard({
             axisLine={false} tickLine={false}
           />
           <YAxis
-            tick={{ fontSize: 12, fill: "var(--text-muted)", fontFamily: "Plus Jakarta Sans", fontWeight: 500 }}
+            tickFormatter={(v) => {
+              if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+              if (v >= 1_000) return `${(v / 1_000).toFixed(0)}K`;
+              return `${v}`;
+            }}
+            tick={{ fontSize: 11, fill: "var(--text-muted)", fontFamily: "Plus Jakarta Sans", fontWeight: 500 }}
             axisLine={false} tickLine={false}
           />
           <Tooltip content={<CustomTooltip />} cursor={{ stroke: "var(--border-active)", strokeWidth: 1 }} />

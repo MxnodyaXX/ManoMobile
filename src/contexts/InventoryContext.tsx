@@ -21,7 +21,7 @@ export interface Supplier {
   name: string;
   phone: string;
   email: string;
-  categoryIds: number[]; // which item categories this supplier carries; [] = all categories
+  brandIds: number[]; // which brands this supplier carries; [] = all brands
 }
 
 export interface BarcodeSettings {
@@ -81,12 +81,12 @@ const INITIAL_CATEGORIES: Category[] = [
 ];
 
 const INITIAL_SUPPLIERS: Supplier[] = [
-  { id: 1, name: "TechImports PVT", phone: "+94 77 123 4567", email: "orders@techimports.lk",  categoryIds: []       }, // universal — devices + all accessories
-  { id: 2, name: "MobileWorld",     phone: "+94 71 234 5678", email: "supply@mobileworld.lk",   categoryIds: []       }, // universal — devices
-  { id: 3, name: "XiaomiSL",        phone: "+94 76 345 6789", email: "info@xiaomisl.lk",        categoryIds: []       }, // universal — Xiaomi devices
-  { id: 4, name: "AccessoryHub",    phone: "+94 75 456 7890", email: "sales@accessoryhub.lk",   categoryIds: [1,2,3,4] }, // Screen Protector, Case, Cable, Charger
-  { id: 5, name: "CableWorld",      phone: "+94 70 567 8901", email: "orders@cableworld.lk",    categoryIds: [3,4]    }, // Cable, Charger
-  { id: 6, name: "AudioZone",       phone: "+94 77 678 9012", email: "hello@audiozone.lk",      categoryIds: [5,6]    }, // Audio, Power Bank
+  { id: 1, name: "TechImports PVT", phone: "+94 77 123 4567", email: "orders@techimports.lk",  brandIds: [] },
+  { id: 2, name: "MobileWorld",     phone: "+94 71 234 5678", email: "supply@mobileworld.lk",   brandIds: [] },
+  { id: 3, name: "XiaomiSL",        phone: "+94 76 345 6789", email: "info@xiaomisl.lk",        brandIds: [] },
+  { id: 4, name: "AccessoryHub",    phone: "+94 75 456 7890", email: "sales@accessoryhub.lk",   brandIds: [] },
+  { id: 5, name: "CableWorld",      phone: "+94 70 567 8901", email: "orders@cableworld.lk",    brandIds: [] },
+  { id: 6, name: "AudioZone",       phone: "+94 77 678 9012", email: "hello@audiozone.lk",      brandIds: [] },
 ];
 
 const INITIAL_BARCODE: BarcodeSettings = {

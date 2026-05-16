@@ -874,7 +874,7 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
             {field("Selling Price (Rs.)", "sellingPrice", "number")}
           </div>
           {/* Row 6: Stock + Date */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, alignItems: "end" }}>
             {field("Current Stock", "stock", "number")}
             {field("Min Stock (Reorder At)", "minStock", "number")}
             {field("Date Added", "addedDate", "date")}

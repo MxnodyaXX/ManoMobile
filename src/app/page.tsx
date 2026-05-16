@@ -16,6 +16,10 @@ import CustomerManagement from "@/components/customer/CustomerManagement";
 import { InventoryProvider } from "@/contexts/InventoryContext";
 import { getDateLabel } from "@/utils/dataLabel";
 import {
+  DASHBOARD_STATS, REVENUE_CHART_DATA, SALES_CHART_DATA,
+  fmtRs, type FilterPeriod,
+} from "@/data/dashboardData";
+import {
   DollarSign, ShoppingCart, Wrench,
   TrendingUp, Smartphone, Package, MoreHorizontal,
   Hammer, Box, ClipboardList,
@@ -24,9 +28,11 @@ import {
 export type ActivePage = "Home" | "Repair Management" | "Sales Management" | "Inventory Management" | "Customer Management" | "Admin Control";
 
 export default function Home() {
-  const [filter, setFilter] = useState("Daily");
+  const [filter, setFilter] = useState<FilterPeriod>("Daily");
   const [activePage, setActivePage] = useState<ActivePage>("Home");
   const dateLabel = getDateLabel(filter);
+
+  const s = DASHBOARD_STATS[filter];
 
   return (
     <InventoryProvider>
@@ -64,32 +70,32 @@ export default function Home() {
                 </p>
               </div>
 
-              <FilterBar active={filter} onChange={setFilter} />
+              <FilterBar active={filter} onChange={(f) => setFilter(f as FilterPeriod)} />
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
                 <StatGroup index={0} title="Revenue" dateLabel={dateLabel}>
-                  <StatCard title="Today Revenue"       value="Rs. 50,000" change="+5%" icon={DollarSign} size="large" />
+                  <StatCard title="Total Revenue"   value={fmtRs(s.totalRevenue.value)}   change={s.totalRevenue.change}   icon={DollarSign}  size="large" />
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                    <StatCard title="Total Sales"         value="Rs. 50,000" change="+5%" icon={TrendingUp} size="small" />
-                    <StatCard title="Repair Income"       value="Rs. 50,000" change="+5%" icon={Wrench}     size="small" />
+                    <StatCard title="Sales"          value={fmtRs(s.salesRevenue.value)}   change={s.salesRevenue.change}   icon={TrendingUp}  size="small" />
+                    <StatCard title="Repairs"        value={fmtRs(s.repairRevenue.value)}  change={s.repairRevenue.change}  icon={Wrench}      size="small" />
                   </div>
                 </StatGroup>
 
                 <StatGroup index={1} title="Sales" dateLabel={dateLabel}>
-                  <StatCard title="Today Sales"           value="Rs. 50,000" change="+5%" icon={ShoppingCart}    size="large" />
+                  <StatCard title="Total Sales"        value={fmtRs(s.totalSales.value)}     change={s.totalSales.change}     icon={ShoppingCart}   size="large" />
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                    <StatCard title="Mobile Sales"        value="Rs. 50,000" change="+5%" icon={Smartphone}      size="small" />
-                    <StatCard title="Accessory Sales"     value="Rs. 50,000" change="+5%" icon={Package}         size="small" />
-                    <StatCard title="Other Sales"         value="Rs. 50,000" change="+5%" icon={MoreHorizontal}  size="small" />
+                    <StatCard title="Mobile"           value={fmtRs(s.mobileSales.value)}    change={s.mobileSales.change}    icon={Smartphone}     size="small" />
+                    <StatCard title="Accessory"        value={fmtRs(s.accessorySales.value)} change={s.accessorySales.change} icon={Package}        size="small" />
+                    <StatCard title="Other"            value={fmtRs(s.otherSales.value)}     change={s.otherSales.change}     icon={MoreHorizontal} size="small" />
                   </div>
                 </StatGroup>
 
                 <StatGroup index={2} title="Repairs" dateLabel={dateLabel}>
-                  <StatCard title="Repair Income"         value="Rs. 50,000" change="+5%" icon={Wrench}        size="large" />
+                  <StatCard title="Repair Income"  value={fmtRs(s.repairIncome.value)}  change={s.repairIncome.change}  icon={Wrench}        size="large" />
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                    <StatCard title="Repair Cost"         value="Rs. 50,000" change="+5%" icon={Hammer}        size="small" />
-                    <StatCard title="Parts Cost"          value="Rs. 50,000" change="+5%" icon={Box}           size="small" />
-                    <StatCard title="Total Jobs"          value="30"         change="+5%" icon={ClipboardList}  size="small" isCount />
+                    <StatCard title="Labor Cost"   value={fmtRs(s.repairCost.value)}    change={s.repairCost.change}    icon={Hammer}        size="small" />
+                    <StatCard title="Parts Cost"   value={fmtRs(s.partsCost.value)}     change={s.partsCost.change}     icon={Box}           size="small" />
+                    <StatCard title="Total Jobs"   value={String(s.totalJobs.value)}    change={s.totalJobs.change}     icon={ClipboardList} size="small" isCount />
                   </div>
                 </StatGroup>
               </div>
@@ -101,8 +107,8 @@ export default function Home() {
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                <ChartCard title="Users Growth"   index={0} color="#6366f1" />
-                <ChartCard title="Sales Overview" index={1} color="#06b6d4" />
+                <ChartCard title="Revenue Growth"  index={0} color="#e8e8e8" data={REVENUE_CHART_DATA} badge="+28%" />
+                <ChartCard title="Sales Overview"  index={1} color="#a8a8a8" data={SALES_CHART_DATA}   badge="+24%" />
               </div>
             </>
           )}
