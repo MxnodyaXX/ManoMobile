@@ -5,23 +5,27 @@ import { createPortal } from "react-dom";
 import {
   Calculator, ArrowDownLeft, ArrowUpRight, Lock,
   DollarSign, X, AlertTriangle, CheckCircle, Clock,
+  UserCheck, History as HistoryIcon, Play,
 } from "lucide-react";
 import { useCashRegister, type CashEntry } from "@/cashier/contexts/CashRegisterContext";
+import { useShift } from "@/cashier/contexts/ShiftContext";
 import ExportButtons from "@/cashier/components/shared/ExportButtons";
 import { exportToPdf, exportToExcel, exportToPng } from "@/cashier/utils/exportUtils";
 
-type CRTab = "Cash Float" | "Transactions" | "End of Day";
+type CRTab = "Cash Float" | "Transactions" | "End of Day" | "Shift History";
 
 const tabs: { id: CRTab; icon: any; label: string }[] = [
   { id: "Cash Float",    icon: DollarSign,    label: "Cash Float" },
   { id: "Transactions",  icon: Calculator,    label: "Transactions" },
   { id: "End of Day",    icon: Lock,          label: "End of Day" },
+  { id: "Shift History", icon: HistoryIcon,   label: "Shift History" },
 ];
 
 const tabDescriptions: Record<CRTab, string> = {
   "Cash Float":    "View current drawer balance and open a new shift",
   "Transactions":  "Log cash-in and cash-out movements during the shift",
   "End of Day":    "Close the shift, reconcile cash, and print the Z-report",
+  "Shift History": "View all past shifts, cashier assignments, and variance records",
 };
 
 function fmtRs(n: number) { return `Rs. ${n.toLocaleString()}`; }
@@ -130,6 +134,145 @@ function AddEntryModal({ type, onAdd, onClose }: {
       </div>
     </div>,
     document.body
+  );
+}
+
+/* ── Open Shift Screen ── */
+function OpenShiftScreen({ onOpen }: { onOpen: (cashier: string, float: number) => void }) {
+  const [cashier, setCashier] = useState("");
+  const [float,   setFloat]   = useState("5000");
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%", background: "var(--bg-secondary)", border: "1px solid var(--border)",
+    borderRadius: 9, padding: "11px 14px", fontSize: 14, fontWeight: 600,
+    color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none",
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px", gap: 24 }}>
+      <div style={{
+        width: 64, height: 64, borderRadius: 20,
+        background: "var(--accent-dim)", border: "1px solid var(--accent-glow)",
+        display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)",
+      }}>
+        <UserCheck size={28} />
+      </div>
+      <div style={{ textAlign: "center" }}>
+        <p style={{ fontSize: 18, fontWeight: 800, color: "var(--text-primary)", marginBottom: 6 }}>Open a New Shift</p>
+        <p style={{ fontSize: 13, color: "var(--text-muted)" }}>Enter cashier name and opening float to start the shift.</p>
+      </div>
+
+      <div style={{ width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div>
+          <label style={{ fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Cashier Name</label>
+          <input
+            placeholder="e.g. Kamal Perera"
+            value={cashier}
+            onChange={e => setCashier(e.target.value)}
+            style={inputStyle}
+          />
+        </div>
+        <div>
+          <label style={{ fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Opening Float (Rs.)</label>
+          <input
+            type="number" min="0"
+            value={float}
+            onChange={e => setFloat(e.target.value)}
+            style={inputStyle}
+          />
+        </div>
+        <button
+          disabled={!cashier.trim() || !float || Number(float) < 0}
+          onClick={() => onOpen(cashier.trim(), Number(float))}
+          style={{
+            padding: "13px 0", borderRadius: 10, border: "1px solid var(--accent-glow)",
+            background: "var(--accent-dim)", color: "var(--accent)", cursor: "pointer",
+            fontSize: 14, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            opacity: !cashier.trim() || !float || Number(float) < 0 ? 0.4 : 1,
+          }}>
+          <Play size={14} /> Open Shift
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Shift History tab ── */
+function ShiftHistory() {
+  const { shiftHistory, currentShift } = useShift();
+
+  const fmtDT = (d: Date) => new Date(d).toLocaleString("en-GB", {
+    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+  });
+
+  const allShifts = currentShift
+    ? [currentShift, ...shiftHistory]
+    : shiftHistory;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ background: "var(--bg-secondary)" }}>
+              {["Shift ID", "Cashier", "Opened At", "Closed At", "Opening Float", "Closing Balance", "Variance", "Status"].map(h => (
+                <th key={h} style={{
+                  padding: "10px 14px", textAlign: "left", fontSize: 11,
+                  color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600,
+                  whiteSpace: "nowrap",
+                }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {allShifts.length === 0 ? (
+              <tr>
+                <td colSpan={8} style={{ padding: "40px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+                  No shift history yet.
+                </td>
+              </tr>
+            ) : allShifts.map((s, i) => {
+              const isOpen = s.status === "open";
+              return (
+                <tr key={s.id} style={{ borderTop: "1px solid var(--border)", background: i % 2 === 1 ? "var(--bg-secondary)" : "transparent" }}>
+                  <td style={{ padding: "11px 14px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap" }}>{s.id.slice(-8)}</td>
+                  <td style={{ padding: "11px 14px", color: "var(--text-primary)" }}>{s.cashier}</td>
+                  <td style={{ padding: "11px 14px", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtDT(s.openedAt)}</td>
+                  <td style={{ padding: "11px 14px", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                    {s.closedAt ? fmtDT(s.closedAt) : <span style={{ color: "#4ade80", fontWeight: 600 }}>Active</span>}
+                  </td>
+                  <td style={{ padding: "11px 14px", color: "var(--text-primary)" }}>{fmtRs(s.openingFloat)}</td>
+                  <td style={{ padding: "11px 14px", color: "var(--text-primary)" }}>
+                    {s.closingBalance !== undefined ? fmtRs(s.closingBalance) : "—"}
+                  </td>
+                  <td style={{ padding: "11px 14px" }}>
+                    {s.variance !== undefined ? (
+                      <span style={{
+                        fontSize: 12, fontWeight: 700,
+                        color: s.variance === 0 ? "#4ade80" : s.variance > 0 ? "#60a5fa" : "#f87171",
+                      }}>
+                        {s.variance > 0 ? "+" : ""}{fmtRs(s.variance)}
+                      </span>
+                    ) : "—"}
+                  </td>
+                  <td style={{ padding: "11px 14px" }}>
+                    <span style={{
+                      fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 6,
+                      color: isOpen ? "#4ade80" : "var(--text-muted)",
+                      background: isOpen ? "rgba(74,222,128,0.1)" : "var(--bg-secondary)",
+                      border: `1px solid ${isOpen ? "rgba(74,222,128,0.25)" : "var(--border)"}`,
+                    }}>
+                      {isOpen ? "Open" : "Closed"}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -284,41 +427,15 @@ function Transactions({ log, onAdd }: { log: CashEntry[]; onAdd: (type: "in" | "
 
 /* ── End of Day tab ── */
 function EndOfDay({ log }: { log: CashEntry[] }) {
+  const { currentShift, closeShift } = useShift();
   const [actualClose, setActualClose] = useState("");
-  const [closed, setClosed] = useState(false);
 
   const expectedClose = log.reduce((a, e) => e.type === "in" ? a + e.amount : a - e.amount, 0);
   const variance      = actualClose ? Number(actualClose) - expectedClose : null;
 
-  if (closed) {
-    return (
-      <div style={{
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        gap: 16, padding: "60px 20px", textAlign: "center",
-      }}>
-        <div style={{
-          width: 64, height: 64, borderRadius: 20,
-          background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.25)",
-          display: "flex", alignItems: "center", justifyContent: "center", color: "#4ade80",
-        }}>
-          <CheckCircle size={30} />
-        </div>
-        <div>
-          <p style={{ fontSize: 18, fontWeight: 800, color: "var(--text-primary)", marginBottom: 6 }}>Shift Closed</p>
-          <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
-            The shift has been successfully closed. The Z-report has been saved.
-          </p>
-        </div>
-        <button onClick={() => setClosed(false)} style={{
-          padding: "10px 20px", borderRadius: 9, border: "1px solid var(--border)",
-          background: "transparent", color: "var(--text-secondary)", cursor: "pointer",
-          fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif",
-        }}>
-          View Again
-        </button>
-      </div>
-    );
-  }
+  const handleClose = () => {
+    closeShift(Number(actualClose));
+  };
 
   const inputStyle: React.CSSProperties = {
     background: "var(--bg-secondary)", border: "1px solid var(--border)",
@@ -328,12 +445,24 @@ function EndOfDay({ log }: { log: CashEntry[] }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 560 }}>
+      {currentShift && (
+        <div style={{ background: "var(--accent-dim)", border: "1px solid var(--accent-glow)", borderRadius: 12, padding: "14px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+          <UserCheck size={16} color="var(--accent)" />
+          <div>
+            <p style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)" }}>Active Shift — {currentShift.cashier}</p>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+              Opened at {currentShift.openedAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} | Float: {fmtRs(currentShift.openingFloat)}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "20px 22px" }}>
         <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 16 }}>Closing Summary</p>
         {[
-          { label: "Opening Float",   value: fmtRs(log.find(e => e.reason === "Opening Float")?.amount ?? 0) },
-          { label: "Total Cash In",   value: fmtRs(log.filter(e => e.type === "in").reduce((a, e) => a + e.amount, 0)) },
-          { label: "Total Cash Out",  value: fmtRs(log.filter(e => e.type === "out").reduce((a, e) => a + e.amount, 0)) },
+          { label: "Opening Float",    value: fmtRs(log.find(e => e.reason === "Opening Float")?.amount ?? currentShift?.openingFloat ?? 0) },
+          { label: "Total Cash In",    value: fmtRs(log.filter(e => e.type === "in").reduce((a, e) => a + e.amount, 0)) },
+          { label: "Total Cash Out",   value: fmtRs(log.filter(e => e.type === "out").reduce((a, e) => a + e.amount, 0)) },
           { label: "Expected Closing", value: fmtRs(expectedClose), bold: true },
         ].map(row => (
           <div key={row.label} style={{
@@ -378,7 +507,7 @@ function EndOfDay({ log }: { log: CashEntry[] }) {
 
       <button
         disabled={!actualClose || Number(actualClose) < 0}
-        onClick={() => setClosed(true)}
+        onClick={handleClose}
         style={{
           padding: "12px 0", borderRadius: 10, border: "1px solid var(--accent-glow)",
           background: "var(--accent-dim)", color: "var(--accent)", cursor: "pointer",
@@ -386,7 +515,7 @@ function EndOfDay({ log }: { log: CashEntry[] }) {
           display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
           opacity: !actualClose || Number(actualClose) < 0 ? 0.4 : 1,
         }}>
-        <Lock size={14} /> Close Shift & Print Z-Report
+        <Lock size={14} /> Close Shift & Save Z-Report
       </button>
     </div>
   );
@@ -396,6 +525,7 @@ function EndOfDay({ log }: { log: CashEntry[] }) {
 export default function CashRegister() {
   const [active, setActive] = useState<CRTab>("Cash Float");
   const { log, addEntry } = useCashRegister();
+  const { currentShift, openShift } = useShift();
   const [addModal, setAddModal] = useState<"in" | "out" | null>(null);
 
   const ActiveIcon = tabs.find(t => t.id === active)!.icon;
@@ -403,6 +533,11 @@ export default function CashRegister() {
   const handleAdd = (amount: number, reason: string) => {
     if (!addModal) return;
     addEntry(addModal, reason, amount);
+  };
+
+  const handleOpenShift = (cashier: string, float: number) => {
+    openShift(cashier, float);
+    addEntry("in", "Opening Float", float);
   };
 
   return (
@@ -464,11 +599,35 @@ export default function CashRegister() {
         </div>
       </div>
 
+      {/* Active shift banner */}
+      {currentShift && (
+        <div className="fade-up fade-up-2" style={{
+          display: "flex", alignItems: "center", gap: 10,
+          background: "rgba(74,222,128,0.06)", border: "1px solid rgba(74,222,128,0.2)",
+          borderRadius: 10, padding: "10px 16px",
+        }}>
+          <UserCheck size={14} color="#4ade80" />
+          <p style={{ fontSize: 12.5, color: "#4ade80", fontWeight: 600 }}>
+            Shift Open — {currentShift.cashier}
+          </p>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 4 }}>
+            Since {currentShift.openedAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+          </span>
+        </div>
+      )}
+
       {/* Content */}
       <div className="fade-up fade-up-3" style={{ flex: 1, overflowY: "auto", paddingBottom: 20 }}>
-        {active === "Cash Float"   && <CashFloat log={log} />}
-        {active === "Transactions" && <Transactions log={log} onAdd={type => setAddModal(type)} />}
-        {active === "End of Day"   && <EndOfDay log={log} />}
+        {!currentShift && active !== "Shift History" ? (
+          <OpenShiftScreen onOpen={handleOpenShift} />
+        ) : (
+          <>
+            {active === "Cash Float"    && <CashFloat log={log} />}
+            {active === "Transactions"  && <Transactions log={log} onAdd={type => setAddModal(type)} />}
+            {active === "End of Day"    && <EndOfDay log={log} />}
+            {active === "Shift History" && <ShiftHistory />}
+          </>
+        )}
       </div>
 
       {addModal && (

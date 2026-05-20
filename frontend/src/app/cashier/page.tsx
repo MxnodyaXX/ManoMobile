@@ -16,10 +16,14 @@ import CustomerManagement from "@/cashier/components/customer/CustomerManagement
 import ReportsManagement from "@/cashier/components/reports/ReportsManagement";
 import CashRegister from "@/cashier/components/cashregister/CashRegister";
 import InvoiceHistory from "@/cashier/components/invoicehistory/InvoiceHistory";
+import AuditLog from "@/cashier/components/audit/AuditLog";
 import { InventoryProvider } from "@/cashier/contexts/InventoryContext";
 import { CashRegisterProvider } from "@/cashier/contexts/CashRegisterContext";
 import { RepairProvider } from "@/cashier/contexts/RepairContext";
 import { SalesProvider } from "@/cashier/contexts/SalesContext";
+import { ShiftProvider } from "@/cashier/contexts/ShiftContext";
+import { HeldSalesProvider } from "@/cashier/contexts/HeldSalesContext";
+import { AuditProvider } from "@/cashier/contexts/AuditContext";
 import { getDateLabel } from "@/cashier/utils/dataLabel";
 import {
   DASHBOARD_STATS, REVENUE_CHART_DATA, SALES_CHART_DATA,
@@ -41,13 +45,14 @@ export type ActivePage =
   | "Reports"
   | "Cash Register"
   | "Invoice History"
+  | "Audit Trail"
   | "Admin Control";
 
 /* Pages where the main area should be overflow-hidden (have their own scroll) */
 const MANAGED_PAGES: ActivePage[] = [
   "Repair Management", "Sales Management", "Inventory Management",
   "Admin Control", "Customer Management", "Reports",
-  "Cash Register", "Invoice History",
+  "Cash Register", "Invoice History", "Audit Trail",
 ];
 
 /* ── Quick-action button on the dashboard ── */
@@ -176,9 +181,12 @@ export default function CashierPage() {
   const isManaged = MANAGED_PAGES.includes(activePage);
 
   return (
+    <AuditProvider>
+    <ShiftProvider>
     <CashRegisterProvider>
     <RepairProvider>
     <SalesProvider>
+    <HeldSalesProvider>
     <InventoryProvider>
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
         <Sidebar activePage={activePage} onNavigate={setActivePage as (p: string) => void} />
@@ -199,6 +207,7 @@ export default function CashierPage() {
             {activePage === "Admin Control"        && <AdminControl />}
             {activePage === "Customer Management"  && <CustomerManagement />}
             {activePage === "Reports"              && <ReportsManagement />}
+            {activePage === "Audit Trail"          && <AuditLog />}
             {activePage === "Cash Register"        && <CashRegister />}
             {activePage === "Invoice History"      && (
               <div style={{ display: "flex", flexDirection: "column", gap: 24, flex: 1, minHeight: 0 }}>
@@ -299,8 +308,11 @@ export default function CashierPage() {
         </div>
       </div>
     </InventoryProvider>
+    </HeldSalesProvider>
     </SalesProvider>
     </RepairProvider>
     </CashRegisterProvider>
+    </ShiftProvider>
+    </AuditProvider>
   );
 }

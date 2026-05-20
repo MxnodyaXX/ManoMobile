@@ -8,6 +8,7 @@ import {
   BarChart2,
   Calculator,
   Receipt,
+  Shield,
 } from "lucide-react";
 
 export const sidebarData = [
@@ -19,5 +20,6 @@ export const sidebarData = [
   { title: "Reports",            icon: BarChart2 },
   { title: "Cash Register",      icon: Calculator },
   { title: "Invoice History",    icon: Receipt },
+  { title: "Audit Trail",        icon: Shield },
   { title: "Admin Control",      icon: Settings },
 ];

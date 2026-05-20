@@ -6,8 +6,9 @@ import {
   Smartphone, Package, AlertTriangle, XCircle,
   Plus, Search, Edit2, Trash2, X, Check,
   BarChart3, ArrowUpCircle, ArrowDownCircle, Sliders,
-  ChevronDown, ShieldAlert,
+  ChevronDown, ShieldAlert, Truck,
 } from "lucide-react";
+import StockReceiving from "./StockReceiving";
 import { useInventory } from "@/cashier/contexts/InventoryContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -51,7 +52,7 @@ interface ApprovalRequest {
   suggestedBrandType?: "device" | "accessory";
 }
 
-type InventoryTab = "Overview" | "Mobile Devices" | "Accessories";
+type InventoryTab = "Overview" | "Mobile Devices" | "Accessories" | "Stock Receiving";
 
 // ─── Initial Data ─────────────────────────────────────────────────────────────
 
@@ -1430,9 +1431,10 @@ export default function InventoryManagement() {
   const lowStockCount = accessories.filter(p => p.stock >= 0 && p.stock < p.minStock).length;
 
   const tabs: { id: InventoryTab; icon: React.ComponentType<{ size?: number; strokeWidth?: number }>; label: string }[] = [
-    { id: "Overview",       icon: BarChart3,  label: "Overview" },
-    { id: "Mobile Devices", icon: Smartphone, label: "Mobile Devices" },
-    { id: "Accessories",    icon: Package,    label: "Accessories" },
+    { id: "Overview",        icon: BarChart3,  label: "Overview" },
+    { id: "Mobile Devices",  icon: Smartphone, label: "Mobile Devices" },
+    { id: "Accessories",     icon: Package,    label: "Accessories" },
+    { id: "Stock Receiving", icon: Truck,      label: "Stock Receiving" },
   ];
 
   return (
@@ -1468,12 +1470,38 @@ export default function InventoryManagement() {
         </div>
       </div>
 
+      {/* Low Stock Alert Banner */}
+      {lowStockCount > 0 && (
+        <div className="fade-up fade-up-2" style={{
+          display: "flex", alignItems: "center", gap: 12,
+          background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.25)",
+          borderRadius: 10, padding: "11px 16px", marginTop: -8,
+        }}>
+          <AlertTriangle size={15} color="#fbbf24" style={{ flexShrink: 0 }} />
+          <p style={{ fontSize: 13, color: "var(--text-primary)", flex: 1 }}>
+            <strong style={{ color: "#fbbf24" }}>{lowStockCount} accessory item{lowStockCount > 1 ? "s" : ""}</strong> below reorder level — restock required.
+          </p>
+          <button
+            onClick={() => setTab("Accessories")}
+            style={{
+              fontSize: 12, fontWeight: 600, color: "#fbbf24",
+              background: "none", border: "1px solid rgba(251,191,36,0.3)", borderRadius: 7,
+              cursor: "pointer", padding: "5px 12px",
+              fontFamily: "'Plus Jakarta Sans', sans-serif",
+            }}
+          >
+            View Items
+          </button>
+        </div>
+      )}
+
       <div className="fade-up fade-up-2" style={{ borderTop: "1px solid var(--border)", marginTop: -8 }} />
 
       <div className="fade-up fade-up-3" style={{ flex: 1, overflowY: "auto", paddingBottom: 32 }}>
-        {tab === "Overview"       && <OverviewTab devices={devices} accessories={accessories} />}
-        {tab === "Mobile Devices" && <MobileDevicesTab devices={devices} setDevices={setDevices} />}
-        {tab === "Accessories"    && <AccessoriesTab accessories={accessories} setAccessories={setAccessories} />}
+        {tab === "Overview"        && <OverviewTab devices={devices} accessories={accessories} />}
+        {tab === "Mobile Devices"  && <MobileDevicesTab devices={devices} setDevices={setDevices} />}
+        {tab === "Accessories"     && <AccessoriesTab accessories={accessories} setAccessories={setAccessories} />}
+        {tab === "Stock Receiving" && <StockReceiving />}
       </div>
     </div>
   );

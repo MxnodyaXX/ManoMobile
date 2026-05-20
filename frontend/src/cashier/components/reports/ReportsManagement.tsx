@@ -17,18 +17,30 @@ import {
 import ExportButtons from "@/cashier/components/shared/ExportButtons";
 import { exportToExcel, exportToPng, exportMultiSectionToExcel, exportReportToPdf } from "@/cashier/utils/exportUtils";
 
-type ReportTab = "Daily Report" | "Sales Report" | "Repair Report";
+type ReportTab = "Daily Report" | "Sales Report" | "Repair Report" | "P&L Report" | "Stock Valuation" | "Cashier Performance" | "Supplier Report" | "Credit Aging" | "Repair SLA";
 
 const tabs: { id: ReportTab; icon: any; label: string }[] = [
-  { id: "Daily Report",  icon: Calendar,     label: "Daily Report" },
-  { id: "Sales Report",  icon: ShoppingCart, label: "Sales Report" },
-  { id: "Repair Report", icon: Wrench,       label: "Repair Report" },
+  { id: "Daily Report",        icon: Calendar,     label: "Daily" },
+  { id: "Sales Report",        icon: ShoppingCart, label: "Sales" },
+  { id: "Repair Report",       icon: Wrench,       label: "Repair" },
+  { id: "P&L Report",          icon: TrendingUp,   label: "P&L" },
+  { id: "Stock Valuation",     icon: Package,      label: "Stock Value" },
+  { id: "Cashier Performance", icon: DollarSign,   label: "Cashier" },
+  { id: "Supplier Report",     icon: FileText,     label: "Supplier" },
+  { id: "Credit Aging",        icon: TrendingDown, label: "Credit Aging" },
+  { id: "Repair SLA",          icon: Smartphone,   label: "Repair SLA" },
 ];
 
 const tabDescriptions: Record<ReportTab, string> = {
-  "Daily Report":  "Full-day revenue, transaction count, and cash reconciliation",
-  "Sales Report":  "Sales breakdown by category, product, and customer",
-  "Repair Report": "Repair job statistics, technician performance, and parts usage",
+  "Daily Report":        "Full-day revenue, transaction count, and cash reconciliation",
+  "Sales Report":        "Sales breakdown by category, product, and customer",
+  "Repair Report":       "Repair job statistics, technician performance, and parts usage",
+  "P&L Report":          "Profit & Loss — revenue vs COGS vs gross profit by category",
+  "Stock Valuation":     "Current inventory value at cost and selling price",
+  "Cashier Performance": "Sales and transaction count broken down by cashier",
+  "Supplier Report":     "Purchases, delivery time, and spend per supplier",
+  "Credit Aging":        "Outstanding credit balances aged by 30 / 60 / 90+ day buckets",
+  "Repair SLA":          "Repair job turnaround time and SLA performance by technician",
 };
 
 function fmtRs(n: number) { return `Rs. ${n.toLocaleString()}`; }

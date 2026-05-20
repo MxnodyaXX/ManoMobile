@@ -158,9 +158,10 @@ interface CreditCustomerPickerProps {
   selected: POSCreditCustomer | null;
   onSelect: (c: POSCreditCustomer | null) => void;
   onNewCustomer: (c: POSCreditCustomer) => void;
+  pendingAmount?: number;
 }
 
-export default function CreditCustomerPicker({ customers, selected, onSelect, onNewCustomer }: CreditCustomerPickerProps) {
+export default function CreditCustomerPicker({ customers, selected, onSelect, onNewCustomer, pendingAmount = 0 }: CreditCustomerPickerProps) {
   const [showAdd, setShowAdd] = useState(false);
 
   const nextId = `CC-${String(customers.length + 1).padStart(3, "0")}`;
@@ -173,9 +174,11 @@ export default function CreditCustomerPicker({ customers, selected, onSelect, on
     setShowAdd(false);
   };
 
-  const available   = selected ? selected.maxCredit - selected.balance : 0;
-  const usedPct     = selected && selected.maxCredit > 0 ? Math.min(100, Math.round((selected.balance / selected.maxCredit) * 100)) : 0;
-  const isOverLimit = selected ? selected.balance >= selected.maxCredit : false;
+  const available        = selected ? selected.maxCredit - selected.balance : 0;
+  const usedPct          = selected && selected.maxCredit > 0 ? Math.min(100, Math.round((selected.balance / selected.maxCredit) * 100)) : 0;
+  const isOverLimit      = selected ? selected.balance >= selected.maxCredit : false;
+  const wouldExceedLimit = selected && pendingAmount > 0 ? (selected.balance + pendingAmount) > selected.maxCredit : false;
+  const afterSaleBalance = selected && pendingAmount > 0 ? selected.balance + pendingAmount : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -263,7 +266,29 @@ export default function CreditCustomerPicker({ customers, selected, onSelect, on
           {isOverLimit && (
             <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#f87171", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
               <AlertCircle size={12} strokeWidth={2.2} />
-              Customer has reached their credit limit. New credit purchases may be restricted.
+              Customer has reached their credit limit. Credit sales are blocked.
+            </div>
+          )}
+
+          {/* Would exceed limit */}
+          {!isOverLimit && wouldExceedLimit && afterSaleBalance !== null && (
+            <div style={{ background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.25)", borderRadius: 8, padding: "9px 11px", display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#f87171", fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 700 }}>
+                <AlertCircle size={12} strokeWidth={2.2} />
+                This sale exceeds the credit limit
+              </div>
+              <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                Balance after sale: Rs. {afterSaleBalance.toLocaleString()} / Limit: Rs. {selected!.maxCredit.toLocaleString()}.
+                Requires manager approval to proceed.
+              </p>
+            </div>
+          )}
+
+          {/* Pending amount preview */}
+          {!wouldExceedLimit && !isOverLimit && pendingAmount > 0 && afterSaleBalance !== null && (
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              <span>After this sale:</span>
+              <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>Rs. {afterSaleBalance.toLocaleString()} outstanding</span>
             </div>
           )}
         </div>
