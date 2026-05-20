@@ -15,7 +15,7 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
 } from "recharts";
 import ExportButtons from "@/cashier/components/shared/ExportButtons";
-import { exportToPdf, exportToExcel, exportToPng, exportMultiSectionToPdf, exportMultiSectionToExcel } from "@/cashier/utils/exportUtils";
+import { exportToExcel, exportToPng, exportMultiSectionToExcel, exportReportToPdf } from "@/cashier/utils/exportUtils";
 
 type ReportTab = "Daily Report" | "Sales Report" | "Repair Report";
 
@@ -199,17 +199,34 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
   return (
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
-      <ReportFilters
-        dateFrom={dateFrom} dateTo={dateTo}
-        setDateFrom={setDateFrom} setDateTo={setDateTo}
-        actions={
+      {/* Single-date selector */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Calendar size={13} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={e => { setDateFrom(e.target.value); setDateTo(e.target.value); }}
+          style={{
+            background: "var(--bg-secondary)", border: "1px solid var(--border)",
+            borderRadius: 8, padding: "7px 11px", fontSize: 12.5,
+            color: "var(--text-primary)", fontFamily: ff, outline: "none",
+            colorScheme: "dark", width: 145,
+          }}
+        />
+        <div style={{ marginLeft: "auto" }}>
           <ExportButtons
-            onPdf={()  => exportMultiSectionToPdf(`Daily Report — ${dateFrom}`, buildSections(), drFilename)}
+            onPdf={() => {
+              if (!containerRef.current) return;
+              const charts = Array.from(containerRef.current.querySelectorAll("[data-pdf-chart]"))
+                .filter(el => (el as HTMLElement).getBoundingClientRect().height > 0)
+                .map(el => ({ title: el.getAttribute("data-pdf-chart") as string, element: el as HTMLElement }));
+              return exportReportToPdf(`Daily Report — ${dateFrom}`, buildSections(), charts, drFilename);
+            }}
             onExcel={() => exportMultiSectionToExcel(drFilename, buildSections())}
             onPng={()  => containerRef.current && exportToPng(containerRef.current, drFilename)}
           />
-        }
-      />
+        </div>
+      </div>
 
       {/* Stat cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
@@ -235,7 +252,7 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
 
       {/* Revenue by Category BarChart + Payment Split Donut */}
       <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 16 }}>
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
+        <div data-pdf-chart="Revenue by Category" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 18, fontFamily: ff }}>Revenue by Category</p>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={categoryData} barGap={4} barCategoryGap="30%">
@@ -254,7 +271,7 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
         </div>
 
         {/* Payment Split Donut */}
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 24px", display: "flex", flexDirection: "column" }}>
+        <div data-pdf-chart="Payment Split" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 24px", display: "flex", flexDirection: "column" }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 2, fontFamily: ff }}>Payment Split</p>
           <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontFamily: ff }}>Revenue by payment method</p>
           <ResponsiveContainer width="100%" height={155}>
@@ -290,7 +307,7 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
 
         {/* Today vs Yesterday */}
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 10px" }}>
+        <div data-pdf-chart="Today vs Yesterday" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 10px" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
             <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Today vs Yesterday</p>
             <div style={{ display: "flex", gap: 14 }}>
@@ -319,7 +336,7 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
         </div>
 
         {/* Cash Flow ComposedChart */}
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 10px" }}>
+        <div data-pdf-chart="Cash Flow" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 10px" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
             <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Cash Flow</p>
             <div style={{ display: "flex", gap: 12 }}>
@@ -349,7 +366,7 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
       </div>
 
       {/* Hourly Revenue Trend */}
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 10px" }}>
+      <div data-pdf-chart="Hourly Revenue Trend" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 10px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Hourly Revenue Trend</p>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -377,7 +394,7 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
       {/* Top Items Sold Today + Customer Type */}
       <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 16 }}>
 
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
+        <div data-pdf-chart="Top Items Sold Today" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 18, fontFamily: ff }}>Top Items Sold Today</p>
           <ResponsiveContainer width="100%" height={190}>
             <BarChart data={topItemsToday} layout="vertical" margin={{ top: 0, right: 60, left: 0, bottom: 0 }}>
@@ -392,7 +409,7 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
           </ResponsiveContainer>
         </div>
 
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 24px", display: "flex", flexDirection: "column" }}>
+        <div data-pdf-chart="Customer Type" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 24px", display: "flex", flexDirection: "column" }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 2, fontFamily: ff }}>Customer Type</p>
           <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontFamily: ff }}>Returning vs new walk-ins</p>
           <ResponsiveContainer width="100%" height={145}>
@@ -425,7 +442,7 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
       </div>
 
       {/* Transaction Volume by Hour */}
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
+      <div data-pdf-chart="Transaction Volume by Hour" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <div>
             <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Transaction Volume by Hour</p>
@@ -706,20 +723,72 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
     );
   };
 
+  const fmtDate = (iso: string) =>
+    new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+  const inputStyle: React.CSSProperties = {
+    background: "var(--bg-secondary)", border: "1px solid var(--border)",
+    borderRadius: 8, padding: "7px 11px", fontSize: 12.5,
+    color: "var(--text-primary)", fontFamily: ff, outline: "none",
+    colorScheme: "dark",
+  };
+
   return (
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
-      <ReportFilters
-        dateFrom={dateFrom} dateTo={dateTo}
-        setDateFrom={setDateFrom} setDateTo={setDateTo}
-        actions={
-          <ExportButtons
-            onPdf={()  => exportToPdf("Sales Report", SR_HEADERS, srRows(), srFilename)}
-            onExcel={() => exportToExcel(srFilename, "Sales Report", SR_HEADERS, srRows())}
-            onPng={()  => containerRef.current && exportToPng(containerRef.current, srFilename)}
+      {/* Sticky date bar */}
+      <div style={{
+        position: "sticky", top: 0, zIndex: 20,
+        background: "var(--bg-primary)",
+        paddingBottom: 12,
+        borderBottom: "1px solid var(--border)",
+        marginBottom: 4,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Calendar size={13} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={e => setDateFrom(e.target.value)}
+            style={{ ...inputStyle, width: 145 }}
           />
-        }
-      />
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>–</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={e => setDateTo(e.target.value)}
+            style={{ ...inputStyle, width: 145 }}
+          />
+          <span style={{
+            fontSize: 11.5, color: "var(--text-muted)",
+            background: "var(--bg-secondary)", border: "1px solid var(--border)",
+            borderRadius: 20, padding: "5px 12px", fontFamily: ff,
+            whiteSpace: "nowrap",
+          }}>
+            {dateFrom === dateTo ? fmtDate(dateFrom) : `${fmtDate(dateFrom)} – ${fmtDate(dateTo)}`}
+          </span>
+          <div style={{ marginLeft: "auto" }}>
+            <ExportButtons
+              onPdf={() => {
+                if (!containerRef.current) return;
+                const sections = [
+                  { title: "Sales Summary", headers: SR_HEADERS, rows: srRows() },
+                  ...(openAccs.has("Mobile") ? [{ title: "Mobile Devices", headers: ["Model", "Brand", "Units", "Unit Price (Rs.)", "Revenue (Rs.)"], rows: mobileItems.map(i => [i.model, i.brand, i.units, i.unitPrice, i.revenue]) as (string|number)[][] }] : []),
+                  ...(openAccs.has("Accessories") ? [{ title: "Accessories", headers: ["Item", "Units", "Unit Price (Rs.)", "Revenue (Rs.)"], rows: accessoryItems.map(i => [i.item, i.units, i.unitPrice, i.revenue]) as (string|number)[][] }] : []),
+                  ...(openAccs.has("Repairs") ? [{ title: "Repair Services", headers: ["Type", "Jobs", "Avg Charge (Rs.)", "Parts (Rs.)", "Labor (Rs.)", "Revenue (Rs.)"], rows: repairItems.map(r => [r.type, r.jobs, r.avgCharge, r.parts, r.labor, r.revenue]) as (string|number)[][] }] : []),
+                  ...(openAccs.has("Others") ? [{ title: "Others", headers: ["Service", "Units", "Unit Price (Rs.)", "Revenue (Rs.)"], rows: otherItems.map(o => [o.service, o.units, o.unitPrice, o.revenue]) as (string|number)[][] }] : []),
+                ];
+                const charts = Array.from(containerRef.current.querySelectorAll("[data-pdf-chart]"))
+                  .filter(el => (el as HTMLElement).getBoundingClientRect().height > 0)
+                  .map(el => ({ title: el.getAttribute("data-pdf-chart") as string, element: el as HTMLElement }));
+                return exportReportToPdf("Sales Report", sections, charts, srFilename);
+              }}
+              onExcel={() => exportToExcel(srFilename, "Sales Report", SR_HEADERS, srRows())}
+              onPng={()  => containerRef.current && exportToPng(containerRef.current, srFilename)}
+            />
+          </div>
+        </div>
+      </div>
 
       {/* Stat cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
@@ -736,7 +805,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
 
       {/* Sales BarChart + Revenue Share Donut */}
       <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 16 }}>
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
+        <div data-pdf-chart="Sales by Category" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 18, fontFamily: ff }}>Sales by Category</p>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={categoryData} barGap={4} barCategoryGap="30%">
@@ -755,7 +824,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
         </div>
 
         {/* Revenue Share Donut */}
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 24px", display: "flex", flexDirection: "column" }}>
+        <div data-pdf-chart="Revenue Share" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 24px", display: "flex", flexDirection: "column" }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 2, fontFamily: ff }}>Revenue Share</p>
           <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontFamily: ff }}>Category contribution to total</p>
           <ResponsiveContainer width="100%" height={155}>
@@ -826,7 +895,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 14, marginBottom: 18 }}>
-                    <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 14px 8px" }}>
+                    <div data-pdf-chart="Mobile — Sales by Brand" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 14px 8px" }}>
                       <p style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", marginBottom: 2, fontFamily: ff }}>Sales by Brand</p>
                       <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 10, fontFamily: ff }}>Hover a bar — top model & profit</p>
                       <ResponsiveContainer width="100%" height={155}>
@@ -841,7 +910,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
-                    <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 14px 8px" }}>
+                    <div data-pdf-chart="Mobile — Supplier Contribution" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 14px 8px" }}>
                       <p style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", marginBottom: 2, fontFamily: ff }}>Supplier Contribution</p>
                       <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 4, fontFamily: ff }}>Who supplies our mobile stock</p>
                       <ResponsiveContainer width="100%" height={110}>
@@ -946,7 +1015,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 14, marginBottom: 18 }}>
-                    <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 14px 8px" }}>
+                    <div data-pdf-chart="Accessories — Selling Trends" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 14px 8px" }}>
                       <p style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", marginBottom: 2, fontFamily: ff }}>Selling Trends by Item</p>
                       <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 10, fontFamily: ff }}>Daily revenue — stacked by accessory type</p>
                       <ResponsiveContainer width="100%" height={155}>
@@ -963,7 +1032,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                         </AreaChart>
                       </ResponsiveContainer>
                     </div>
-                    <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 14px 8px" }}>
+                    <div data-pdf-chart="Accessories — Supplier Contribution" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 14px 8px" }}>
                       <p style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", marginBottom: 2, fontFamily: ff }}>Supplier Contribution</p>
                       <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 10, fontFamily: ff }}>Who stocks our accessories</p>
                       <ResponsiveContainer width="100%" height={120}>
@@ -1074,7 +1143,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                   {/* Fault frequency + Brand frequency charts */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
                     {/* Most Received Fault */}
-                    <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px 18px" }}>
+                    <div data-pdf-chart="Repairs — Most Received Fault" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px 18px" }}>
                       <p style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", marginBottom: 14, fontFamily: ff }}>Most Received Fault</p>
                       <ResponsiveContainer width="100%" height={160}>
                         <BarChart data={repairFaultData} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
@@ -1092,7 +1161,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                     </div>
 
                     {/* Most Coming Brand */}
-                    <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px 18px" }}>
+                    <div data-pdf-chart="Repairs — Most Coming Brand" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px 18px" }}>
                       <p style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", marginBottom: 14, fontFamily: ff }}>Most Coming Brand</p>
                       <ResponsiveContainer width="100%" height={160}>
                         <BarChart data={repairBrandFreqData} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
@@ -1423,7 +1492,14 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
         setDateFrom={setDateFrom} setDateTo={setDateTo}
         actions={
           <ExportButtons
-            onPdf={()  => exportToPdf("Repair Report", RR_HEADERS, rrRows(), rrFilename)}
+            onPdf={() => {
+              if (!containerRef.current) return;
+              const sections = [{ title: "Repair Job Summary", headers: RR_HEADERS, rows: rrRows() }];
+              const charts = Array.from(containerRef.current.querySelectorAll("[data-pdf-chart]"))
+                .filter(el => (el as HTMLElement).getBoundingClientRect().height > 0)
+                .map(el => ({ title: el.getAttribute("data-pdf-chart") as string, element: el as HTMLElement }));
+              return exportReportToPdf("Repair Report", sections, charts, rrFilename);
+            }}
             onExcel={() => exportToExcel(rrFilename, "Repair Report", RR_HEADERS, rrRows())}
             onPng={()  => containerRef.current && exportToPng(containerRef.current, rrFilename)}
           />
@@ -1456,7 +1532,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
       <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 16 }}>
 
         {/* ComposedChart: stacked Parts+Labor bars + Revenue line */}
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
+        <div data-pdf-chart="Cost vs Revenue by Tech" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
             <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Cost vs Revenue by Tech</p>
             <div style={{ display: "flex", gap: 12 }}>
@@ -1485,7 +1561,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
         </div>
 
         {/* RadarChart: technician multi-metric */}
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 24px" }}>
+        <div data-pdf-chart="Technician Comparison" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 24px" }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 2, fontFamily: ff }}>Technician Comparison</p>
           <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, fontFamily: ff }}>Multi-metric radar analysis</p>
           <ResponsiveContainer width="100%" height={245}>
@@ -1506,7 +1582,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
 
         {/* Horizontal BarChart: repair type frequency */}
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
+        <div data-pdf-chart="Repair Type Frequency" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 18, fontFamily: ff }}>Repair Type Frequency</p>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={repairTypes} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
@@ -1520,7 +1596,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
         </div>
 
         {/* Job Status Distribution */}
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 24px", display: "flex", flexDirection: "column" }}>
+        <div data-pdf-chart="Job Status Distribution" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 24px", display: "flex", flexDirection: "column" }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 22, fontFamily: ff }}>Job Status</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 14, flex: 1 }}>
             {statusGroups.map(s => (
@@ -1555,7 +1631,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
       {/* Device Brand Frequency + Parts Supplier */}
       <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 16 }}>
 
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
+        <div data-pdf-chart="Repairs by Device Brand" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 18, fontFamily: ff }}>Repairs by Device Brand</p>
           <ResponsiveContainer width="100%" height={210}>
             <BarChart data={deviceBrandData} layout="vertical" margin={{ top: 0, right: 30, left: 0, bottom: 0 }}>
@@ -1570,7 +1646,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
           </ResponsiveContainer>
         </div>
 
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 24px", display: "flex", flexDirection: "column" }}>
+        <div data-pdf-chart="Parts Suppliers" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 24px", display: "flex", flexDirection: "column" }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 2, fontFamily: ff }}>Parts Suppliers</p>
           <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontFamily: ff }}>Who supplies most of our repair parts</p>
           <ResponsiveContainer width="100%" height={145}>
@@ -1599,7 +1675,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
       </div>
 
       {/* Monthly Profit Trend */}
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
+      <div data-pdf-chart="Monthly Profit Trend" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 14px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <div>
             <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Monthly Profit Trend</p>
@@ -1636,7 +1712,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
       </div>
 
       {/* Repair Revenue Trend */}
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 10px" }}>
+      <div data-pdf-chart="Repair Revenue Trend" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 20px 10px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Repair Revenue Trend</p>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
