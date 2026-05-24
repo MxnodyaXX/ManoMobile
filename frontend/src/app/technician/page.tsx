@@ -161,6 +161,7 @@ function TechPageInner() {
     return <TechSelect onSelect={setTechName} />;
   }
 
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const MANAGED_PAGES: TechPage[] = ["My Jobs", "Pending Collection", "Parts & Stock", "Job History", "My Performance", "My Shift"];
   const isManaged = MANAGED_PAGES.includes(activePage);
 
@@ -169,26 +170,26 @@ function TechPageInner() {
     <TechProvider technicianName={techName}>
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
 
-        {/* Sidebar */}
         <TechSidebar
           activePage={activePage}
           onNavigate={setActivePage}
           techName={techName}
           onLogout={() => setTechName(null)}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
         />
 
-        {/* Main area */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <TechNavbar activePage={activePage} />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
+          <TechNavbar activePage={activePage} onMenuClick={() => setSidebarOpen(true)} />
 
-          <main style={{
-            flex: 1,
-            overflowY: isManaged ? "hidden" : "auto",
-            padding: isManaged ? "24px 26px 0" : "24px 26px 40px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 0,
-          }}>
+          <main
+            className={isManaged ? "resp-main-tight" : "resp-main"}
+            style={{
+              flex: 1,
+              overflowY: isManaged ? "hidden" : "auto",
+              display: "flex", flexDirection: "column", gap: 0,
+            }}
+          >
             {activePage === "Dashboard"          && <TechDashboard />}
             {activePage === "My Jobs"            && <MyJobs />}
             {activePage === "Pending Collection" && <PendingCollection />}

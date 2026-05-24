@@ -117,7 +117,7 @@ export default function AccountsDashboard() {
       </div>
 
       {/* Mid row: P&L summary + Aging */}
-      <div className="fade-up" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+      <div className="fade-up resp-grid-3" style={{ gap: 16 }}>
 
         {/* P&L summary */}
         <div style={{ padding: "20px", background: "var(--bg-card)", borderRadius: 14, border: "1px solid var(--border)" }}>
@@ -163,7 +163,7 @@ export default function AccountsDashboard() {
       </div>
 
       {/* Bottom row: Balance sheet snapshot + Expense breakdown */}
-      <div className="fade-up" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div className="fade-up resp-grid-2" style={{ gap: 16 }}>
 
         {/* Balance sheet snapshot */}
         <div style={{ padding: "20px", background: "var(--bg-card)", borderRadius: 14, border: "1px solid var(--border)" }}>

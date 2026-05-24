@@ -137,7 +137,7 @@ function ActivityFeed() {
               }}>
                 <Icon size={12} />
               </div>
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <p style={{ fontSize: 12.5, color: "var(--text-primary)" }}>{item.text}</p>
                 <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{item.time}</p>
               </div>
@@ -158,7 +158,7 @@ function TodaySnapshot() {
     { label: "Pending Pickups",   value: "3",           color: "#a78bfa" },
   ];
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+    <div className="resp-grid-4">
       {snaps.map(s => (
         <div key={s.label} style={{
           background: "var(--bg-card)", border: "1px solid var(--border)",
@@ -175,6 +175,7 @@ function TodaySnapshot() {
 export default function CashierPage() {
   const [filter, setFilter] = useState<FilterPeriod>("Daily");
   const [activePage, setActivePage] = useState<ActivePage>("Home");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const dateLabel = getDateLabel(filter);
 
   const s = DASHBOARD_STATS[filter];
@@ -189,17 +190,27 @@ export default function CashierPage() {
     <HeldSalesProvider>
     <InventoryProvider>
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
-        <Sidebar activePage={activePage} onNavigate={setActivePage as (p: string) => void} />
+        <Sidebar
+          activePage={activePage}
+          onNavigate={setActivePage as (p: string) => void}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+        />
 
-        <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
-          <Navbar activePage={activePage} />
+        <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", minWidth: 0 }}>
+          <Navbar
+            activePage={activePage}
+            onMenuClick={() => setSidebarOpen(true)}
+          />
 
-          <main style={{
-            flex: 1, position: "relative",
-            overflowY: isManaged ? "hidden" : "auto",
-            padding: isManaged ? "28px 28px 0" : "28px 28px 40px",
-            display: "flex", flexDirection: "column", gap: 20,
-          }}>
+          <main
+            className={isManaged ? "resp-main-tight scroll-x" : "resp-main scroll-x"}
+            style={{
+              flex: 1, position: "relative",
+              overflowY: isManaged ? "hidden" : "auto",
+              display: "flex", flexDirection: "column", gap: 20,
+            }}
+          >
 
             {activePage === "Repair Management"    && <RepairManagement />}
             {activePage === "Sales Management"     && <SalesManagement />}
@@ -248,10 +259,10 @@ export default function CashierPage() {
                 <FilterBar active={filter} onChange={(f) => setFilter(f as FilterPeriod)} />
 
                 {/* Stat groups */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                <div className="resp-grid-3">
                   <StatGroup index={0} title="Revenue" dateLabel={dateLabel}>
                     <StatCard title="Total Revenue"   value={fmtRs(s.totalRevenue.value)}   change={s.totalRevenue.change}   icon={DollarSign}  size="large" />
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <div className="resp-grid-2">
                       <StatCard title="Sales"         value={fmtRs(s.salesRevenue.value)}   change={s.salesRevenue.change}   icon={TrendingUp}  size="small" />
                       <StatCard title="Repairs"       value={fmtRs(s.repairRevenue.value)}  change={s.repairRevenue.change}  icon={Wrench}      size="small" />
                     </div>
@@ -277,10 +288,10 @@ export default function CashierPage() {
                 </div>
 
                 {/* Quick actions + Activity feed */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <div className="resp-grid-2">
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <p style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Quick Actions</p>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <div className="resp-grid-2">
                       <QuickAction label="New Repair Job"   sub="Register a device"       color="#34d399" onClick={() => setActivePage("Repair Management")} />
                       <QuickAction label="New Sale"         sub="Process a transaction"   color="#60a5fa" onClick={() => setActivePage("Sales Management")} />
                       <QuickAction label="Cash Register"    sub="Manage the drawer"       color="#fbbf24" onClick={() => setActivePage("Cash Register")} />
@@ -291,13 +302,13 @@ export default function CashierPage() {
                 </div>
 
                 {/* Charts */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <div className="resp-grid-2">
                   <ChartCard title="Revenue Growth"  index={0} color="#e8e8e8" data={REVENUE_CHART_DATA} badge="+28%" />
                   <ChartCard title="Sales Overview"  index={1} color="#a8a8a8" data={SALES_CHART_DATA}   badge="+24%" />
                 </div>
 
                 {/* Info cards */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                <div className="resp-grid-3">
                   <InfoCard title="Built for Scale"  description="Manage repairs, sales, inventory and customers from one unified dashboard." tag="Platform"    index={0} />
                   <InfoCard title="Smart Workflows"  description="Automate your repair pipeline and reduce manual operations."                tag="Automation" accent index={1} />
                   <InfoCard title="Work Smart"       description="Build systems that scale without adding complexity."                        tag="Efficiency" index={2} />

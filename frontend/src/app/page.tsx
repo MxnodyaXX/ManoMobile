@@ -97,7 +97,7 @@ export default function LoginPage() {
         </div>
 
         {/* Role cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, width: "100%" }}>
+        <div className="resp-grid-4" style={{ width: "100%" }}>
           {ROLES.map(role => {
             const Icon = role.icon;
             const hov = hoveredRole === role.id;
@@ -175,7 +175,8 @@ export default function LoginPage() {
         >
           <div style={{
             background: "var(--bg-card)", border: "1px solid var(--border)",
-            borderRadius: 20, padding: "32px 28px", width: 380,
+            borderRadius: 20, padding: "32px 28px",
+            width: "min(380px, calc(100vw - 32px))",
             display: "flex", flexDirection: "column", gap: 24,
             boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
           }}>

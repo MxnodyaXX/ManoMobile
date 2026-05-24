@@ -196,7 +196,7 @@ export default function TechDashboard() {
       )}
 
       {/* Stat strip */}
-      <div className="fade-up" style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10 }}>
+      <div className="fade-up resp-grid-4" style={{ gap: 10 }}>
         {stats.map(s => {
           const Icon = s.icon;
           return (
@@ -212,7 +212,7 @@ export default function TechDashboard() {
       </div>
 
       {/* Lower row: Paused jobs + Approved parts notifications */}
-      <div className="fade-up" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div className="fade-up resp-grid-2" style={{ gap: 16 }}>
 
         {/* Paused jobs */}
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>

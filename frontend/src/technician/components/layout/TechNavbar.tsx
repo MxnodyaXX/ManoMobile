@@ -1,16 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Clock, Wifi, Bell } from "lucide-react";
+import { Clock, Wifi, Bell, Menu } from "lucide-react";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
 
-export default function TechNavbar({ activePage }: { activePage: string }) {
+interface Props {
+  activePage: string;
+  onMenuClick?: () => void;
+}
+
+export default function TechNavbar({ activePage, onMenuClick }: Props) {
   const { jobs } = useRepair();
   const { technicianName, partRequests } = useTech();
+  const isMobile = useIsMobile();
   const [time, setTime] = useState(() => new Date());
 
   useEffect(() => {
@@ -27,31 +34,31 @@ export default function TechNavbar({ activePage }: { activePage: string }) {
 
   return (
     <header style={{
-      height: 54,
+      height: isMobile ? 56 : 54,
       background: "var(--bg-secondary)",
       borderBottom: "1px solid var(--border)",
       display: "flex", alignItems: "center",
-      padding: "0 20px",
-      gap: 16,
-      flexShrink: 0,
-      fontFamily: ff,
+      padding: isMobile ? "0 14px" : "0 20px",
+      gap: 10, flexShrink: 0, fontFamily: ff,
     }}>
+      {/* Hamburger */}
+      <button className="hamburger-btn" onClick={onMenuClick} aria-label="Open menu">
+        <Menu size={18} />
+      </button>
+
       {/* Page title */}
-      <p style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff, flex: 1 }}>
+      <p style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {activePage}
       </p>
 
-      {/* Active job badge */}
-      {myActiveJob && (
+      {/* Active job badge — hide on small mobile */}
+      {myActiveJob && !isMobile && (
         <div style={{
           display: "flex", alignItems: "center", gap: 7,
           padding: "5px 12px", borderRadius: 20,
           background: `${TA}10`, border: `1px solid ${TA}30`,
         }}>
-          <span style={{
-            width: 6, height: 6, borderRadius: "50%", background: TA,
-            animation: "pulse-tech 2s infinite", display: "inline-block",
-          }} />
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: TA, animation: "pulse-tech 2s infinite", display: "inline-block" }} />
           <span style={{ fontSize: 11.5, fontWeight: 600, color: TA, fontFamily: ff }}>
             Active: {myActiveJob.id}
           </span>
@@ -78,20 +85,22 @@ export default function TechNavbar({ activePage }: { activePage: string }) {
         </div>
       )}
 
-      {/* Connection status */}
-      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-        <Wifi size={13} color={TA} />
-        <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff }}>Online</span>
-      </div>
-
-      {/* Clock */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", background: "var(--bg-card)", borderRadius: 8, border: "1px solid var(--border)" }}>
-        <Clock size={12} color="var(--text-muted)" />
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff, fontVariantNumeric: "tabular-nums" }}>
-          {fmtTime(time)}
-        </span>
-        <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff }}>{fmtDate(time)}</span>
-      </div>
+      {/* Connection + Clock — desktop only */}
+      {!isMobile && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <Wifi size={13} color={TA} />
+            <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff }}>Online</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", background: "var(--bg-card)", borderRadius: 8, border: "1px solid var(--border)" }}>
+            <Clock size={12} color="var(--text-muted)" />
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff, fontVariantNumeric: "tabular-nums" }}>
+              {fmtTime(time)}
+            </span>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff }}>{fmtDate(time)}</span>
+          </div>
+        </>
+      )}
 
       <style>{`
         @keyframes pulse-tech {

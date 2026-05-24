@@ -60,10 +60,9 @@ function AdminSelect({ onSelect }: { onSelect: (name: string) => void }) {
 function AdminPageInner() {
   const [adminName, setAdminName]   = useState<string | null>(null);
   const [activePage, setActivePage] = useState<AdminPage>("Dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   if (!adminName) return <AdminSelect onSelect={setAdminName} />;
-
-  const SCROLL_PAGES: AdminPage[] = ["Dashboard", "Staff Management", "Permissions", "Suppliers", "Purchase Orders", "Device Registry", "Notifications", "System Settings"];
 
   return (
     <AdminProvider>
@@ -74,12 +73,14 @@ function AdminPageInner() {
           onNavigate={setActivePage}
           adminName={adminName}
           onLogout={() => setAdminName(null)}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
         />
 
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <AdminNavbar activePage={activePage} />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
+          <AdminNavbar activePage={activePage} onMenuClick={() => setSidebarOpen(true)} />
 
-          <main style={{ flex: 1, overflowY: "auto", padding: "24px 26px 40px", display: "flex", flexDirection: "column" }}>
+          <main className="resp-main" style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
             {activePage === "Dashboard"       && <AdminDashboard />}
             {activePage === "Staff Management"&& <StaffManagement />}
             {activePage === "Permissions"     && <Permissions />}

@@ -93,6 +93,7 @@ function AccountsSelect({ onSelect }: { onSelect: (name: string) => void }) {
 function AccountsPageInner() {
   const [userName, setUserName]     = useState<string | null>(null);
   const [activePage, setActivePage] = useState<AccountsPage>("Dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   if (!userName) {
     return <AccountsSelect onSelect={setUserName} />;
@@ -102,23 +103,19 @@ function AccountsPageInner() {
     <AccountsProvider accountsUser={userName}>
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
 
-        {/* Sidebar */}
         <AccountsSidebar
           activePage={activePage}
           onNavigate={setActivePage}
           userName={userName}
           onLogout={() => setUserName(null)}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
         />
 
-        {/* Main area */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <AccountsNavbar activePage={activePage} />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
+          <AccountsNavbar activePage={activePage} onMenuClick={() => setSidebarOpen(true)} />
 
-          <main style={{
-            flex: 1, overflowY: "auto",
-            padding: "24px 26px 40px",
-            display: "flex", flexDirection: "column",
-          }}>
+          <main className="resp-main" style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
             {activePage === "Dashboard"           && <AccountsDashboard />}
             {activePage === "General Ledger"      && <GeneralLedger />}
             {activePage === "Accounts Receivable" && <AccountsReceivable />}

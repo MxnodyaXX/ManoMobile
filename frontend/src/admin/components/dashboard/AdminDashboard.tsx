@@ -59,7 +59,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* Middle row */}
-      <div className="fade-up" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div className="fade-up resp-grid-2" style={{ gap: 16 }}>
 
         {/* Staff by role */}
         <div style={{ padding: 20, background: "var(--bg-card)", borderRadius: 14, border: "1px solid var(--border)" }}>

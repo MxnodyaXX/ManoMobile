@@ -118,3 +118,88 @@ select option { background: var(--bg-card); color: var(--text-primary); }
   animation: shimmer 1.4s infinite linear;
   border-radius: 6px;
 }
+
+/* ── Sidebar backdrop overlay ─────────────────────────────────────── */
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 49;
+  animation: fadeIn 0.2s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Responsive grid helpers ──────────────────────────────────────── */
+.resp-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; width: 100%; }
+.resp-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; width: 100%; }
+.resp-grid-2 { display: grid; grid-template-columns: 1fr 1fr;        gap: 16px; width: 100%; }
+.resp-grid-2-3 { display: grid; grid-template-columns: 1fr 1fr 1fr;  gap: 16px; width: 100%; }
+
+@media (max-width: 1100px) {
+  .resp-grid-4   { grid-template-columns: repeat(2, 1fr); }
+  .resp-grid-3   { grid-template-columns: repeat(2, 1fr); }
+  .resp-grid-2-3 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .resp-grid-4, .resp-grid-3, .resp-grid-2, .resp-grid-2-3 { grid-template-columns: 1fr; gap: 12px; }
+}
+
+/* ── Responsive main content padding ─────────────────────────────── */
+.resp-main       { padding: 28px 28px 40px; }
+.resp-main-tight { padding: 28px 28px 0; }
+@media (max-width: 768px) {
+  .resp-main       { padding: 16px 16px 32px; }
+  .resp-main-tight { padding: 16px 16px 0; }
+}
+
+/* ── Visibility helpers ───────────────────────────────────────────── */
+@media (max-width: 768px)  { .hide-mobile  { display: none !important; } }
+@media (min-width: 769px)  { .hide-desktop { display: none !important; } }
+@media (max-width: 960px)  { .hide-tablet  { display: none !important; } }
+
+/* ── Prevent iOS input zoom on focus ─────────────────────────────── */
+@media (max-width: 768px) {
+  input[type="text"],
+  input[type="number"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  input[type="tel"],
+  textarea,
+  select { font-size: max(16px, 1em) !important; }
+}
+
+/* ── Horizontal scroll for tables/charts ─────────────────────────── */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+/* ── Hamburger button (show only on mobile) ───────────────────────── */
+.hamburger-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px; height: 40px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s, color 0.15s;
+}
+@media (max-width: 768px) {
+  .hamburger-btn { display: flex; }
+}
+
+/* ── Responsive chart/card min-width ─────────────────────────────── */
+@media (max-width: 768px) {
+  [data-pdf-chart], .recharts-wrapper { min-width: 0 !important; }
+}
