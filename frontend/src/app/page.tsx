@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Wrench, ShoppingCart, Shield, ArrowRight, Smartphone, X, Zap } from "lucide-react";
+import { Wrench, ShoppingCart, Shield, Landmark, ArrowRight, Smartphone, X, Zap } from "lucide-react";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 const TECH_NAMES = ["Kamal", "Nimal", "Suresh"];
@@ -32,6 +32,14 @@ const ROLES = [
     color: "#a78bfa",
     badge: "Admin Only",
   },
+  {
+    id: "accounts",
+    label: "Accounts",
+    sub: "Ledger, AR/AP &\nfinancial reports",
+    icon: Landmark,
+    color: "#f59e0b",
+    badge: "Finance",
+  },
 ];
 
 export default function LoginPage() {
@@ -42,6 +50,8 @@ export default function LoginPage() {
 
   const handleRoleClick = (id: string) => {
     if (id === "technician") { setShowTechPicker(true); return; }
+    if (id === "accounts")   { router.push("/accounts"); return; }
+    if (id === "admin")      { router.push("/admin"); return; }
     router.push("/cashier");
   };
 
@@ -87,7 +97,7 @@ export default function LoginPage() {
         </div>
 
         {/* Role cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, width: "100%" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, width: "100%" }}>
           {ROLES.map(role => {
             const Icon = role.icon;
             const hov = hoveredRole === role.id;

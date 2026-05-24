@@ -3,11 +3,13 @@
 import { useEffect, useState, useRef } from "react";
 import {
   Wrench, Clock, CheckCircle, AlertCircle, PackageCheck,
-  Play, Timer, Layers, TrendingUp, Calendar,
+  Play, Timer, Layers, TrendingUp, Calendar, Package,
 } from "lucide-react";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
 import StatusUpdateModal from "@/technician/components/jobs/StatusUpdateModal";
+import PartRequestModal from "@/technician/components/parts/PartRequestModal";
+import { SPARE_PARTS } from "@/technician/data/partsData";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -38,6 +40,8 @@ export default function TechDashboard() {
   const { technicianName, partRequests, jobMeta, getElapsedMinutes } = useTech();
   const [, tick] = useState(0);
   const [statusModalJob, setStatusModalJob] = useState<string | null>(null);
+  const [showPartReq, setShowPartReq] = useState(false);
+  const [showPartsView, setShowPartsView] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const myJobs = jobs.filter(j => j.technician === technicianName);
@@ -63,7 +67,13 @@ export default function TechDashboard() {
 
   const pendingJobs  = myJobs.filter(j => j.status === "Pending");
   const notStarted   = myJobs.filter(j => j.status === "Non-Issued").slice(0, 3);
-  const approvedParts = partRequests.filter(r => r.status === "Approved");
+
+  const REQ_CFG: Record<string, { color: string; bg: string; border: string }> = {
+    Pending:  { color: "#fbbf24", bg: "rgba(251,191,36,0.08)",  border: "rgba(251,191,36,0.2)"  },
+    Approved: { color: TA,        bg: `${TA}10`,                border: `${TA}28`               },
+    Issued:   { color: "#60a5fa", bg: "rgba(96,165,250,0.08)",  border: "rgba(96,165,250,0.2)"  },
+    Rejected: { color: "#f87171", bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.2)" },
+  };
 
   const activeJobModal = statusModalJob ? myJobs.find(j => j.id === statusModalJob) : null;
 
@@ -85,54 +95,93 @@ export default function TechDashboard() {
         const meta = jobMeta[activeJob.id];
         const elapsed = meta?.startedAt ? fmtElapsed(meta.startedAt) : "00:00";
         const pc = PRIORITY_CFG[activeJob.priority];
+        const jobParts = partRequests.filter(r => r.jobId === activeJob.id);
+        const REQ_CFG: Record<string, { color: string; bg: string; border: string }> = {
+          Pending:  { color: "#fbbf24", bg: "rgba(251,191,36,0.12)",  border: "rgba(251,191,36,0.3)"  },
+          Approved: { color: TA,        bg: `${TA}18`,                border: `${TA}35`               },
+          Issued:   { color: "#60a5fa", bg: "rgba(96,165,250,0.12)",  border: "rgba(96,165,250,0.3)"  },
+          Rejected: { color: "#f87171", bg: "rgba(248,113,113,0.12)", border: "rgba(248,113,113,0.3)" },
+        };
         return (
           <div className="fade-up" style={{
             background: `linear-gradient(135deg, ${TA}12 0%, ${TA}06 100%)`,
             border: `1px solid ${TA}35`,
             borderRadius: 16, padding: "20px 22px",
-            display: "flex", alignItems: "center", gap: 18,
+            display: "flex", flexDirection: "column", gap: 0,
           }}>
-            <div style={{
-              width: 52, height: 52, borderRadius: 14,
-              background: `${TA}18`, border: `1px solid ${TA}35`,
-              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-            }}>
-              <Wrench size={22} color={TA} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
-                <span style={{ width: 7, height: 7, borderRadius: "50%", background: TA, animation: "pulse-tech 2s infinite", display: "inline-block" }} />
-                <span style={{ fontSize: 11, fontWeight: 700, color: TA, letterSpacing: "0.07em", textTransform: "uppercase", fontFamily: ff }}>ACTIVE JOB</span>
+            {/* Main row */}
+            <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+              <div style={{
+                width: 52, height: 52, borderRadius: 14,
+                background: `${TA}18`, border: `1px solid ${TA}35`,
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+              }}>
+                <Wrench size={22} color={TA} />
               </div>
-              <p style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)", marginBottom: 3, fontFamily: ff }}>
-                {activeJob.brand} {activeJob.model} — {activeJob.issue}
-              </p>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff }}>
-                  <strong style={{ color: "var(--text-secondary)" }}>{activeJob.id}</strong> · {activeJob.customerName}
-                </span>
-                <span style={{
-                  fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5,
-                  background: pc.bg, color: pc.color, fontFamily: ff,
-                }}>
-                  {activeJob.priority}
-                </span>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: TA, animation: "pulse-tech 2s infinite", display: "inline-block" }} />
+                  <span style={{ fontSize: 11, fontWeight: 700, color: TA, letterSpacing: "0.07em", textTransform: "uppercase", fontFamily: ff }}>ACTIVE JOB</span>
+                </div>
+                <p style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)", marginBottom: 3, fontFamily: ff }}>
+                  {activeJob.brand} {activeJob.model} — {activeJob.issue}
+                </p>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff }}>
+                    <strong style={{ color: "var(--text-secondary)" }}>{activeJob.id}</strong> · {activeJob.customerName}
+                  </span>
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5,
+                    background: pc.bg, color: pc.color, fontFamily: ff,
+                  }}>
+                    {activeJob.priority}
+                  </span>
+                </div>
               </div>
+              <div style={{ textAlign: "center", padding: "0 10px", borderLeft: `1px solid ${TA}22` }}>
+                <p style={{ fontSize: 28, fontWeight: 800, color: TA, fontFamily: ff, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{elapsed}</p>
+                <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff }}>Time on job</p>
+              </div>
+              {jobParts.length > 0 && (
+                <button
+                  onClick={() => setShowPartsView(true)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "9px 14px", borderRadius: 9, fontSize: 12.5, fontWeight: 600,
+                    background: "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.3)", color: "#a78bfa",
+                    cursor: "pointer", fontFamily: ff, flexShrink: 0,
+                  }}
+                >
+                  <Package size={14} />
+                  {jobParts.length} Part{jobParts.length > 1 ? "s" : ""}
+                  <span style={{ fontSize: 10, fontWeight: 700, background: "rgba(167,139,250,0.2)", borderRadius: 20, padding: "1px 6px" }}>
+                    Rs. {jobParts.reduce((sum, r) => sum + (SPARE_PARTS.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0).toLocaleString()}
+                  </span>
+                </button>
+              )}
+              <button
+                onClick={() => setShowPartReq(true)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "9px 16px", borderRadius: 9, fontSize: 12.5, fontWeight: 600,
+                  background: `${TA}14`, border: `1px solid ${TA}35`, color: TA,
+                  cursor: "pointer", fontFamily: ff, flexShrink: 0,
+                }}
+              >
+                <Package size={14} />
+                Request Parts
+              </button>
+              <button
+                onClick={() => setStatusModalJob(activeJob.id)}
+                style={{
+                  padding: "9px 16px", borderRadius: 9, fontSize: 12.5, fontWeight: 600,
+                  background: TA, border: "none", color: "#000",
+                  cursor: "pointer", fontFamily: ff, flexShrink: 0,
+                }}
+              >
+                Update Status
+              </button>
             </div>
-            <div style={{ textAlign: "center", padding: "0 10px", borderLeft: `1px solid ${TA}22` }}>
-              <p style={{ fontSize: 28, fontWeight: 800, color: TA, fontFamily: ff, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{elapsed}</p>
-              <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff }}>Time on job</p>
-            </div>
-            <button
-              onClick={() => setStatusModalJob(activeJob.id)}
-              style={{
-                padding: "9px 16px", borderRadius: 9, fontSize: 12.5, fontWeight: 600,
-                background: TA, border: "none", color: "#000",
-                cursor: "pointer", fontFamily: ff, flexShrink: 0,
-              }}
-            >
-              Update Status
-            </button>
           </div>
         );
       })() : (
@@ -208,30 +257,43 @@ export default function TechDashboard() {
           </div>
         </div>
 
-        {/* Approved parts + Upcoming jobs */}
+        {/* Part Requests + Up Next */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-          {/* Approved parts notification */}
-          {approvedParts.length > 0 && (
-            <div style={{
-              background: `${TA}08`, border: `1px solid ${TA}25`,
-              borderRadius: 14, padding: "14px 16px",
-              display: "flex", flexDirection: "column", gap: 10,
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <CheckCircle size={14} color={TA} />
-                <p style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>
-                  {approvedParts.length} Part{approvedParts.length > 1 ? "s" : ""} Ready for Collection
-                </p>
-              </div>
-              {approvedParts.map(r => (
-                <div key={r.id} style={{ padding: "8px 10px", background: `${TA}08`, borderRadius: 8, border: `1px solid ${TA}20` }}>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff }}>{r.partName}</p>
-                  <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff }}>For job {r.jobId} · Qty {r.quantity}</p>
-                </div>
-              ))}
+          {/* Part Requests card */}
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+            <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
+              <Package size={14} color="#a78bfa" />
+              <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Part Requests</p>
+              {partRequests.length > 0 && (
+                <span style={{ fontSize: 10, fontWeight: 700, background: "rgba(167,139,250,0.12)", color: "#a78bfa", border: "1px solid rgba(167,139,250,0.25)", borderRadius: 20, padding: "2px 7px", fontFamily: ff, marginLeft: "auto" }}>
+                  {partRequests.length}
+                </span>
+              )}
             </div>
-          )}
+            <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+              {partRequests.length === 0 ? (
+                <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff, padding: "8px 4px" }}>No part requests yet</p>
+              ) : partRequests.map(r => {
+                const rc = REQ_CFG[r.status] ?? REQ_CFG.Pending;
+                return (
+                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", background: "var(--bg-secondary)", borderRadius: 9, border: "1px solid var(--border)" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {r.partName}
+                      </p>
+                      <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, marginTop: 1 }}>
+                        {r.jobId} · Qty {r.quantity}
+                      </p>
+                    </div>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 20, color: rc.color, background: rc.bg, border: `1px solid ${rc.border}`, fontFamily: ff, flexShrink: 0 }}>
+                      {r.status}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
           {/* Not started yet */}
           <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden", flex: 1 }}>
@@ -286,6 +348,92 @@ export default function TechDashboard() {
       {statusModalJob && activeJobModal && (
         <StatusUpdateModal job={activeJobModal} onClose={() => setStatusModalJob(null)} />
       )}
+
+      {showPartReq && activeJob && (
+        <PartRequestModal job={activeJob} onClose={() => setShowPartReq(false)} />
+      )}
+
+      {/* Parts view modal */}
+      {showPartsView && activeJob && (() => {
+        const jobParts = partRequests.filter(r => r.jobId === activeJob.id);
+        const RC: Record<string, { color: string; bg: string; border: string }> = {
+          Pending:  { color: "#fbbf24", bg: "rgba(251,191,36,0.1)",  border: "rgba(251,191,36,0.25)"  },
+          Approved: { color: TA,        bg: `${TA}10`,               border: `${TA}28`                },
+          Issued:   { color: "#60a5fa", bg: "rgba(96,165,250,0.1)",  border: "rgba(96,165,250,0.25)"  },
+          Rejected: { color: "#f87171", bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.25)" },
+        };
+        const totalCost = jobParts.reduce((sum, r) => sum + (SPARE_PARTS.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+        return (
+          <>
+            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 60 }} onClick={() => setShowPartsView(false)} />
+            <div style={{
+              position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+              width: 580, maxHeight: "80vh", background: "var(--bg-card)",
+              borderRadius: 16, border: "1px solid var(--border)",
+              display: "flex", flexDirection: "column",
+              zIndex: 61, boxShadow: "0 24px 64px rgba(0,0,0,0.5)", fontFamily: ff,
+            }}>
+              {/* Header */}
+              <div style={{ padding: "18px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <Package size={16} color="#a78bfa" />
+                  <div>
+                    <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Requested Parts</p>
+                    <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff }}>{activeJob.id} · {activeJob.brand} {activeJob.model}</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowPartsView(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}>✕</button>
+              </div>
+
+              {/* Table */}
+              <div style={{ flex: 1, overflowY: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                  <thead>
+                    <tr style={{ background: "var(--bg-secondary)", borderBottom: "1px solid var(--border)" }}>
+                      {["Part", "SKU", "Qty", "Status", "Unit Cost", "Total"].map(h => (
+                        <th key={h} style={{ padding: "9px 14px", textAlign: "left", fontSize: 10.5, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600, whiteSpace: "nowrap", fontFamily: ff }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {jobParts.map((r, i) => {
+                      const unitCost = SPARE_PARTS.find(p => p.sku === r.partSku)?.costPrice ?? 0;
+                      const rc = RC[r.status] ?? RC.Pending;
+                      return (
+                        <tr key={r.id} style={{ borderBottom: "1px solid var(--border)", background: i % 2 === 0 ? "transparent" : "var(--bg-secondary)" }}>
+                          <td style={{ padding: "11px 14px", color: "var(--text-primary)", fontWeight: 600, fontFamily: ff }}>{r.partName}</td>
+                          <td style={{ padding: "11px 14px", color: "var(--text-muted)", fontFamily: ff, whiteSpace: "nowrap" }}>{r.partSku}</td>
+                          <td style={{ padding: "11px 14px", color: "var(--text-primary)", fontFamily: ff, textAlign: "center" }}>{r.quantity}</td>
+                          <td style={{ padding: "11px 14px" }}>
+                            <span style={{ fontSize: 10.5, fontWeight: 700, padding: "3px 8px", borderRadius: 20, color: rc.color, background: rc.bg, border: `1px solid ${rc.border}`, fontFamily: ff }}>
+                              {r.status}
+                            </span>
+                          </td>
+                          <td style={{ padding: "11px 14px", color: "var(--text-secondary)", fontFamily: ff, whiteSpace: "nowrap" }}>
+                            {unitCost > 0 ? `Rs. ${unitCost.toLocaleString()}` : "—"}
+                          </td>
+                          <td style={{ padding: "11px 14px", fontWeight: 700, color: "var(--text-primary)", fontFamily: ff, whiteSpace: "nowrap" }}>
+                            {unitCost > 0 ? `Rs. ${(unitCost * r.quantity).toLocaleString()}` : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Footer total */}
+              <div style={{ padding: "14px 20px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff }}>{jobParts.length} part request{jobParts.length > 1 ? "s" : ""}</p>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff }}>Total Parts Cost</p>
+                  <p style={{ fontSize: 16, fontWeight: 800, color: TA, fontFamily: ff }}>Rs. {totalCost.toLocaleString()}</p>
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      })()}
 
       <style>{`@keyframes pulse-tech { 0%,100%{opacity:1} 50%{opacity:.4} }`}</style>
     </div>

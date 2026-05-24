@@ -1,0 +1,97 @@
+"use client";
+
+import { LayoutDashboard, BookOpen, ArrowDownCircle, ArrowUpCircle, FileBarChart2, LogOut, Landmark } from "lucide-react";
+
+export type AccountsPage = "Dashboard" | "General Ledger" | "Accounts Receivable" | "Accounts Payable" | "Financial Reports";
+
+const NAV_ITEMS: { id: AccountsPage; icon: any; label: string }[] = [
+  { id: "Dashboard",          icon: LayoutDashboard,  label: "Dashboard"           },
+  { id: "General Ledger",     icon: BookOpen,          label: "General Ledger"      },
+  { id: "Accounts Receivable",icon: ArrowDownCircle,   label: "Receivables"         },
+  { id: "Accounts Payable",   icon: ArrowUpCircle,     label: "Payables"            },
+  { id: "Financial Reports",  icon: FileBarChart2,     label: "Financial Reports"   },
+];
+
+const AA = "#f59e0b"; // accounts accent — amber/gold
+const ff = "'Plus Jakarta Sans', sans-serif";
+
+interface Props {
+  activePage: AccountsPage;
+  onNavigate: (p: AccountsPage) => void;
+  userName: string;
+  onLogout: () => void;
+  badges?: Partial<Record<AccountsPage, number>>;
+}
+
+export default function AccountsSidebar({ activePage, onNavigate, userName, onLogout, badges = {} }: Props) {
+  return (
+    <aside style={{
+      width: 224, background: "var(--bg-secondary)", borderRight: "1px solid var(--border)",
+      display: "flex", flexDirection: "column", height: "100vh", flexShrink: 0, fontFamily: ff,
+    }}>
+      {/* Logo */}
+      <div style={{ padding: "20px 18px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ width: 32, height: 32, borderRadius: 9, background: `${AA}14`, border: `1px solid ${AA}30`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Landmark size={15} color={AA} />
+        </div>
+        <div>
+          <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Mano Mobile</p>
+          <p style={{ fontSize: 10, color: AA, fontWeight: 600, fontFamily: ff, letterSpacing: "0.04em" }}>ACCOUNTS</p>
+        </div>
+      </div>
+
+      {/* Nav */}
+      <nav style={{ flex: 1, padding: "10px 10px 0", overflowY: "auto" }}>
+        {NAV_ITEMS.map(({ id, icon: Icon, label }) => {
+          const active = activePage === id;
+          const badge  = badges[id];
+          return (
+            <button
+              key={id}
+              onClick={() => onNavigate(id)}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 9,
+                padding: "9px 12px", borderRadius: 9,
+                border: active ? `1px solid ${AA}30` : "1px solid transparent",
+                background: active ? `${AA}0e` : "transparent",
+                cursor: "pointer", textAlign: "left", transition: "all 0.15s",
+                marginBottom: 3, fontFamily: ff,
+              }}
+              onMouseEnter={e => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-card)"; }}
+              onMouseLeave={e => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              <Icon size={15} strokeWidth={active ? 2.4 : 1.8} color={active ? AA : "var(--text-muted)"} style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: 13, fontWeight: active ? 600 : 400, color: active ? "var(--text-primary)" : "var(--text-secondary)", flex: 1, fontFamily: ff }}>
+                {label}
+              </span>
+              {badge !== undefined && badge > 0 && (
+                <span style={{ fontSize: 10, fontWeight: 700, background: active ? AA : `${AA}20`, color: active ? "#000" : AA, borderRadius: 20, padding: "2px 7px", minWidth: 20, textAlign: "center", fontFamily: ff }}>
+                  {badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* User identity + logout */}
+      <div style={{ padding: "12px 14px", borderTop: "1px solid var(--border)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px", background: "var(--bg-card)", borderRadius: 10, border: "1px solid var(--border)" }}>
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: `${AA}14`, border: `1px solid ${AA}25`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: AA, fontFamily: ff, flexShrink: 0 }}>
+            {userName[0]}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{userName}</p>
+            <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff }}>Accounts Officer</p>
+          </div>
+          <button onClick={onLogout} title="Log out" style={{ background: "none", border: "none", cursor: "pointer", padding: 5, borderRadius: 6, color: "var(--text-muted)", flexShrink: 0 }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = "#f87171"; (e.currentTarget as HTMLButtonElement).style.background = "rgba(248,113,113,0.1)"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = "var(--text-muted)"; (e.currentTarget as HTMLButtonElement).style.background = "none"; }}
+          >
+            <LogOut size={14} />
+          </button>
+        </div>
+      </div>
+    </aside>
+  );
+}

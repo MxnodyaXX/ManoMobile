@@ -1,14 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import {
   Search, Play, Pause, CheckCircle, Clock,
   AlertTriangle, Filter, Wrench, User, Phone,
   ChevronDown, MoreVertical, Calendar, DollarSign,
+  Package, FileText, Activity, MessageCircle, AlertOctagon, ClipboardCheck,
 } from "lucide-react";
 import { useRepair, type RepairJob, type JobStatus } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
+import { SPARE_PARTS } from "@/technician/data/partsData";
 import StatusUpdateModal from "@/technician/components/jobs/StatusUpdateModal";
+import PartRequestModal from "@/technician/components/parts/PartRequestModal";
+import DiagnosticModal from "@/technician/components/jobs/DiagnosticModal";
+import ActivityLogPanel from "@/technician/components/jobs/ActivityLogPanel";
+import InternalNotesModal from "@/technician/components/jobs/InternalNotesModal";
+import EscalationModal from "@/technician/components/jobs/EscalationModal";
+import CustomerMessageModal from "@/technician/components/jobs/CustomerMessageModal";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -31,6 +39,29 @@ const PRIORITY_CFG = {
   Urgent: { color: "#f87171", dot: "#f87171" },
 };
 
+// ─── SLA helpers ─────────────────────────────────────────────────────────────
+
+function getDaysUntilDue(estimatedCompletion: string): number {
+  const due = new Date(estimatedCompletion + "T23:59:59");
+  return Math.ceil((due.getTime() - Date.now()) / 86_400_000);
+}
+
+function getSlaStatus(job: RepairJob): "overdue" | "due-today" | "due-soon" | "ok" {
+  if (["Completed", "Delivered", "Cancelled"].includes(job.status)) return "ok";
+  const days = getDaysUntilDue(job.estimatedCompletion);
+  if (days < 0) return "overdue";
+  if (days === 0) return "due-today";
+  if (days <= 2) return "due-soon";
+  return "ok";
+}
+
+const SLA_CFG = {
+  overdue:   { color: "#f87171", bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.25)", label: "Overdue"   },
+  "due-today":{ color: "#f97316", bg: "rgba(249,115,22,0.1)", border: "rgba(249,115,22,0.25)", label: "Due Today" },
+  "due-soon": { color: "#fbbf24", bg: "rgba(251,191,36,0.1)", border: "rgba(251,191,36,0.25)", label: "Due Soon"  },
+  ok:         { color: TA,        bg: `${TA}10`,              border: `${TA}28`,                label: "On Track"  },
+};
+
 type FilterTab = "All" | "Active" | "Paused" | "Not Started" | "Completed";
 const FILTER_TABS: FilterTab[] = ["All", "Active", "Paused", "Not Started", "Completed"];
 
@@ -44,7 +75,7 @@ const STATUS_FOR_FILTER: Record<FilterTab, JobStatus[]> = {
 
 // ─── Job Detail Panel ─────────────────────────────────────────────────────────
 
-function JobDetailPanel({ job, onClose, onStatusUpdate }: { job: RepairJob; onClose: () => void; onStatusUpdate: () => void }) {
+function JobDetailPanel({ job, onClose, onStatusUpdate, onRequestParts }: { job: RepairJob; onClose: () => void; onStatusUpdate: () => void; onRequestParts?: () => void }) {
   const { jobMeta, partRequests, getElapsedMinutes } = useTech();
   const meta = jobMeta[job.id];
   const myRequests = partRequests.filter(r => r.jobId === job.id);
@@ -155,7 +186,20 @@ function JobDetailPanel({ job, onClose, onStatusUpdate }: { job: RepairJob; onCl
 
       {/* Action footer */}
       {["Non-Issued", "Issued", "Pending"].includes(job.status) && (
-        <div style={{ padding: "14px 18px", borderTop: "1px solid var(--border)" }}>
+        <div style={{ padding: "14px 18px", borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 8 }}>
+          {job.status === "Issued" && onRequestParts && (
+            <button
+              onClick={() => { onClose(); onRequestParts(); }}
+              style={{
+                width: "100%", padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 600,
+                background: "rgba(52,211,153,0.1)", border: `1px solid ${TA}40`, color: TA,
+                cursor: "pointer", fontFamily: ff, display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+              }}
+            >
+              <Package size={14} />
+              Request Parts
+            </button>
+          )}
           <button
             onClick={() => { onClose(); onStatusUpdate(); }}
             style={{
@@ -176,14 +220,20 @@ function JobDetailPanel({ job, onClose, onStatusUpdate }: { job: RepairJob; onCl
 
 export default function MyJobs() {
   const { jobs } = useRepair();
-  const { technicianName } = useTech();
+  const { technicianName, partRequests, diagnostics, notes, activityLog, escalations } = useTech();
 
   const [search, setSearch]             = useState("");
   const [filterTab, setFilterTab]       = useState<FilterTab>("All");
   const [priorityFilter, setPriorityFilter] = useState<string>("All");
-  const [detailJobId, setDetailJobId]   = useState<string | null>(null);
+  const [detailJobId, setDetailJobId]     = useState<string | null>(null);
   const [statusModalId, setStatusModalId] = useState<string | null>(null);
-  const [expandedId, setExpandedId]     = useState<string | null>(null);
+  const [expandedId, setExpandedId]       = useState<string | null>(null);
+  const [partReqJob, setPartReqJob]       = useState<RepairJob | null>(null);
+  const [diagnosticJob, setDiagnosticJob] = useState<RepairJob | null>(null);
+  const [activityJob, setActivityJob]     = useState<RepairJob | null>(null);
+  const [notesJob, setNotesJob]           = useState<RepairJob | null>(null);
+  const [escalationJob, setEscalationJob] = useState<RepairJob | null>(null);
+  const [messageJob, setMessageJob]       = useState<RepairJob | null>(null);
 
   const { jobMeta } = useTech();
 
@@ -356,9 +406,8 @@ export default function MyJobs() {
               const isExpanded = expandedId === job.id;
 
               return (
-                <>
+                <React.Fragment key={job.id}>
                   <tr
-                    key={job.id}
                     style={{
                       borderBottom: "1px solid var(--border)",
                       background: job.status === "Issued" ? `${TA}04` : i % 2 === 0 ? "transparent" : "var(--bg-secondary)",
@@ -406,47 +455,70 @@ export default function MyJobs() {
                       <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>
                         Rs. {job.estimatedCost.toLocaleString()}
                       </span>
+                      {(() => {
+                        const jobReqs = partRequests.filter(r => r.jobId === job.id);
+                        if (jobReqs.length === 0) return null;
+                        const partsCost = jobReqs.reduce((s, r) => s + (SPARE_PARTS.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+                        return (
+                          <p style={{ fontSize: 10.5, color: "#a78bfa", fontFamily: ff, marginTop: 2 }}>
+                            +Rs. {partsCost.toLocaleString()} parts
+                          </p>
+                        );
+                      })()}
                     </td>
 
-                    {/* Status */}
+                    {/* Status + SLA */}
                     <td style={{ padding: "11px 14px" }}>
-                      <span style={{
-                        fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 6,
-                        color: sCfg.color, background: sCfg.bg, border: `1px solid ${sCfg.border}`,
-                        whiteSpace: "nowrap", fontFamily: ff,
-                      }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 6, color: sCfg.color, background: sCfg.bg, border: `1px solid ${sCfg.border}`, whiteSpace: "nowrap", fontFamily: ff }}>
                         {sCfg.label}
                       </span>
+                      {(() => {
+                        const sla = getSlaStatus(job);
+                        if (sla === "ok") return null;
+                        const sc = SLA_CFG[sla];
+                        const days = getDaysUntilDue(job.estimatedCompletion);
+                        return (
+                          <p style={{ fontSize: 10, fontWeight: 700, color: sc.color, fontFamily: ff, marginTop: 3 }}>
+                            {sla === "overdue" ? `${Math.abs(days)}d overdue` : sla === "due-today" ? "Due today" : `Due in ${days}d`}
+                          </p>
+                        );
+                      })()}
                     </td>
 
                     {/* Actions */}
                     <td style={{ padding: "11px 14px" }} onClick={e => e.stopPropagation()}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                         {qa && (
-                          <button
-                            onClick={() => setStatusModalId(job.id)}
-                            style={{
-                              display: "flex", alignItems: "center", gap: 5,
-                              padding: "5px 10px", borderRadius: 7, fontSize: 11.5,
-                              fontWeight: 600, background: `${qa.color}12`,
-                              border: `1px solid ${qa.color}30`, color: qa.color,
-                              cursor: "pointer", fontFamily: ff, whiteSpace: "nowrap",
-                              transition: "all 0.15s",
-                            }}
-                          >
-                            <qa.icon size={11} />
-                            {qa.label}
+                          <button onClick={() => setStatusModalId(job.id)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, background: `${qa.color}12`, border: `1px solid ${qa.color}30`, color: qa.color, cursor: "pointer", fontFamily: ff, whiteSpace: "nowrap", transition: "all 0.15s" }}>
+                            <qa.icon size={11} />{qa.label}
                           </button>
                         )}
-                        <button
-                          onClick={() => setDetailJobId(job.id)}
-                          style={{
-                            padding: "5px 7px", borderRadius: 7, background: "none",
-                            border: "1px solid var(--border)", color: "var(--text-muted)",
-                            cursor: "pointer",
-                          }}
-                          title="View details"
-                        >
+                        {/* Diagnostic button for not-started */}
+                        {job.status === "Non-Issued" && (
+                          <button onClick={() => setDiagnosticJob(job)} title="Pre-repair diagnostic" style={{ padding: "5px 7px", borderRadius: 7, background: diagnostics[job.id] ? `${TA}12` : "none", border: `1px solid ${diagnostics[job.id] ? TA + "30" : "var(--border)"}`, color: diagnostics[job.id] ? TA : "var(--text-muted)", cursor: "pointer" }}>
+                            <ClipboardCheck size={13} />
+                          </button>
+                        )}
+                        {/* Notes */}
+                        <button onClick={() => setNotesJob(job)} title="Repair notes" style={{ padding: "5px 7px", borderRadius: 7, background: (notes[job.id]?.length ?? 0) > 0 ? "rgba(251,191,36,0.1)" : "none", border: `1px solid ${(notes[job.id]?.length ?? 0) > 0 ? "rgba(251,191,36,0.3)" : "var(--border)"}`, color: (notes[job.id]?.length ?? 0) > 0 ? "#fbbf24" : "var(--text-muted)", cursor: "pointer", position: "relative" }}>
+                          <FileText size={13} />
+                          {(notes[job.id]?.length ?? 0) > 0 && <span style={{ position: "absolute", top: -4, right: -4, width: 14, height: 14, borderRadius: "50%", background: "#fbbf24", fontSize: 8, fontWeight: 700, color: "#000", display: "flex", alignItems: "center", justifyContent: "center" }}>{notes[job.id].length}</span>}
+                        </button>
+                        {/* Activity */}
+                        <button onClick={() => setActivityJob(job)} title="Activity log" style={{ padding: "5px 7px", borderRadius: 7, background: (activityLog[job.id]?.length ?? 0) > 0 ? "rgba(96,165,250,0.1)" : "none", border: `1px solid ${(activityLog[job.id]?.length ?? 0) > 0 ? "rgba(96,165,250,0.3)" : "var(--border)"}`, color: (activityLog[job.id]?.length ?? 0) > 0 ? "#60a5fa" : "var(--text-muted)", cursor: "pointer" }}>
+                          <Activity size={13} />
+                        </button>
+                        {/* Message */}
+                        <button onClick={() => setMessageJob(job)} title="Message customer" style={{ padding: "5px 7px", borderRadius: 7, background: "none", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" }}>
+                          <MessageCircle size={13} />
+                        </button>
+                        {/* Escalation */}
+                        {!["Completed", "Delivered", "Cancelled"].includes(job.status) && (
+                          <button onClick={() => setEscalationJob(job)} title={escalations.some(e => e.jobId === job.id && !e.resolved) ? "Active escalation" : "Raise escalation"} style={{ padding: "5px 7px", borderRadius: 7, background: escalations.some(e => e.jobId === job.id && !e.resolved) ? "rgba(248,113,113,0.1)" : "none", border: `1px solid ${escalations.some(e => e.jobId === job.id && !e.resolved) ? "rgba(248,113,113,0.3)" : "var(--border)"}`, color: escalations.some(e => e.jobId === job.id && !e.resolved) ? "#f87171" : "var(--text-muted)", cursor: "pointer" }}>
+                            <AlertOctagon size={13} />
+                          </button>
+                        )}
+                        <button onClick={() => setDetailJobId(job.id)} title="View details" style={{ padding: "5px 7px", borderRadius: 7, background: "none", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" }}>
                           <MoreVertical size={13} />
                         </button>
                       </div>
@@ -456,6 +528,9 @@ export default function MyJobs() {
                   {/* Expanded detail row */}
                   {isExpanded && (() => {
                     const meta = jobMeta[job.id];
+                    const jobReqs = partRequests.filter(r => r.jobId === job.id);
+                    const partsCost = jobReqs.reduce((s, r) => s + (SPARE_PARTS.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+                    const REQ_COLORS: Record<string, string> = { Pending: "#fbbf24", Approved: TA, Issued: "#60a5fa", Rejected: "#f87171" };
                     return (
                       <tr key={`${job.id}-expanded`} style={{ borderBottom: "1px solid var(--border)", background: job.status === "Issued" ? `${TA}06` : "var(--bg-secondary)" }}>
                         <td colSpan={8} style={{ padding: "10px 14px 12px 40px" }}>
@@ -483,12 +558,42 @@ export default function MyJobs() {
                                 <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: ff }}>{job.phone}</p>
                               </div>
                             </div>
+                            {jobReqs.length > 0 && (
+                              <div style={{ flex: 1 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                                  <p style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: ff }}>Parts Requested</p>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: "#a78bfa", background: "rgba(167,139,250,0.12)", border: "1px solid rgba(167,139,250,0.25)", borderRadius: 20, padding: "1px 6px", fontFamily: ff }}>
+                                    Rs. {partsCost.toLocaleString()}
+                                  </span>
+                                </div>
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                  {jobReqs.map(r => (
+                                    <span key={r.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, padding: "3px 9px", borderRadius: 20, background: "var(--bg-card)", border: "1px solid var(--border)", fontFamily: ff }}>
+                                      <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{r.partName}</span>
+                                      <span style={{ color: "var(--text-muted)" }}>× {r.quantity}</span>
+                                      <span style={{ color: REQ_COLORS[r.status] ?? TA, fontWeight: 700 }}>· {r.status}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {job.status === "Issued" && (
+                              <div style={{ marginLeft: "auto" }}>
+                                <button
+                                  onClick={e => { e.stopPropagation(); setPartReqJob(job); setExpandedId(null); }}
+                                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, background: `${TA}10`, border: `1px solid ${TA}30`, color: TA, cursor: "pointer", fontFamily: ff }}
+                                >
+                                  <Package size={12} />
+                                  Request Parts
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </td>
                       </tr>
                     );
                   })()}
-                </>
+                </React.Fragment>
               );
             })}
           </tbody>
@@ -506,6 +611,7 @@ export default function MyJobs() {
             job={detailJob}
             onClose={() => setDetailJobId(null)}
             onStatusUpdate={() => { setDetailJobId(null); setStatusModalId(detailJob.id); }}
+            onRequestParts={() => { setDetailJobId(null); setPartReqJob(detailJob); }}
           />
         </>
       )}
@@ -515,6 +621,54 @@ export default function MyJobs() {
         <StatusUpdateModal
           job={statusModalJob}
           onClose={() => setStatusModalId(null)}
+        />
+      )}
+
+      {/* Part request modal */}
+      {partReqJob && (
+        <PartRequestModal
+          job={partReqJob}
+          onClose={() => setPartReqJob(null)}
+        />
+      )}
+
+      {/* Diagnostic modal */}
+      {diagnosticJob && (
+        <DiagnosticModal
+          job={diagnosticJob}
+          onClose={() => setDiagnosticJob(null)}
+        />
+      )}
+
+      {/* Activity log panel */}
+      {activityJob && (
+        <ActivityLogPanel
+          job={activityJob}
+          onClose={() => setActivityJob(null)}
+        />
+      )}
+
+      {/* Internal notes modal */}
+      {notesJob && (
+        <InternalNotesModal
+          job={notesJob}
+          onClose={() => setNotesJob(null)}
+        />
+      )}
+
+      {/* Escalation modal */}
+      {escalationJob && (
+        <EscalationModal
+          job={escalationJob}
+          onClose={() => setEscalationJob(null)}
+        />
+      )}
+
+      {/* Customer message modal */}
+      {messageJob && (
+        <CustomerMessageModal
+          job={messageJob}
+          onClose={() => setMessageJob(null)}
         />
       )}
 

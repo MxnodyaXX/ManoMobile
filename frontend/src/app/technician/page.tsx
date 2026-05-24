@@ -11,6 +11,8 @@ import TechDashboard from "@/technician/components/dashboard/TechDashboard";
 import MyJobs        from "@/technician/components/jobs/MyJobs";
 import PendingCollection from "@/technician/components/collection/PendingCollection";
 import PartsAvailability from "@/technician/components/parts/PartsAvailability";
+import MyPerformance from "@/technician/components/performance/MyPerformance";
+import ShiftTracker  from "@/technician/components/shift/ShiftTracker";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -159,7 +161,7 @@ function TechPageInner() {
     return <TechSelect onSelect={setTechName} />;
   }
 
-  const MANAGED_PAGES: TechPage[] = ["My Jobs", "Pending Collection", "Parts & Stock", "Job History"];
+  const MANAGED_PAGES: TechPage[] = ["My Jobs", "Pending Collection", "Parts & Stock", "Job History", "My Performance", "My Shift"];
   const isManaged = MANAGED_PAGES.includes(activePage);
 
   return (
@@ -192,6 +194,8 @@ function TechPageInner() {
             {activePage === "Pending Collection" && <PendingCollection />}
             {activePage === "Parts & Stock"      && <PartsAvailability />}
             {activePage === "Job History"        && <JobHistory techName={techName} />}
+            {activePage === "My Performance"     && <MyPerformance />}
+            {activePage === "My Shift"           && <ShiftTracker />}
           </main>
         </div>
       </div>

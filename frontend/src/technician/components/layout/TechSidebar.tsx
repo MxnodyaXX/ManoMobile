@@ -1,8 +1,8 @@
 "use client";
 
-import { LayoutDashboard, ClipboardList, PackageCheck, Layers, History, LogOut, Wrench } from "lucide-react";
+import { LayoutDashboard, ClipboardList, PackageCheck, Layers, History, LogOut, Wrench, TrendingUp, Timer } from "lucide-react";
 
-export type TechPage = "Dashboard" | "My Jobs" | "Pending Collection" | "Parts & Stock" | "Job History";
+export type TechPage = "Dashboard" | "My Jobs" | "Pending Collection" | "Parts & Stock" | "Job History" | "My Performance" | "My Shift";
 
 const NAV_ITEMS: { id: TechPage; icon: any; label: string }[] = [
   { id: "Dashboard",          icon: LayoutDashboard, label: "Dashboard"          },
@@ -10,6 +10,8 @@ const NAV_ITEMS: { id: TechPage; icon: any; label: string }[] = [
   { id: "Pending Collection", icon: PackageCheck,    label: "Pending Collection" },
   { id: "Parts & Stock",      icon: Layers,          label: "Parts & Stock"      },
   { id: "Job History",        icon: History,         label: "Job History"        },
+  { id: "My Performance",     icon: TrendingUp,      label: "My Performance"     },
+  { id: "My Shift",           icon: Timer,           label: "My Shift"           },
 ];
 
 const TA = "#34d399"; // tech accent
