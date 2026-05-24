@@ -133,7 +133,7 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
     { label: "Actual Closing",       amount: 103200, type: "neutral" as const },
   ];
 
-  const variance = -200;
+  const variance: number = -200;
   const totalRevenue = 181200;
   const paymentMethods = [
     { method: "Cash",          amount: 102000, pct: 56, color: "#4ade80" },
@@ -275,7 +275,7 @@ onPng={() => {
               <YAxis yAxisId="rev" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={58} tickFormatter={v => `Rs.${(v / 1000).toFixed(0)}k`} />
               <YAxis yAxisId="txn" orientation="right" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={28} />
               <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "rgba(99,91,255,0.06)" }}
-                formatter={(val: number, name: string) => name === "revenue" ? [`Rs. ${val.toLocaleString()}`, "Revenue"] : [val, "Transactions"]}
+                formatter={(val, name) => name === "revenue" ? [`Rs. ${(val as number).toLocaleString()}`, "Revenue"] : [val, "Transactions"]}
               />
               <Legend wrapperStyle={{ fontSize: 11.5, fontFamily: ff, paddingTop: 10 }} formatter={v => v === "revenue" ? "Revenue" : "Transactions"} />
               <Bar yAxisId="rev" dataKey="revenue"      fill="#6355ff" radius={[5, 5, 0, 0]} />
@@ -293,7 +293,7 @@ onPng={() => {
               <Pie data={paymentMethods} dataKey="amount" nameKey="method" cx="50%" cy="50%" innerRadius={46} outerRadius={70} paddingAngle={3}>
                 {paymentMethods.map((pm, i) => <Cell key={i} fill={pm.color} />)}
               </Pie>
-              <Tooltip contentStyle={tooltipStyle} formatter={(val: number, name: string) => [`Rs. ${(val as number).toLocaleString()}`, name]} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(val, name) => [`Rs. ${(val as number).toLocaleString()}`, name]} />
             </PieChart>
           </ResponsiveContainer>
           <div style={{ display: "flex", flexDirection: "column", gap: 9, marginTop: 6 }}>
@@ -341,7 +341,7 @@ onPng={() => {
               <XAxis dataKey="time" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={54} tickFormatter={v => `Rs.${(v / 1000).toFixed(0)}k`} />
               <Tooltip contentStyle={tooltipStyle}
-                formatter={(val: number, name: string) => [`Rs. ${val.toLocaleString()}`, name === "today" ? "Today" : "Yesterday"]}
+                formatter={(val, name) => [`Rs. ${(val as number).toLocaleString()}`, name === "today" ? "Today" : "Yesterday"]}
               />
               <Line dataKey="today"     stroke="#6355ff" strokeWidth={2.5} dot={{ r: 3, fill: "#6355ff", strokeWidth: 0 }} activeDot={{ r: 5 }} />
               <Line dataKey="yesterday" stroke="#94a3b8" strokeWidth={1.5} dot={false} strokeDasharray="5 4" />
@@ -369,7 +369,7 @@ onPng={() => {
               <YAxis yAxisId="cash" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={54} tickFormatter={v => `Rs.${(v / 1000).toFixed(0)}k`} />
               <YAxis yAxisId="run"  orientation="right" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={54} tickFormatter={v => `Rs.${(v / 1000).toFixed(0)}k`} />
               <Tooltip contentStyle={tooltipStyle}
-                formatter={(val: number, name: string) => [`Rs. ${val.toLocaleString()}`, name === "cashIn" ? "Cash In" : name === "cashOut" ? "Cash Out" : "Running Total"]}
+                formatter={(val, name) => [`Rs. ${(val as number).toLocaleString()}`, name === "cashIn" ? "Cash In" : name === "cashOut" ? "Cash Out" : "Running Total"]}
               />
               <Bar yAxisId="cash" dataKey="cashIn"  fill="#4ade80" stackId="flow" radius={[0, 0, 0, 0]} />
               <Bar yAxisId="cash" dataKey="cashOut" fill="#f87171" stackId="flow" radius={[4, 4, 0, 0]} />
@@ -399,7 +399,7 @@ onPng={() => {
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
             <XAxis dataKey="time" tick={{ fontSize: 11, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={58} tickFormatter={v => `Rs.${(v / 1000).toFixed(0)}k`} />
-            <Tooltip contentStyle={tooltipStyle} formatter={(val: number) => [`Rs. ${val.toLocaleString()}`, "Revenue"]} />
+            <Tooltip contentStyle={tooltipStyle} formatter={(val) => [`Rs. ${(val as number).toLocaleString()}`, "Revenue"]} />
             <Area type="monotone" dataKey="revenue" stroke="#4ade80" strokeWidth={2.5} fill="url(#drRevGrad)" dot={false} activeDot={{ r: 5, fill: "#4ade80", strokeWidth: 0 }} />
           </AreaChart>
         </ResponsiveContainer>
@@ -415,7 +415,7 @@ onPng={() => {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} tickFormatter={v => `Rs.${(v / 1000).toFixed(0)}k`} />
               <YAxis type="category" dataKey="item" width={112} tick={{ fontSize: 11, fill: "var(--text-secondary)", fontFamily: ff }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(val: number) => [`Rs. ${val.toLocaleString()}`, "Revenue"]} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(val) => [`Rs. ${(val as number).toLocaleString()}`, "Revenue"]} />
               <Bar dataKey="revenue" radius={[0, 6, 6, 0]} barSize={20}>
                 {topItemsToday.map((item, i) => <Cell key={i} fill={itemCatColors[item.category] ?? "#94a3b8"} />)}
               </Bar>
@@ -431,7 +431,7 @@ onPng={() => {
               <Pie data={customerData} dataKey="pct" nameKey="type" cx="50%" cy="50%" innerRadius={42} outerRadius={65} paddingAngle={4}>
                 {customerData.map((c, i) => <Cell key={i} fill={c.color} />)}
               </Pie>
-              <Tooltip contentStyle={tooltipStyle} formatter={(val: number, name: string) => [`${val}%`, name]} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(val, name) => [`${val}%`, name]} />
             </PieChart>
           </ResponsiveContainer>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
@@ -472,7 +472,7 @@ onPng={() => {
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
             <XAxis dataKey="time" tick={{ fontSize: 11, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={24} allowDecimals={false} />
-            <Tooltip contentStyle={tooltipStyle} formatter={(val: number) => [val, "Transactions"]} />
+            <Tooltip contentStyle={tooltipStyle} formatter={(val) => [val, "Transactions"]} />
             <Bar dataKey="txn" fill="#fbbf24" radius={[5, 5, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
@@ -798,7 +798,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                 return exportReportToPdf("Sales Report", sections, charts, srFilename);
               }}
               onExcel={() => exportToExcel(srFilename, "Sales Report", SR_HEADERS, srRows())}
-              onPng={()  => containerRef.current && exportToPng(containerRef.current, srFilename)}
+              onPng={() => { if (containerRef.current) exportToPng(containerRef.current, srFilename); }}
             />
           </div>
         </div>
@@ -828,7 +828,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
               <YAxis yAxisId="rev" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={58} tickFormatter={v => `Rs.${(v / 1000).toFixed(0)}k`} />
               <YAxis yAxisId="txn" orientation="right" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={28} />
               <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "rgba(99,91,255,0.06)" }}
-                formatter={(val: number, name: string) => name === "revenue" ? [`Rs. ${val.toLocaleString()}`, "Revenue"] : [val, "Transactions"]}
+                formatter={(val, name) => name === "revenue" ? [`Rs. ${(val as number).toLocaleString()}`, "Revenue"] : [val, "Transactions"]}
               />
               <Legend wrapperStyle={{ fontSize: 11.5, fontFamily: ff, paddingTop: 10 }} formatter={v => v === "revenue" ? "Revenue" : "Transactions"} />
               <Bar yAxisId="rev" dataKey="revenue"      fill="#6355ff" radius={[5, 5, 0, 0]} />
@@ -846,7 +846,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
               <Pie data={categoryData} dataKey="revenue" nameKey="name" cx="50%" cy="50%" innerRadius={46} outerRadius={70} paddingAngle={3}>
                 {categoryData.map((c, i) => <Cell key={i} fill={catColors[c.name]} />)}
               </Pie>
-              <Tooltip contentStyle={tooltipStyle} formatter={(val: number, name: string) => [`Rs. ${(val as number).toLocaleString()}`, name]} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(val, name) => [`Rs. ${(val as number).toLocaleString()}`, name]} />
             </PieChart>
           </ResponsiveContainer>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
@@ -932,7 +932,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                           <Pie data={supplierData} dataKey="pct" nameKey="name" cx="50%" cy="50%" innerRadius={32} outerRadius={52} paddingAngle={3}>
                             {supplierData.map((s, i) => <Cell key={i} fill={s.color} />)}
                           </Pie>
-                          <Tooltip contentStyle={tooltipStyle} formatter={(val: number, name: string) => [`${val}%`, name]} />
+                          <Tooltip contentStyle={tooltipStyle} formatter={(val, name) => [`${val}%`, name]} />
                         </PieChart>
                       </ResponsiveContainer>
                       <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 2 }}>
@@ -1037,7 +1037,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                           <XAxis dataKey="day" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} />
                           <YAxis tick={{ fontSize: 9.5, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={42} tickFormatter={v => `Rs.${(v / 1000).toFixed(1)}k`} />
-                          <Tooltip contentStyle={tooltipStyle} formatter={(val: number, name: string) => [`Rs. ${val.toLocaleString()}`, accItemLabels[name] ?? name]} />
+                          <Tooltip contentStyle={tooltipStyle} formatter={(val, name) => [`Rs. ${(val as number).toLocaleString()}`, accItemLabels[name as string] ?? name]} />
                           <Legend wrapperStyle={{ fontSize: 10.5, fontFamily: ff }} formatter={n => accItemLabels[n] ?? n} />
                           <Area type="monotone" dataKey="TypeC"      stackId="1" stroke="#60a5fa" fill="#60a5fa" fillOpacity={0.55} strokeWidth={1.5} dot={false} />
                           <Area type="monotone" dataKey="ScreenProt" stackId="1" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.55} strokeWidth={1.5} dot={false} />
@@ -1054,7 +1054,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
                           <XAxis type="number" tick={{ fontSize: 9.5, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} tickFormatter={v => `${v}%`} domain={[0, 60]} />
                           <YAxis type="category" dataKey="supplier" width={115} tick={{ fontSize: 10, fill: "var(--text-secondary)", fontFamily: ff }} axisLine={false} tickLine={false} />
-                          <Tooltip contentStyle={tooltipStyle} formatter={(val: number) => [`${val}%`, "Share"]} />
+                          <Tooltip contentStyle={tooltipStyle} formatter={(val) => [`${val}%`, "Share"]} />
                           <Bar dataKey="pct" radius={[0, 6, 6, 0]} barSize={18}>
                             {accSupplierData.map((s, i) => <Cell key={i} fill={s.color} />)}
                           </Bar>
@@ -1164,7 +1164,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
                           <XAxis type="number" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} />
                           <YAxis type="category" dataKey="fault" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={110} />
-                          <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [v, "Jobs"]} labelStyle={{ fontFamily: ff, fontWeight: 700 }} />
+                          <Tooltip contentStyle={tooltipStyle} formatter={(v) => [v, "Jobs"]} labelStyle={{ fontFamily: ff, fontWeight: 700 }} />
                           <Bar dataKey="count" radius={[0, 5, 5, 0]} barSize={18}>
                             {repairFaultData.map((_: any, i: number) => (
                               <Cell key={i} fill={repairFaultColors[i % repairFaultColors.length]} />
@@ -1343,7 +1343,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
             <XAxis dataKey="day" tick={{ fontSize: 11, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={58} tickFormatter={v => `Rs.${(v / 1000).toFixed(0)}k`} />
-            <Tooltip contentStyle={tooltipStyle} formatter={(val: number) => [`Rs. ${val.toLocaleString()}`, "Revenue"]} />
+            <Tooltip contentStyle={tooltipStyle} formatter={(val) => [`Rs. ${(val as number).toLocaleString()}`, "Revenue"]} />
             <Area type="monotone" dataKey="revenue" stroke="#6355ff" strokeWidth={2.5} fill="url(#srRevGrad)" dot={false} activeDot={{ r: 5, fill: "#6355ff", strokeWidth: 0 }} />
           </AreaChart>
         </ResponsiveContainer>
@@ -1359,7 +1359,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} tickFormatter={v => `Rs.${(v / 1000).toFixed(0)}k`} />
               <YAxis type="category" dataKey="brand" width={60} tick={{ fontSize: 11, fill: "var(--text-secondary)", fontFamily: ff }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(val: number, name: string) => name === "revenue" ? [`Rs. ${val.toLocaleString()}`, "Revenue"] : [val, "Units"]} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(val, name) => name === "revenue" ? [`Rs. ${(val as number).toLocaleString()}`, "Revenue"] : [val, "Units"]} />
               <Bar dataKey="revenue" radius={[0, 6, 6, 0]} barSize={22}>
                 {brandData.map((_, i) => <Cell key={i} fill={brandColors[i % brandColors.length]} />)}
               </Bar>
@@ -1375,7 +1375,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
               <Pie data={supplierData} dataKey="pct" nameKey="name" cx="50%" cy="50%" innerRadius={42} outerRadius={65} paddingAngle={3}>
                 {supplierData.map((s, i) => <Cell key={i} fill={s.color} />)}
               </Pie>
-              <Tooltip contentStyle={tooltipStyle} formatter={(val: number, name: string) => [`${val}%`, name]} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(val, name) => [`${val}%`, name]} />
             </PieChart>
           </ResponsiveContainer>
           <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 6 }}>
@@ -1515,7 +1515,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
               return exportReportToPdf("Repair Report", sections, charts, rrFilename);
             }}
             onExcel={() => exportToExcel(rrFilename, "Repair Report", RR_HEADERS, rrRows())}
-            onPng={()  => containerRef.current && exportToPng(containerRef.current, rrFilename)}
+            onPng={() => { if (containerRef.current) exportToPng(containerRef.current, rrFilename); }}
           />
         }
       />
@@ -1565,7 +1565,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
               <YAxis yAxisId="cost" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={58} tickFormatter={v => `Rs.${(v / 1000).toFixed(0)}k`} />
               <YAxis yAxisId="rev"  orientation="right" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={58} tickFormatter={v => `Rs.${(v / 1000).toFixed(0)}k`} />
               <Tooltip contentStyle={tooltipStyle}
-                formatter={(val: number, name: string) => [`Rs. ${val.toLocaleString()}`, name === "parts" ? "Parts Cost" : name === "labor" ? "Labor Cost" : "Revenue"]}
+                formatter={(val, name) => [`Rs. ${(val as number).toLocaleString()}`, name === "parts" ? "Parts Cost" : name === "labor" ? "Labor Cost" : "Revenue"]}
               />
               <Bar yAxisId="cost" dataKey="parts"   fill="#f87171" stackId="cost" radius={[0, 0, 0, 0]} barSize={50} />
               <Bar yAxisId="cost" dataKey="labor"   fill="#fbbf24" stackId="cost" radius={[5, 5, 0, 0]} barSize={50} />
@@ -1586,7 +1586,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
               <Radar name="Ashan"   dataKey="Ashan"   stroke="#6355ff" fill="#6355ff" fillOpacity={0.18} strokeWidth={2} />
               <Radar name="Nilufar" dataKey="Nilufar" stroke="#34d399" fill="#34d399" fillOpacity={0.18} strokeWidth={2} />
               <Legend wrapperStyle={{ fontSize: 11.5, fontFamily: ff, paddingTop: 4 }} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(val: number, name: string) => [`${val}/100`, name]} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(val, name) => [`${val}/100`, name]} />
             </RadarChart>
           </ResponsiveContainer>
         </div>
@@ -1603,7 +1603,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} allowDecimals={false} />
               <YAxis type="category" dataKey="type" width={145} tick={{ fontSize: 11, fill: "var(--text-secondary)", fontFamily: ff }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(val: number) => [val, "Jobs"]} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(val) => [val, "Jobs"]} />
               <Bar dataKey="count" fill="#6355ff" radius={[0, 6, 6, 0]} barSize={20} />
             </BarChart>
           </ResponsiveContainer>
@@ -1652,7 +1652,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} allowDecimals={false} />
               <YAxis type="category" dataKey="brand" width={68} tick={{ fontSize: 11, fill: "var(--text-secondary)", fontFamily: ff }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(val: number) => [val, "Repairs"]} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(val) => [val, "Repairs"]} />
               <Bar dataKey="repairs" radius={[0, 6, 6, 0]} barSize={22}>
                 {deviceBrandData.map((_, i) => <Cell key={i} fill={deviceBrandColors[i % deviceBrandColors.length]} />)}
               </Bar>
@@ -1668,7 +1668,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
               <Pie data={partsSupplierData} dataKey="pct" nameKey="name" cx="50%" cy="50%" innerRadius={42} outerRadius={65} paddingAngle={3}>
                 {partsSupplierData.map((s, i) => <Cell key={i} fill={s.color} />)}
               </Pie>
-              <Tooltip contentStyle={tooltipStyle} formatter={(val: number, name: string) => [`${val}%`, name]} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(val, name) => [`${val}%`, name]} />
             </PieChart>
           </ResponsiveContainer>
           <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 6 }}>
@@ -1716,7 +1716,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
             <XAxis dataKey="month" tick={{ fontSize: 11, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={58} tickFormatter={v => `Rs.${(v / 1000).toFixed(0)}k`} />
             <Tooltip contentStyle={tooltipStyle}
-              formatter={(val: number, name: string) => [`Rs. ${val.toLocaleString()}`, name === "revenue" ? "Revenue" : name === "cost" ? "Cost" : "Profit"]}
+              formatter={(val, name) => [`Rs. ${(val as number).toLocaleString()}`, name === "revenue" ? "Revenue" : name === "cost" ? "Cost" : "Profit"]}
             />
             <Bar dataKey="revenue" fill="#34d399" fillOpacity={0.25} radius={[4, 4, 0, 0]} barSize={22} />
             <Bar dataKey="cost"    fill="#f87171" fillOpacity={0.25} radius={[4, 4, 0, 0]} barSize={22} />
@@ -1745,7 +1745,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
             <XAxis dataKey="day" tick={{ fontSize: 11, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} axisLine={false} tickLine={false} width={58} tickFormatter={v => `Rs.${(v / 1000).toFixed(0)}k`} />
-            <Tooltip contentStyle={tooltipStyle} formatter={(val: number) => [`Rs. ${val.toLocaleString()}`, "Revenue"]} />
+            <Tooltip contentStyle={tooltipStyle} formatter={(val) => [`Rs. ${(val as number).toLocaleString()}`, "Revenue"]} />
             <Area type="monotone" dataKey="revenue" stroke="#34d399" strokeWidth={2.5} fill="url(#rrRevGrad)" dot={false} activeDot={{ r: 5, fill: "#34d399", strokeWidth: 0 }} />
           </AreaChart>
         </ResponsiveContainer>
@@ -1825,7 +1825,7 @@ function PLReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
   return (
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <ReportFilters dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}
-        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => containerRef.current && exportToPng(containerRef.current, "pl-report")} />}
+        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => { if (containerRef.current) exportToPng(containerRef.current, "pl-report"); }} />}
       />
       {/* KPI strip */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 12 }}>
@@ -1916,7 +1916,7 @@ function StockValuation({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProp
   return (
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <ReportFilters dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}
-        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => containerRef.current && exportToPng(containerRef.current, "stock-valuation")} />}
+        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => { if (containerRef.current) exportToPng(containerRef.current, "stock-valuation"); }} />}
       />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
         {[
@@ -2015,7 +2015,7 @@ function CashierPerformance({ dateFrom, dateTo, setDateFrom, setDateTo }: Filter
   return (
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <ReportFilters dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}
-        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => containerRef.current && exportToPng(containerRef.current, "cashier-performance")} />}
+        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => { if (containerRef.current) exportToPng(containerRef.current, "cashier-performance"); }} />}
       />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 14 }}>
         {cashiers.map(c => (
@@ -2080,7 +2080,7 @@ function SupplierReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProp
   return (
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <ReportFilters dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}
-        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => containerRef.current && exportToPng(containerRef.current, "supplier-report")} />}
+        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => { if (containerRef.current) exportToPng(containerRef.current, "supplier-report"); }} />}
       />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
         {[
@@ -2158,7 +2158,7 @@ function CreditAging({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
   return (
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <ReportFilters dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}
-        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => containerRef.current && exportToPng(containerRef.current, "credit-aging")} />}
+        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => { if (containerRef.current) exportToPng(containerRef.current, "credit-aging"); }} />}
       />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
         {[
@@ -2235,7 +2235,7 @@ function RepairSLA({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
   return (
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <ReportFilters dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}
-        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => containerRef.current && exportToPng(containerRef.current, "repair-sla")} />}
+        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => { if (containerRef.current) exportToPng(containerRef.current, "repair-sla"); }} />}
       />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
         {[

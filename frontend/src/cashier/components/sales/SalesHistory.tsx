@@ -433,7 +433,7 @@ export default function SalesHistory() {
           <ExportButtons
             onPdf={()   => exportToPdf("Sales History", PDF_HEADERS, excelRows(), filename)}
             onExcel={()  => exportToExcel(filename, "Sales History", PDF_HEADERS, excelRows())}
-            onPng={()   => containerRef.current && exportToPng(containerRef.current, filename)}
+            onPng={() => { if (containerRef.current) exportToPng(containerRef.current, filename); }}
           />
         </div>
       </div>

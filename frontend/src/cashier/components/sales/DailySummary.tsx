@@ -102,7 +102,7 @@ export default function DailySummary() {
         <ExportButtons
           onPdf={()   => exportToPdf(`Daily Summary — ${TODAY_ISO}`, DS_HEADERS, dsRows(), dsFilename, "portrait")}
           onExcel={()  => exportToExcel(dsFilename, "Daily Summary", DS_HEADERS, dsRows())}
-          onPng={()   => containerRef.current && exportToPng(containerRef.current, dsFilename)}
+          onPng={() => { if (containerRef.current) exportToPng(containerRef.current, dsFilename); }}
         />
       </div>
 
