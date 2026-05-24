@@ -1281,8 +1281,10 @@ export default function JobsTable({ filterStatus = "All" }: JobsTableProps) {
         <ExportButtons
           onPdf={()   => exportToPdf("Repair Jobs", JOB_HEADERS, jobRows(), jobFilename)}
           onExcel={()  => exportToExcel(jobFilename, "Repair Jobs", JOB_HEADERS, jobRows())}
-          onPng={()   => tableRef.current && exportToPng(tableRef.current, jobFilename)}
-        />
+onPng={() => {
+  if (!tableRef.current) return;
+  return exportToPng(tableRef.current, jobFilename);
+}}        />
       </div>
 
       {showFilters && (
