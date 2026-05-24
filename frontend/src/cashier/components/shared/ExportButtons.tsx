@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { FileText, FileSpreadsheet, Image } from "lucide-react";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 
 interface ExportButtonsProps {
   onPdf:   () => Promise<void> | void;
@@ -17,6 +18,7 @@ const BTN_DEFS = [
 
 export default function ExportButtons({ onPdf, onExcel, onPng }: ExportButtonsProps) {
   const [loading, setLoading] = useState<"pdf" | "excel" | "png" | null>(null);
+  const isMobile = useIsMobile();
 
   const fns = { pdf: onPdf, excel: onExcel, png: onPng };
 
@@ -49,7 +51,7 @@ export default function ExportButtons({ onPdf, onExcel, onPng }: ExportButtonsPr
           }}
         >
           <Icon size={12} />
-          {loading === key ? "…" : label}
+          {!isMobile && (loading === key ? "…" : label)}
         </button>
       ))}
     </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { Bell, MessageSquare, Mail, Smartphone, ToggleLeft, ToggleRight, Eye, CheckCircle, XCircle, Clock, AlertTriangle } from "lucide-react";
 import { useAdmin, type NotificationChannel } from "@/admin/contexts/AdminContext";
 
@@ -24,6 +25,7 @@ export default function Notifications() {
   const { templates, notificationLog, toggleTemplate } = useAdmin();
   const [tab, setTab]             = useState<"templates" | "log">("templates");
   const [chanFilter, setChan]     = useState<NotificationChannel | "All">("All");
+  const isMobile = useIsMobile();
   const [preview, setPreview]     = useState<string | null>(null);
 
   const filteredTemplates = templates.filter(t => chanFilter === "All" || t.channel === chanFilter);
@@ -62,16 +64,20 @@ export default function Notifications() {
       </div>
 
       {/* Tabs + channel filter */}
-      <div className="fade-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, padding: 4 }}>
-          <button onClick={() => setTab("templates")} style={tabStyle(tab === "templates")}>Templates</button>
-          <button onClick={() => setTab("log")} style={tabStyle(tab === "log")}>Send Log ({notificationLog.length})</button>
+      <div className="fade-up" style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "flex-start" : "center", justifyContent: "space-between", gap: 10 }}>
+        <div className={isMobile ? "tabs-scroll" : undefined}>
+          <div style={{ display: "flex", gap: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, padding: 4, width: "fit-content" }}>
+            <button onClick={() => setTab("templates")} style={tabStyle(tab === "templates")}>Templates</button>
+            <button onClick={() => setTab("log")} style={tabStyle(tab === "log")}>Send Log ({notificationLog.length})</button>
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button onClick={() => setChan("All")} style={filterBtn(chanFilter === "All")}>All</button>
-          {(["SMS", "WhatsApp", "Email"] as NotificationChannel[]).map(c => (
-            <button key={c} onClick={() => setChan(c)} style={filterBtn(chanFilter === c)}>{c}</button>
-          ))}
+        <div className={isMobile ? "tabs-scroll" : undefined}>
+          <div style={{ display: "flex", gap: 6, width: "fit-content" }}>
+            <button onClick={() => setChan("All")} style={filterBtn(chanFilter === "All")}>All</button>
+            {(["SMS", "WhatsApp", "Email"] as NotificationChannel[]).map(c => (
+              <button key={c} onClick={() => setChan(c)} style={filterBtn(chanFilter === c)}>{c}</button>
+            ))}
+          </div>
         </div>
       </div>
 

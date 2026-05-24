@@ -553,9 +553,8 @@ export default function CreditCustomers() {
       </div>
 
       {/* Table */}
-      <div className="table-scroll">
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <div className="table-scroll" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)" }}>
               {["ID", "Customer", "Contact", "Total Invoiced", "Paid", "Balance Due", "Credit Since", "Approved By", "Status", ""].map(h => (
@@ -642,7 +641,6 @@ export default function CreditCustomers() {
             })}
           </tbody>
         </table>
-      </div>
       </div>
 
       {payTarget  && <RecordPaymentModal customer={payTarget}  onClose={() => setPayTarget(null)}  onRecord={handleRecord} />}

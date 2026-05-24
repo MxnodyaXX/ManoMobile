@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { Plus, Briefcase, AlertCircle, Clock, CheckSquare, LayoutGrid, XCircle, Truck } from "lucide-react";
 import NewRepairForm from "./NewRepairForm";
 import JobsTable, { JobStatus } from "./JobsTable";
@@ -36,6 +37,7 @@ const sectionDescriptions: Record<RepairSection, string> = {
 
 export default function RepairManagement() {
   const [active, setActive] = useState<RepairSection>("New Repair");
+  const isMobile = useIsMobile();
 
   const activeSection = sections.find(s => s.id === active)!;
   const ActiveIcon = activeSection.icon;
@@ -44,22 +46,25 @@ export default function RepairManagement() {
     <div style={{ display: "flex", flexDirection: "column", gap: 24, flex: 1, minHeight: 0 }}>
 
       {/* Page header + Sub-nav */}
-      <div className="fade-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-        <div>
-          <h1 className="heading-xl" style={{ fontSize: 24, color: "var(--text-primary)" }}>
-            Repair Management
-          </h1>
-          <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 5 }}>
-            Manage repair jobs, track status, and assign technicians.
-          </p>
+      <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: isMobile ? 12 : 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+          <div>
+            <h1 className="heading-xl" style={{ fontSize: 24, color: "var(--text-primary)" }}>
+              Repair Management
+            </h1>
+            <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 5 }}>
+              Manage repair jobs, track status, and assign technicians.
+            </p>
+          </div>
         </div>
 
+        <div className={isMobile ? "tabs-scroll" : undefined}>
         <div style={{
           display: "flex", gap: 4,
           background: "var(--bg-card)",
           border: "1px solid var(--border)",
           borderRadius: 12, padding: 5,
-          flexWrap: "wrap",
+          width: "fit-content",
         }}>
           {sections.map(({ id, icon: Icon, label }) => {
             const isActive = active === id;
@@ -96,6 +101,7 @@ export default function RepairManagement() {
               </button>
             );
           })}
+        </div>
         </div>
       </div>
 

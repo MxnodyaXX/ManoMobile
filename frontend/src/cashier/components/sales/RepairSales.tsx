@@ -529,7 +529,7 @@ export default function RepairSales() {
           />
         </div>
 
-        <div className="table-scroll" style={{ border: "1px solid var(--border)", borderRadius: 10, minHeight: 200, overflow: "hidden", background: "var(--bg-primary)" }}>
+        <div className="table-scroll" style={{ border: "1px solid var(--border)", borderRadius: 10, minHeight: 200, background: "var(--bg-primary)" }}>
           {!selectedDealer ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: "var(--text-muted)", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
               Select a dealer to see their completed repairs
@@ -539,7 +539,7 @@ export default function RepairSales() {
               No completed repairs found
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 800 }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
                   {["", "Job ID", "Customer", "Brand / Model", "IMEI No.", "Warranty", "Unit Price", "Discount", "Line Total"].map(h => (

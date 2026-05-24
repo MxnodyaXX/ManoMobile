@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useSales } from "@/cashier/contexts/SalesContext";
 import type { TxCategory, TxStatus, SaleTx } from "@/cashier/contexts/SalesContext";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
@@ -354,6 +355,7 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
 export default function SalesHistory() {
   const { sales: txList, updateSale, returnSale } = useSales();
   const { addEntry } = useCashRegister();
+  const isMobile = useIsMobile();
   const containerRef = useRef<HTMLDivElement>(null);
   const [search,   setSearch]   = useState("");
   const [catFilter, setCatFilter] = useState<TxCategory | "All">("All");
@@ -414,22 +416,26 @@ export default function SalesHistory() {
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 16, flex: 1, minHeight: 0 }}>
 
       {/* Summary chips + export */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        {[
-          { label: "Transactions", value: totals.count, color: "var(--accent)" },
-          { label: "Revenue (Paid)", value: fmtRs(totals.revenue), color: "#4ade80" },
-          { label: "Voided", value: totals.voided, color: "#f87171" },
-          { label: "Returned", value: totals.returned, color: "#fbbf24" },
-        ].map(chip => (
-          <div key={chip.label} style={{
-            background: "var(--bg-card)", border: "1px solid var(--border)",
-            borderRadius: 10, padding: "8px 14px", display: "flex", alignItems: "center", gap: 8,
-          }}>
-            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{chip.label}</span>
-            <span style={{ fontSize: 14, fontWeight: 700, color: chip.color }}>{chip.value}</span>
+      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: isMobile ? 8 : 10, alignItems: isMobile ? "stretch" : "center" }}>
+        <div className={isMobile ? "tabs-scroll" : undefined}>
+          <div style={{ display: "flex", gap: 10, width: isMobile ? "fit-content" : undefined }}>
+            {[
+              { label: "Transactions", value: totals.count, color: "var(--accent)" },
+              { label: "Revenue (Paid)", value: fmtRs(totals.revenue), color: "#4ade80" },
+              { label: "Voided", value: totals.voided, color: "#f87171" },
+              { label: "Returned", value: totals.returned, color: "#fbbf24" },
+            ].map(chip => (
+              <div key={chip.label} style={{
+                background: "var(--bg-card)", border: "1px solid var(--border)",
+                borderRadius: 10, padding: "8px 14px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0,
+              }}>
+                <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{chip.label}</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: chip.color, whiteSpace: "nowrap" }}>{chip.value}</span>
+              </div>
+            ))}
           </div>
-        ))}
-        <div style={{ marginLeft: "auto" }}>
+        </div>
+        <div style={{ marginLeft: isMobile ? undefined : "auto" }}>
           <ExportButtons
             onPdf={()   => exportToPdf("Sales History", PDF_HEADERS, excelRows(), filename)}
             onExcel={()  => exportToExcel(filename, "Sales History", PDF_HEADERS, excelRows())}
@@ -439,41 +445,45 @@ export default function SalesHistory() {
       </div>
 
       {/* Filters */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <div style={{ position: "relative", flex: 1, minWidth: 180 }}>
+      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: isMobile ? 8 : 10, alignItems: isMobile ? "stretch" : "center", flexWrap: isMobile ? undefined : "wrap" }}>
+        <div style={{ position: "relative", flex: isMobile ? undefined : 1, minWidth: isMobile ? undefined : 180 }}>
           <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
           <input
             placeholder="Search invoice, customer, item…"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            style={{ ...inputStyle, width: "100%", paddingLeft: 32 }}
+            style={{ ...inputStyle, width: "100%", paddingLeft: 32, boxSizing: "border-box" as const }}
           />
         </div>
 
-        <div style={{ position: "relative" }}>
-          <select value={catFilter} onChange={e => setCatFilter(e.target.value as any)} style={{ ...selectStyle, minWidth: 130 }}>
-            <option value="All">All Categories</option>
-            <option value="Accessories">Accessories</option>
-            <option value="Mobile">Mobile</option>
-            <option value="Repair">Repair</option>
-            <option value="Others">Others</option>
-          </select>
-          <ChevronDown size={12} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ position: "relative", flex: 1 }}>
+            <select value={catFilter} onChange={e => setCatFilter(e.target.value as any)} style={{ ...selectStyle, width: "100%", minWidth: isMobile ? undefined : 130 }}>
+              <option value="All">All Categories</option>
+              <option value="Accessories">Accessories</option>
+              <option value="Mobile">Mobile</option>
+              <option value="Repair">Repair</option>
+              <option value="Others">Others</option>
+            </select>
+            <ChevronDown size={12} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+          </div>
+
+          <div style={{ position: "relative", flex: 1 }}>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} style={{ ...selectStyle, width: "100%", minWidth: isMobile ? undefined : 120 }}>
+              <option value="All">All Status</option>
+              <option value="Paid">Paid</option>
+              <option value="Voided">Voided</option>
+              <option value="Returned">Returned</option>
+            </select>
+            <ChevronDown size={12} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+          </div>
         </div>
 
-        <div style={{ position: "relative" }}>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} style={{ ...selectStyle, minWidth: 120 }}>
-            <option value="All">All Status</option>
-            <option value="Paid">Paid</option>
-            <option value="Voided">Voided</option>
-            <option value="Returned">Returned</option>
-          </select>
-          <ChevronDown size={12} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...inputStyle, flex: 1, width: isMobile ? undefined : 140 }} />
+          <span style={{ fontSize: 12, color: "var(--text-muted)", flexShrink: 0 }}>to</span>
+          <input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   style={{ ...inputStyle, flex: 1, width: isMobile ? undefined : 140 }} />
         </div>
-
-        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...inputStyle, width: 140 }} />
-        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>to</span>
-        <input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   style={{ ...inputStyle, width: 140 }} />
 
         {(search || catFilter !== "All" || statusFilter !== "All" || dateFrom || dateTo) && (
           <button onClick={() => { setSearch(""); setCatFilter("All"); setStatusFilter("All"); setDateFrom(""); setDateTo(""); }}
@@ -481,7 +491,7 @@ export default function SalesHistory() {
               background: "none", border: "1px solid var(--border)", borderRadius: 8,
               padding: "8px 12px", fontSize: 12, color: "var(--text-secondary)",
               cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif",
-              display: "flex", alignItems: "center", gap: 6,
+              display: "flex", alignItems: "center", gap: 6, alignSelf: isMobile ? "flex-start" : undefined,
             }}>
             <X size={12} /> Clear
           </button>

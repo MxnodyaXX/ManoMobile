@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Plus, Search, Edit2, Trash2, X, UserCheck, UserX } from "lucide-react";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useAdmin, type StaffMember, type StaffRole, type StaffStatus } from "@/admin/contexts/AdminContext";
 
 const AA = "#a78bfa";
@@ -63,6 +64,7 @@ function StaffModal({ initial, onSave, onClose }: { initial?: StaffMember; onSav
 
 export default function StaffManagement() {
   const { staff, addStaff, updateStaff, removeStaff } = useAdmin();
+  const isMobile = useIsMobile();
   const [query,    setQuery]    = useState("");
   const [roleFilter, setRole]  = useState<StaffRole | "All">("All");
   const [modal,    setModal]    = useState<"add" | StaffMember | null>(null);
@@ -86,16 +88,20 @@ export default function StaffManagement() {
       </div>
 
       {/* Filters */}
-      <div className="fade-up" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 14px", borderRadius: 10, background: "var(--bg-card)", border: "1px solid var(--border)", height: 38, flex: 1, minWidth: 200 }}>
+      <div className="fade-up" style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 14px", borderRadius: 10, background: "var(--bg-card)", border: "1px solid var(--border)", height: 38, flex: isMobile ? undefined : 1, minWidth: 200 }}>
           <Search size={13} color="var(--text-muted)" />
           <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search by name or email…" style={{ border: "none", background: "none", outline: "none", fontSize: 12.5, color: "var(--text-primary)", fontFamily: ff, flex: 1 }} />
         </div>
-        {(["All", ...ROLES] as const).map(r => (
-          <button key={r} onClick={() => setRole(r as any)} style={{ padding: "8px 14px", borderRadius: 9, fontSize: 12, fontWeight: roleFilter === r ? 600 : 400, border: `1px solid ${roleFilter === r ? (ROLE_COLORS[r as StaffRole] || AA) + "40" : "var(--border)"}`, background: roleFilter === r ? `${ROLE_COLORS[r as StaffRole] || AA}12` : "var(--bg-card)", color: roleFilter === r ? (ROLE_COLORS[r as StaffRole] || AA) : "var(--text-secondary)", cursor: "pointer", fontFamily: ff }}>
-            {r}
-          </button>
-        ))}
+        <div className={isMobile ? "tabs-scroll" : undefined}>
+        <div style={{ display: "flex", gap: 6, width: "fit-content" }}>
+          {(["All", ...ROLES] as const).map(r => (
+            <button key={r} onClick={() => setRole(r as any)} style={{ padding: "8px 14px", borderRadius: 9, fontSize: 12, fontWeight: roleFilter === r ? 600 : 400, border: `1px solid ${roleFilter === r ? (ROLE_COLORS[r as StaffRole] || AA) + "40" : "var(--border)"}`, background: roleFilter === r ? `${ROLE_COLORS[r as StaffRole] || AA}12` : "var(--bg-card)", color: roleFilter === r ? (ROLE_COLORS[r as StaffRole] || AA) : "var(--text-secondary)", cursor: "pointer", fontFamily: ff, whiteSpace: "nowrap" }}>
+              {r}
+            </button>
+          ))}
+        </div>
+        </div>
       </div>
 
       {/* Table */}

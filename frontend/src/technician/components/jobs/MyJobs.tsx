@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import {
   Search, Play, Pause, CheckCircle, Clock,
   AlertTriangle, Filter, Wrench, User, Phone,
@@ -221,6 +222,7 @@ function JobDetailPanel({ job, onClose, onStatusUpdate, onRequestParts }: { job:
 export default function MyJobs() {
   const { jobs } = useRepair();
   const { technicianName, partRequests, diagnostics, notes, activityLog, escalations } = useTech();
+  const isMobile = useIsMobile();
 
   const [search, setSearch]             = useState("");
   const [filterTab, setFilterTab]       = useState<FilterTab>("All");
@@ -343,7 +345,8 @@ export default function MyJobs() {
       </div>
 
       {/* Status tabs */}
-      <div className="fade-up" style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, width: "fit-content" }}>
+      <div className={`fade-up${isMobile ? " tabs-scroll" : ""}`}>
+      <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, width: "fit-content" }}>
         {FILTER_TABS.map(tab => {
           const active = filterTab === tab;
           const count = tabCounts[tab];
@@ -375,6 +378,7 @@ export default function MyJobs() {
             </button>
           );
         })}
+      </div>
       </div>
 
       {/* Jobs table */}

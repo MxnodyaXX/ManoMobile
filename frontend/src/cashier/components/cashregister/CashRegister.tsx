@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import {
   Calculator, ArrowDownLeft, ArrowUpRight, Lock,
   DollarSign, X, AlertTriangle, CheckCircle, Clock,
@@ -529,6 +530,7 @@ export default function CashRegister() {
   const { log, addEntry } = useCashRegister();
   const { currentShift, openShift } = useShift();
   const [addModal, setAddModal] = useState<"in" | "out" | null>(null);
+  const isMobile = useIsMobile();
 
   const ActiveIcon = tabs.find(t => t.id === active)!.icon;
 
@@ -546,7 +548,7 @@ export default function CashRegister() {
     <div style={{ display: "flex", flexDirection: "column", gap: 24, flex: 1, minHeight: 0 }}>
 
       {/* Header + sub-nav */}
-      <div className="fade-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+      <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div>
           <h1 className="heading-xl" style={{ fontSize: 24, color: "var(--text-primary)" }}>Cash Register</h1>
           <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 5 }}>
@@ -554,10 +556,11 @@ export default function CashRegister() {
           </p>
         </div>
 
+        <div className={isMobile ? "tabs-scroll" : undefined}>
         <div style={{
           display: "flex", gap: 4,
           background: "var(--bg-card)", border: "1px solid var(--border)",
-          borderRadius: 12, padding: 5,
+          borderRadius: 12, padding: 5, width: "fit-content",
         }}>
           {tabs.map(({ id, icon: Icon, label }) => {
             const isActive = active === id;
@@ -580,6 +583,7 @@ export default function CashRegister() {
               </button>
             );
           })}
+        </div>
         </div>
       </div>
 

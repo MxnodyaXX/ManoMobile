@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Plus, Search, Edit2, X, Truck, Phone, Mail, MapPin, ExternalLink } from "lucide-react";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useAdmin, type Supplier, type SupplierCategory } from "@/admin/contexts/AdminContext";
 
 const AA = "#a78bfa";
@@ -112,6 +113,7 @@ function SupplierModal({ initial, onSave, onClose }: {
 
 export default function Suppliers() {
   const { suppliers, addSupplier, updateSupplier } = useAdmin();
+  const isMobile = useIsMobile();
   const [query, setQuery]           = useState("");
   const [catFilter, setCatFilter]   = useState<SupplierCategory | "All">("All");
   const [statusFilter, setStatus]   = useState<"All" | "Active" | "Inactive">("All");
@@ -155,20 +157,24 @@ export default function Suppliers() {
       </div>
 
       {/* Filters */}
-      <div className="fade-up" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 9, padding: "0 12px", flex: "0 0 240px" }}>
+      <div className="fade-up" style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 10, alignItems: isMobile ? "stretch" : "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 9, padding: "0 12px", flex: isMobile ? undefined : "0 0 240px" }}>
           <Search size={13} color="var(--text-muted)" />
           <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search suppliers…" style={{ background: "none", border: "none", outline: "none", fontSize: 12.5, color: "var(--text-primary)", fontFamily: ff, padding: "9px 0", width: "100%" }} />
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
+        <div className={isMobile ? "tabs-scroll" : undefined}>
+        <div style={{ display: "flex", gap: 6, width: "fit-content" }}>
           {(["All", ...CATEGORIES] as const).map(c => (
-            <button key={c} onClick={() => setCatFilter(c as any)} style={filterBtn(catFilter === c)}>{c}</button>
+            <button key={c} onClick={() => setCatFilter(c as any)} style={{ ...filterBtn(catFilter === c), whiteSpace: "nowrap" }}>{c}</button>
           ))}
         </div>
-        <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+        </div>
+        <div className={isMobile ? "tabs-scroll" : undefined} style={isMobile ? undefined : { marginLeft: "auto" }}>
+        <div style={{ display: "flex", gap: 6, width: "fit-content" }}>
           {(["All", "Active", "Inactive"] as const).map(s => (
-            <button key={s} onClick={() => setStatus(s)} style={filterBtn(statusFilter === s)}>{s}</button>
+            <button key={s} onClick={() => setStatus(s)} style={{ ...filterBtn(statusFilter === s), whiteSpace: "nowrap" }}>{s}</button>
           ))}
+        </div>
         </div>
       </div>
 

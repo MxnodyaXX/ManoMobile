@@ -149,6 +149,7 @@ function TechPageInner() {
 
   const [techName, setTechName] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<TechPage>("Dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // If tech name passed via URL (from login page), auto-select it
   useEffect(() => {
@@ -160,8 +161,6 @@ function TechPageInner() {
   if (!techName) {
     return <TechSelect onSelect={setTechName} />;
   }
-
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const MANAGED_PAGES: TechPage[] = ["My Jobs", "Pending Collection", "Parts & Stock", "Job History", "My Performance", "My Shift"];
   const isManaged = MANAGED_PAGES.includes(activePage);
 

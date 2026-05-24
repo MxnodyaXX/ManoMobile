@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { FileBarChart2, TrendingUp, Scale, ArrowLeftRight, Receipt, FileDown, FileSpreadsheet, Download } from "lucide-react";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useAccounts } from "@/accounts/contexts/AccountsContext";
 import {
   exportIncomePDF, exportIncomeExcel,
@@ -405,6 +406,7 @@ const TABS: { id: ReportTab; label: string; icon: any; color: string }[] = [
 
 export default function FinancialReports() {
   const [activeTab, setActiveTab] = useState<ReportTab>("income");
+  const isMobile = useIsMobile();
 
   const { getPLData, getBalanceSheetData, getTaxSummary, getAccountBalance, getTotalAROutstanding, getTotalAPOutstanding } = useAccounts();
 
@@ -450,7 +452,8 @@ export default function FinancialReports() {
       </div>
 
       {/* Tab bar */}
-      <div className="fade-up" style={{ display: "flex", gap: 10 }}>
+      <div className={`fade-up${isMobile ? " tabs-scroll" : ""}`}>
+      <div style={{ display: "flex", gap: 10, width: "fit-content" }}>
         {TABS.map(t => {
           const active = activeTab === t.id;
           return (
@@ -464,6 +467,7 @@ export default function FinancialReports() {
             </button>
           );
         })}
+      </div>
       </div>
 
       <div className="fade-up">

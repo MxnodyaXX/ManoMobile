@@ -3,6 +3,7 @@
 import { useMemo, useRef } from "react";
 import { ShoppingBag, Smartphone, Wrench, MoreHorizontal, TrendingUp, DollarSign, ShoppingCart } from "lucide-react";
 import { useSales } from "@/cashier/contexts/SalesContext";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import ExportButtons from "@/cashier/components/shared/ExportButtons";
 import { exportToPdf, exportToExcel, exportToPng } from "@/cashier/utils/exportUtils";
 
@@ -31,6 +32,7 @@ function MiniBar({ value, max, color }: { value: number; max: number; color: str
 
 export default function DailySummary() {
   const { sales } = useSales();
+  const isMobile = useIsMobile();
   const containerRef = useRef<HTMLDivElement>(null);
 
   const { CATEGORIES, totals, recent } = useMemo(() => {
@@ -85,7 +87,9 @@ export default function DailySummary() {
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {/* Date header */}
       <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
+        display: "flex", flexDirection: isMobile ? "column" : "row",
+        alignItems: isMobile ? "stretch" : "center", justifyContent: isMobile ? undefined : "space-between",
+        gap: isMobile ? 10 : 0,
         background: "var(--bg-card)", border: "1px solid var(--border)",
         borderRadius: 12, padding: "14px 18px",
       }}>
@@ -93,21 +97,23 @@ export default function DailySummary() {
           <p style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>Daily Sales Summary</p>
           <p style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{TODAY_LABEL}</p>
         </div>
-        <div style={{
-          fontSize: 11, fontWeight: 600, padding: "5px 12px", borderRadius: 20,
-          background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.25)", color: "#4ade80",
-        }}>
-          Live
+        <div style={{ display: "flex", alignItems: "center", justifyContent: isMobile ? "space-between" : undefined, gap: isMobile ? 0 : undefined }}>
+          <div style={{
+            fontSize: 11, fontWeight: 600, padding: "5px 12px", borderRadius: 20,
+            background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.25)", color: "#4ade80",
+          }}>
+            Live
+          </div>
+          <ExportButtons
+            onPdf={()   => exportToPdf(`Daily Summary — ${TODAY_ISO}`, DS_HEADERS, dsRows(), dsFilename, "portrait")}
+            onExcel={()  => exportToExcel(dsFilename, "Daily Summary", DS_HEADERS, dsRows())}
+            onPng={() => { if (containerRef.current) exportToPng(containerRef.current, dsFilename); }}
+          />
         </div>
-        <ExportButtons
-          onPdf={()   => exportToPdf(`Daily Summary — ${TODAY_ISO}`, DS_HEADERS, dsRows(), dsFilename, "portrait")}
-          onExcel={()  => exportToExcel(dsFilename, "Daily Summary", DS_HEADERS, dsRows())}
-          onPng={() => { if (containerRef.current) exportToPng(containerRef.current, dsFilename); }}
-        />
       </div>
 
       {/* Summary cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: 12 }}>
         {summaryCards.map(card => {
           const Icon = card.icon;
           return (
@@ -133,7 +139,7 @@ export default function DailySummary() {
       </div>
 
       {/* Category breakdown + Recent transactions */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16 }}>
 
         {/* Category breakdown */}
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px" }}>

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import StockReceiving from "./StockReceiving";
 import { useInventory } from "@/cashier/contexts/InventoryContext";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1010,6 +1011,7 @@ function StockAdjustModal({ product, onSave, onClose }: {
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
 
 function OverviewTab({ devices, accessories }: { devices: DeviceItem[]; accessories: AccessoryProduct[] }) {
+  const isMobile = useIsMobile();
   const availableDevices = devices.filter(d => d.status === "available");
   const soldDevices = devices.filter(d => d.status === "sold");
   const mobileStockValue = availableDevices.reduce((s, d) => s + d.buyingPrice, 0);
@@ -1025,7 +1027,7 @@ function OverviewTab({ devices, accessories }: { devices: DeviceItem[]; accessor
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: isMobile ? 10 : 16 }}>
         {([
           { icon: <Smartphone size={18} />, iconBg: "var(--accent-dim)", iconColor: "var(--accent)", title: "Mobile Devices", main: `${availableDevices.length} available`, sub: `${soldDevices.length} sold · Stock ${Rs(mobileStockValue)}` },
           { icon: <Package size={18} />,    iconBg: "#dbeafe",           iconColor: "#1d4ed8",       title: "Accessories",    main: `${accessories.length} SKUs`,           sub: `Total stock value ${Rs(accessoryStockValue)}` },
@@ -1045,7 +1047,7 @@ function OverviewTab({ devices, accessories }: { devices: DeviceItem[]; accessor
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16 }}>
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
           <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
             <AlertTriangle size={15} color="#b45309" />
@@ -1107,15 +1109,16 @@ function OverviewTab({ devices, accessories }: { devices: DeviceItem[]; accessor
           const m = d.suggestedPrice - d.buyingPrice;
           const mp = marginPct(d.buyingPrice, d.suggestedPrice);
           return (
-            <div key={d.id} style={{ padding: "11px 20px", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid var(--border)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            <div key={d.id} style={{ padding: "11px 16px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid var(--border)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>{d.name}</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>{d.imei} · {d.storage} · {d.color}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>{isMobile ? `${d.storage} · ${d.color}` : `${d.imei} · ${d.storage} · ${d.color}`}</div>
+                {isMobile && <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 600, marginTop: 2 }}>+{Rs(m)} ({mp}%)</div>}
               </div>
-              <div style={{ fontSize: 12, color: "var(--text-secondary)", minWidth: 120 }}>{d.supplier}</div>
-              <div style={{ fontSize: 12, color: "var(--text-secondary)", minWidth: 120, textAlign: "right" }}>Cost: {Rs(d.buyingPrice)}</div>
-              <div style={{ fontSize: 12, color: "#16a34a", fontWeight: 600, minWidth: 100, textAlign: "right" }}>+{Rs(m)} ({mp}%)</div>
-              <span style={{ background: sc.bg, color: sc.color, fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, minWidth: 72, textAlign: "center" }}>{sc.label}</span>
+              {!isMobile && <div style={{ fontSize: 12, color: "var(--text-secondary)", minWidth: 120 }}>{d.supplier}</div>}
+              {!isMobile && <div style={{ fontSize: 12, color: "var(--text-secondary)", minWidth: 120, textAlign: "right" }}>Cost: {Rs(d.buyingPrice)}</div>}
+              {!isMobile && <div style={{ fontSize: 12, color: "#16a34a", fontWeight: 600, minWidth: 100, textAlign: "right" }}>+{Rs(m)} ({mp}%)</div>}
+              <span style={{ background: sc.bg, color: sc.color, fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, minWidth: 72, textAlign: "center", flexShrink: 0 }}>{sc.label}</span>
             </div>
           );
         })}
@@ -1129,6 +1132,7 @@ function OverviewTab({ devices, accessories }: { devices: DeviceItem[]; accessor
 function MobileDevicesTab({ devices, setDevices }: {
   devices: DeviceItem[]; setDevices: Dispatch<SetStateAction<DeviceItem[]>>;
 }) {
+  const isMobile = useIsMobile();
   const [search, setSearch] = useState("");
   const [brandFilter, setBrandFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -1169,7 +1173,7 @@ function MobileDevicesTab({ devices, setDevices }: {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: 10 }}>
         {([
           { label: "Available", value: available, color: "#16a34a", bg: "#dcfce7" },
           { label: "Sold", value: sold, color: "var(--text-muted)", bg: "var(--bg-surface)" },
@@ -1183,20 +1187,22 @@ function MobileDevicesTab({ devices, setDevices }: {
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <div style={{ position: "relative", flex: 1, maxWidth: 380 }}>
+      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 10, alignItems: isMobile ? "stretch" : "center" }}>
+        <div style={{ position: "relative", flex: 1 }}>
           <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by IMEI, name, brand, supplier…" style={{ ...inputStyle, paddingLeft: 36 }} />
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by IMEI, name, brand, supplier…" style={{ ...inputStyle, paddingLeft: 36, width: "100%", boxSizing: "border-box" as const }} />
         </div>
-        <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} style={selectStyle}>
-          {brands.map(b => <option key={b}>{b}</option>)}
-        </select>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={selectStyle}>
-          {["All", "Available", "Reserved", "Sold"].map(s => <option key={s}>{s}</option>)}
-        </select>
-        <button onClick={() => setEditDevice("new")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 16px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
-          <Plus size={14} /> Add Device
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} style={{ ...selectStyle, flex: isMobile ? 1 : undefined }}>
+            {brands.map(b => <option key={b}>{b}</option>)}
+          </select>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ ...selectStyle, flex: isMobile ? 1 : undefined }}>
+            {["All", "Available", "Reserved", "Sold"].map(s => <option key={s}>{s}</option>)}
+          </select>
+          <button onClick={() => setEditDevice("new")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 16px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
+            <Plus size={14} />{isMobile ? "Add" : "Add Device"}
+          </button>
+        </div>
       </div>
 
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
@@ -1271,6 +1277,7 @@ function MobileDevicesTab({ devices, setDevices }: {
 function AccessoriesTab({ accessories, setAccessories }: {
   accessories: AccessoryProduct[]; setAccessories: Dispatch<SetStateAction<AccessoryProduct[]>>;
 }) {
+  const isMobile = useIsMobile();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [stockFilter, setStockFilter] = useState("All");
@@ -1305,7 +1312,7 @@ function AccessoriesTab({ accessories, setAccessories }: {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: 10 }}>
         {([
           { label: "Total Products", value: accessories.length, color: "var(--text-primary)", bg: "var(--bg-surface)" },
           { label: "In Stock", value: inStock, color: "#16a34a", bg: "#dcfce7" },
@@ -1319,23 +1326,25 @@ function AccessoriesTab({ accessories, setAccessories }: {
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <div style={{ position: "relative", flex: 1, maxWidth: 380 }}>
+      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 10, alignItems: isMobile ? "stretch" : "center" }}>
+        <div style={{ position: "relative", flex: 1 }}>
           <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by code, name, brand, supplier…" style={{ ...inputStyle, paddingLeft: 36 }} />
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by code, name, brand, supplier…" style={{ ...inputStyle, paddingLeft: 36, width: "100%", boxSizing: "border-box" as const }} />
         </div>
-        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} style={selectStyle}>
-          {categories.map(c => <option key={c}>{c}</option>)}
-        </select>
-        <select value={stockFilter} onChange={e => setStockFilter(e.target.value)} style={selectStyle}>
-          {["All", "In Stock", "Low Stock", "Out of Stock"].map(s => <option key={s}>{s}</option>)}
-        </select>
-        <div style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
-          Value: <strong style={{ color: "var(--text-primary)" }}>{Rs(totalValue)}</strong>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} style={{ ...selectStyle, flex: 1 }}>
+            {categories.map(c => <option key={c}>{c}</option>)}
+          </select>
+          <select value={stockFilter} onChange={e => setStockFilter(e.target.value)} style={{ ...selectStyle, flex: 1 }}>
+            {["All", "In Stock", "Low Stock", "Out of Stock"].map(s => <option key={s}>{s}</option>)}
+          </select>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
+            Value: <strong style={{ color: "var(--text-primary)" }}>{Rs(totalValue)}</strong>
+          </div>
+          <button onClick={() => setEditProduct("new")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 16px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
+            <Plus size={14} /> {isMobile ? "Add" : "Add Product"}
+          </button>
         </div>
-        <button onClick={() => setEditProduct("new")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 16px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
-          <Plus size={14} /> Add Product
-        </button>
       </div>
 
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
@@ -1427,6 +1436,7 @@ export default function InventoryManagement() {
   const [tab, setTab] = useState<InventoryTab>("Overview");
   const [devices, setDevices] = useState<DeviceItem[]>(INITIAL_DEVICES);
   const [accessories, setAccessories] = useState<AccessoryProduct[]>(INITIAL_ACCESSORIES);
+  const isMobile = useIsMobile();
 
   const lowStockCount = accessories.filter(p => p.stock >= 0 && p.stock < p.minStock).length;
 
@@ -1439,14 +1449,15 @@ export default function InventoryManagement() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24, flex: 1, minHeight: 0 }}>
-      <div className="fade-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+      <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div>
           <h1 className="heading-xl" style={{ fontSize: 24, color: "var(--text-primary)" }}>Inventory Management</h1>
           <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 5 }}>
             Track devices, accessories, stock levels, and margins.
           </p>
         </div>
-        <div style={{ display: "flex", gap: 6, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 6 }}>
+        <div className={isMobile ? "tabs-scroll" : undefined}>
+        <div style={{ display: "flex", gap: 6, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 6, width: "fit-content" }}>
           {tabs.map(({ id, icon: Icon, label }) => {
             const isActive = tab === id;
             return (
@@ -1467,6 +1478,7 @@ export default function InventoryManagement() {
               </button>
             );
           })}
+        </div>
         </div>
       </div>
 

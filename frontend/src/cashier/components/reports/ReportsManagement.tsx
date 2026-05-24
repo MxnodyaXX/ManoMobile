@@ -16,6 +16,7 @@ import {
 } from "recharts";
 import ExportButtons from "@/cashier/components/shared/ExportButtons";
 import { exportToExcel, exportToPng, exportMultiSectionToExcel, exportReportToPdf } from "@/cashier/utils/exportUtils";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 
 type ReportTab = "Daily Report" | "Sales Report" | "Repair Report" | "P&L Report" | "Stock Valuation" | "Cashier Performance" | "Supplier Report" | "Credit Aging" | "Repair SLA";
 
@@ -2319,6 +2320,7 @@ export default function ReportsManagement() {
   const [active, setActive] = useState<ReportTab>("Daily Report");
   const [dateFrom, setDateFrom] = useState(() => new Date().toISOString().slice(0, 10));
   const [dateTo,   setDateTo]   = useState(() => new Date().toISOString().slice(0, 10));
+  const isMobile = useIsMobile();
 
   const ActiveIcon = tabs.find(t => t.id === active)!.icon;
 
@@ -2326,7 +2328,7 @@ export default function ReportsManagement() {
     <div style={{ display: "flex", flexDirection: "column", gap: 24, flex: 1, minHeight: 0 }}>
 
       {/* Header + sub-nav */}
-      <div className="fade-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+      <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div>
           <h1 className="heading-xl" style={{ fontSize: 24, color: "var(--text-primary)" }}>Reports</h1>
           <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 5 }}>
@@ -2334,10 +2336,11 @@ export default function ReportsManagement() {
           </p>
         </div>
 
+        <div className={isMobile ? "tabs-scroll" : undefined}>
         <div style={{
           display: "flex", gap: 4,
           background: "var(--bg-card)", border: "1px solid var(--border)",
-          borderRadius: 12, padding: 5,
+          borderRadius: 12, padding: 5, width: "fit-content",
         }}>
           {tabs.map(({ id, icon: Icon, label }) => {
             const isActive = active === id;
@@ -2360,6 +2363,7 @@ export default function ReportsManagement() {
               </button>
             );
           })}
+        </div>
         </div>
       </div>
 

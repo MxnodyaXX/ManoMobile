@@ -574,21 +574,21 @@ function Step1({
   const stockColor = (s: number) => s > 20 ? "#4ade80" : s > 5 ? "#f59e0b" : "#ef4444";
 
   return (
-    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 0, flex: 1, minHeight: 0, overflowY: isMobile ? "auto" : undefined }}>
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 0, flex: isMobile ? undefined : 1, minHeight: isMobile ? undefined : 0 }}>
 
       {/* ── Left: Search + Product List ── */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, minHeight: 0 }}>
+      <div style={{ flex: isMobile ? undefined : 1, display: "flex", flexDirection: "column", gap: 10, minHeight: isMobile ? undefined : 0 }}>
 
         {/* Search bar row */}
-        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: isMobile ? "wrap" : "nowrap" }}>
           <input
-            style={{ ...inputStyle, flex: "0 0 180px" }}
+            style={{ ...inputStyle, flex: isMobile ? "1 1 120px" : "0 0 180px" }}
             placeholder="SCAN Barcode"
             value={barcodeVal}
             onChange={(e) => setBarcodeVal(e.target.value)}
           />
           <input
-            style={{ ...inputStyle, flex: "0 0 900px" }}
+            style={{ ...inputStyle, flex: 1, minWidth: isMobile ? "100%" : 200 }}
             placeholder="Enter Item Code or Name"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -630,9 +630,12 @@ function Step1({
 
         {/* Product list */}
         <div style={{
-          flex: 1, overflowY: "auto", minHeight: 0, paddingRight: 4,
+          flex: isMobile ? undefined : 1,
+          overflowY: isMobile ? "visible" : "auto",
+          minHeight: isMobile ? undefined : 0,
+          paddingRight: 4,
           ...(viewMode === "grid"
-            ? { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, alignContent: "flex-start" }
+            ? { display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: 8, alignContent: "flex-start" }
             : { display: "flex", flexDirection: "column", gap: 8 }),
         }}>
           {filtered.length === 0 && (
@@ -735,19 +738,29 @@ function Step1({
 
                 {/* Main info */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{p.name}</span>
-                    <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>|</span>
-                    <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{p.model}</span>
-                    <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>|</span>
-                    <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{p.brand}</span>
-                  </div>
-                  <div style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 2 }}>
-                    {p.supplier}
-                  </div>
-                  <div style={{ fontSize: 11, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 3, fontStyle: "italic" }}>
-                    💡 {p.insight}
-                  </div>
+                  {isMobile ? (
+                    <>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.model} · {p.brand}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.supplier}</div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{p.name}</span>
+                        <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>|</span>
+                        <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{p.model}</span>
+                        <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>|</span>
+                        <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{p.brand}</span>
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 2 }}>
+                        {p.supplier}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 3, fontStyle: "italic" }}>
+                        💡 {p.insight}
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Right: price + stock + actions */}
@@ -831,7 +844,7 @@ function Step1({
       </div>
 
       {/* ── Right panel ── */}
-      <div style={{ width: isMobile ? "100%" : 350, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", paddingRight: 2, paddingTop: isMobile ? 12 : 0 }}>
+      <div style={{ width: isMobile ? "100%" : 350, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12, overflowY: isMobile ? "visible" : "auto", paddingRight: 2, paddingTop: isMobile ? 12 : 0 }}>
 
         {/* Bill Summary */}
         <div style={{

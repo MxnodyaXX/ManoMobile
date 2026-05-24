@@ -574,45 +574,69 @@ export default function OtherSales() {
               style={inputStyle}
             />
           </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <div style={{ flex: 2 }}>
-              <label style={labelStyle}>Unit Price (Rs.)</label>
-              <input
-                type="number" min={0} value={unitPrice}
-                onChange={e => { setUnitPrice(e.target.value); setFormError(""); }}
-                onKeyDown={e => e.key === "Enter" && addItem()}
-                placeholder="0"
-                style={inputStyle}
-              />
+          {isMobile ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", gap: 10 }}>
+                <div style={{ flex: 2 }}>
+                  <label style={labelStyle}>Unit Price (Rs.)</label>
+                  <input type="number" min={0} value={unitPrice} onChange={e => { setUnitPrice(e.target.value); setFormError(""); }} onKeyDown={e => e.key === "Enter" && addItem()} placeholder="0" style={inputStyle} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={labelStyle}>Qty</label>
+                  <input type="number" min={1} value={qty} onChange={e => setQty(e.target.value)} onKeyDown={e => e.key === "Enter" && addItem()} style={inputStyle} />
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+                <div style={{ flex: 1 }}>
+                  <label style={labelStyle}>Discount (Rs.)</label>
+                  <input type="number" min={0} value={itemDiscount} onChange={e => setItemDiscount(e.target.value)} onKeyDown={e => e.key === "Enter" && addItem()} placeholder="0" style={inputStyle} />
+                </div>
+                <button onClick={addItem} style={{ height: 40, width: 40, borderRadius: 8, border: "none", background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                  <Plus size={16} />
+                </button>
+              </div>
             </div>
-            <div style={{ flex: 1 }}>
-              <label style={labelStyle}>Qty</label>
-              <input
-                type="number" min={1} value={qty}
-                onChange={e => setQty(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && addItem()}
-                style={inputStyle}
-              />
+          ) : (
+            <div style={{ display: "flex", gap: 10 }}>
+              <div style={{ flex: 2 }}>
+                <label style={labelStyle}>Unit Price (Rs.)</label>
+                <input
+                  type="number" min={0} value={unitPrice}
+                  onChange={e => { setUnitPrice(e.target.value); setFormError(""); }}
+                  onKeyDown={e => e.key === "Enter" && addItem()}
+                  placeholder="0"
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Qty</label>
+                <input
+                  type="number" min={1} value={qty}
+                  onChange={e => setQty(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && addItem()}
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 2 }}>
+                <label style={labelStyle}>Item Discount (Rs.)</label>
+                <input
+                  type="number" min={0} value={itemDiscount}
+                  onChange={e => setItemDiscount(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && addItem()}
+                  placeholder="0"
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ display: "flex", alignItems: "flex-end" }}>
+                <button
+                  onClick={addItem}
+                  style={{ height: 40, width: 40, borderRadius: 8, border: "none", background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
             </div>
-            <div style={{ flex: 2 }}>
-              <label style={labelStyle}>Item Discount (Rs.)</label>
-              <input
-                type="number" min={0} value={itemDiscount}
-                onChange={e => setItemDiscount(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && addItem()}
-                placeholder="0"
-                style={inputStyle}
-              />
-            </div>
-            <div style={{ display: "flex", alignItems: "flex-end" }}>
-              <button
-                onClick={addItem}
-                style={{ height: 40, width: 40, borderRadius: 8, border: "none", background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}
-              >
-                <Plus size={16} />
-              </button>
-            </div>
-          </div>
+          )}
           {formError && (
             <div style={{ fontSize: 11, color: "#ef4444", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{formError}</div>
           )}

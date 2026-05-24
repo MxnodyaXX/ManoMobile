@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useMemo } from "react";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import ExportButtons from "@/cashier/components/shared/ExportButtons";
 import { exportToPdf, exportToExcel, exportToPng } from "@/cashier/utils/exportUtils";
@@ -447,9 +448,8 @@ function PickupModal({ job, onClose, onConfirm }: {
 
 // ─── Job Details Modal ────────────────────────────────────────────────────────
 
-function JobDetailsModal({ job, allJobs, onClose, onFinishJob, onIssueJob, onCancelJob, onPickup, onPrintSlip }: {
+function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, onPickup, onPrintSlip }: {
   job: RepairJob;
-  allJobs: RepairJob[];
   onClose: () => void;
   onFinishJob: () => void;
   onIssueJob: () => void;
@@ -457,8 +457,7 @@ function JobDetailsModal({ job, allJobs, onClose, onFinishJob, onIssueJob, onCan
   onPickup: () => void;
   onPrintSlip: () => void;
 }) {
-  const [logSearch,        setLogSearch]        = useState("");
-  const [showFinishedOnly, setShowFinishedOnly] = useState(false);
+  const isMobile = useIsMobile();
 
   const sc      = statusConfig[job.status];
   const StatusIcon = sc.icon;
@@ -474,15 +473,6 @@ function JobDetailsModal({ job, allJobs, onClose, onFinishJob, onIssueJob, onCan
     ["No power",  "Charging",    "Signal drop",     "Hands free mark", "Short"],
   ];
 
-  const logJobs = allJobs.filter(j => {
-    const s = logSearch.toLowerCase();
-    const matchSearch = !s || j.customerName.toLowerCase().includes(s) || j.id.toLowerCase().includes(s) || (j.imei || "").includes(s) || j.issue.toLowerCase().includes(s);
-    const matchDone   = !showFinishedOnly || j.status === "Completed" || j.status === "Issued";
-    return matchSearch && matchDone;
-  });
-
-  const statusShort = (s: JobStatus) => ({ "Non-Issued": "N/I", "Issued": "ISS", "Pending": "PND", "Completed": "FIN", "Delivered": "DEL", "Cancelled": "CXL" }[s]);
-
   const fieldBox: React.CSSProperties = { padding: "7px 10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", minHeight: 33, display: "flex", alignItems: "center" };
   const secHead: React.CSSProperties  = { fontSize: 10, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase" as const, marginBottom: 10, fontFamily: "'Plus Jakarta Sans', sans-serif" };
 
@@ -495,15 +485,15 @@ function JobDetailsModal({ job, allJobs, onClose, onFinishJob, onIssueJob, onCan
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "100%", maxWidth: 1240, maxHeight: "calc(100vh - 40px)", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.55)" }}>
 
         {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0, flexWrap: isMobile ? "wrap" : undefined, gap: isMobile ? 8 : 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <span style={{ fontSize: 15, fontWeight: 700, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{job.id}</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 9px", borderRadius: 7, background: sc.bg, border: `1px solid ${sc.border}`, color: sc.color, fontSize: 11, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
               <StatusIcon size={9} strokeWidth={2.5} />{job.status}
             </span>
             <span style={{ fontSize: 11, fontWeight: 600, color: priorityColor[job.priority], fontFamily: "'Plus Jakarta Sans', sans-serif" }}>● {job.priority}</span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: isMobile ? "wrap" : undefined, justifyContent: isMobile ? "flex-end" : undefined }}>
             <button onClick={onPrintSlip} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
               <FileText size={11} strokeWidth={2} />Intake Slip
             </button>
@@ -533,11 +523,11 @@ function JobDetailsModal({ job, allJobs, onClose, onFinishJob, onIssueJob, onCan
           </div>
         </div>
 
-        {/* Two-panel body */}
-        <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
+        {/* Body */}
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
 
-          {/* LEFT: Job detail */}
-          <div style={{ flex: "0 0 52%", borderRight: "1px solid var(--border)", overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Job detail */}
+          <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
 
             <div>
               <div style={secHead}>Job details</div>
@@ -545,7 +535,7 @@ function JobDetailsModal({ job, allJobs, onClose, onFinishJob, onIssueJob, onCan
                 <label style={labelSt}>Dealer</label>
                 <div style={{ ...fieldBox, color: "var(--text-secondary)" }}>{job.dealer || "MANO MOBILE CENTRE"}</div>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10, marginBottom: 8 }}>
                 <div>
                   <label style={labelSt}>Internal number</label>
                   <div style={{ ...fieldBox, color: "var(--accent)", fontWeight: 600 }}>{job.id}</div>
@@ -563,7 +553,7 @@ function JobDetailsModal({ job, allJobs, onClose, onFinishJob, onIssueJob, onCan
 
             <div>
               <div style={secHead}>Owner data</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
                 <div>
                   <label style={labelSt}>Name</label>
                   <div style={{ ...fieldBox, fontWeight: 600 }}>{job.customerName}</div>
@@ -575,7 +565,7 @@ function JobDetailsModal({ job, allJobs, onClose, onFinishJob, onIssueJob, onCan
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
               <div>
                 <label style={labelSt}>Accepted date</label>
                 <div style={{ ...fieldBox, color: "var(--text-secondary)" }}>{dayName}, {monthName} {d.getDate()}, {d.getFullYear()}</div>
@@ -585,7 +575,7 @@ function JobDetailsModal({ job, allJobs, onClose, onFinishJob, onIssueJob, onCan
                 <div style={{ ...fieldBox, fontWeight: 600 }}>{job.brand} {job.model}</div>
               </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
               <div>
                 <label style={labelSt}>Accepted by</label>
                 <div style={{ ...fieldBox, color: "var(--text-muted)", fontStyle: "italic" }}>—</div>
@@ -611,13 +601,15 @@ function JobDetailsModal({ job, allJobs, onClose, onFinishJob, onIssueJob, onCan
             <div>
               <div style={secHead}>Submission details</div>
               <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", background: "var(--bg-secondary)" }}>
-                <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
-                  {["Equipment", "Antenna", "Back cover", "Other issue"].map(item => (
-                    <label key={item} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text-secondary)", cursor: "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                      <input type="checkbox" disabled readOnly style={{ accentColor: "var(--accent)" }} />{item}
-                    </label>
-                  ))}
-                  <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: isMobile ? 8 : 18, flexWrap: "wrap", marginBottom: 8, alignItems: isMobile ? "flex-start" : "center" }}>
+                  <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+                    {["Equipment", "Antenna", "Back cover", "Other issue"].map(item => (
+                      <label key={item} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text-secondary)", cursor: "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                        <input type="checkbox" disabled readOnly style={{ accentColor: "var(--accent)" }} />{item}
+                      </label>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: isMobile ? undefined : "auto" }}>
                     <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase" as const, letterSpacing: "0.06em" }}>Warranty</span>
                     {(["Yes", "No"] as const).map(opt => (
                       <label key={opt} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-secondary)", cursor: "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
@@ -651,87 +643,6 @@ function JobDetailsModal({ job, allJobs, onClose, onFinishJob, onIssueJob, onCan
                     })}
                   </div>
                 ))}
-              </div>
-            </div>
-          </div>
-
-          {/* RIGHT: Daily log */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-
-            <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-              <div style={secHead}>Daily log</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ position: "relative", flex: 1 }}>
-                  <Search size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
-                  <input value={logSearch} onChange={e => setLogSearch(e.target.value)} placeholder="Search..."
-                    style={{ width: "100%", padding: "7px 10px 7px 28px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-primary)", color: "var(--text-primary)", fontSize: 12, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", boxSizing: "border-box" as const }} />
-                </div>
-                <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--text-secondary)", cursor: "pointer", whiteSpace: "nowrap", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                  <input type="checkbox" checked={showFinishedOnly} onChange={e => setShowFinishedOnly(e.target.checked)} style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
-                  Finished only
-                </label>
-              </div>
-            </div>
-
-            <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                    {["Dealer", "Job No.", "IMEI", "Fault", "Advance", "Total", "Status"].map(h => (
-                      <th key={h} style={{ padding: "9px 12px", textAlign: "left", fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" as const, whiteSpace: "nowrap", fontFamily: "'Plus Jakarta Sans', sans-serif", background: "var(--bg-secondary)", position: "sticky" as const, top: 0 }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {logJobs.length === 0 ? (
-                    <tr><td colSpan={7} style={{ padding: "32px", textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>No jobs found</td></tr>
-                  ) : logJobs.map(j => {
-                    const jsc = statusConfig[j.status];
-                    const isCurrent = j.id === job.id;
-                    return (
-                      <tr key={j.id} style={{ borderBottom: "1px solid var(--border)", background: isCurrent ? jsc.bg : "transparent" }}>
-                        <td style={{ padding: "8px 12px", fontSize: 12, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{j.dealer || "MANO MOBILE"}</td>
-                        <td style={{ padding: "8px 12px", fontSize: 12, color: "var(--accent)", fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{j.id}</td>
-                        <td style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace" }}>{j.imei || "—"}</td>
-                        <td style={{ padding: "8px 12px", fontSize: 11.5, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.issue}</td>
-                        <td style={{ padding: "8px 12px", fontSize: 12, color: "var(--text-primary)", textAlign: "right", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{j.advancePaid.toLocaleString()}</td>
-                        <td style={{ padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text-primary)", textAlign: "right", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{j.estimatedCost.toLocaleString()}</td>
-                        <td style={{ padding: "8px 12px" }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5, background: jsc.bg, border: `1px solid ${jsc.border}`, color: jsc.color, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
-                            {statusShort(j.status)}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
-              <div style={{ display: "flex", gap: 24, marginBottom: 10, alignItems: "center" }}>
-                {[
-                  { label: "Advance",  value: job.advancePaid.toLocaleString(),   color: "var(--text-primary)" },
-                  { label: "Total",    value: job.estimatedCost.toLocaleString(),  color: "var(--text-primary)" },
-                  { label: "Balance",  value: balance.toLocaleString(),            color: balance > 0 ? "#f87171" : "#4ade80" },
-                ].map(({ label, value, color }) => (
-                  <div key={label} style={{ fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                    <span style={{ color: "var(--text-muted)" }}>{label}: </span>
-                    <span style={{ fontWeight: 700, color }}>{value}</span>
-                  </div>
-                ))}
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s" }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--accent-glow)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--accent)"; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-secondary)"; }}>
-                  Jobs on credit
-                </button>
-                <button style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s" }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--accent-glow)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--accent)"; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-secondary)"; }}>
-                  View open jobs
-                </button>
               </div>
             </div>
           </div>
@@ -1156,6 +1067,7 @@ interface JobsTableProps {
 export default function JobsTable({ filterStatus = "All" }: JobsTableProps) {
   const { addEntry } = useCashRegister();
   const { jobs: allJobs, updateJob } = useRepair();
+  const isMobile = useIsMobile();
   const [search,         setSearch]         = useState("");
   const [showFilters,    setShowFilters]    = useState(false);
   const [priorityFilter, setPriorityFilter] = useState("All");
@@ -1261,30 +1173,34 @@ export default function JobsTable({ filterStatus = "All" }: JobsTableProps) {
       )}
 
       {/* Toolbar */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ position: "relative", flex: 1, maxWidth: 360 }}>
-          <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: searchFocused ? "var(--accent)" : "var(--text-muted)", transition: "color 0.18s", pointerEvents: "none" }} />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
-            placeholder="Search by name, ID, device..."
-            style={{ width: "100%", background: "var(--bg-card)", border: `1px solid ${searchFocused ? "var(--accent)" : "var(--border)"}`, borderRadius: 10, padding: "10px 14px 10px 36px", fontSize: 13.5, color: "var(--text-primary)", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "border-color 0.18s" }} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {/* Row 1: Search + Filters */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ position: "relative", flex: 1 }}>
+            <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: searchFocused ? "var(--accent)" : "var(--text-muted)", transition: "color 0.18s", pointerEvents: "none" }} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
+              placeholder="Search by name, ID, device..."
+              style={{ width: "100%", background: "var(--bg-card)", border: `1px solid ${searchFocused ? "var(--accent)" : "var(--border)"}`, borderRadius: 10, padding: "10px 14px 10px 36px", fontSize: 13.5, color: "var(--text-primary)", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "border-color 0.18s" }} />
+          </div>
+          <button onClick={() => setShowFilters(!showFilters)}
+            style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 14px", borderRadius: 10, border: `1px solid ${showFilters ? "var(--accent-glow)" : "var(--border)"}`, background: showFilters ? "var(--accent-dim)" : "var(--bg-card)", color: showFilters ? "var(--accent)" : "var(--text-secondary)", fontSize: 13, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.18s", whiteSpace: "nowrap" }}>
+            <Filter size={14} />{!isMobile && "Filters"}
+            <ChevronDown size={13} style={{ transform: showFilters ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
+          </button>
         </div>
-        <button onClick={() => setShowFilters(!showFilters)}
-          style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 16px", borderRadius: 10, border: `1px solid ${showFilters ? "var(--accent-glow)" : "var(--border)"}`, background: showFilters ? "var(--accent-dim)" : "var(--bg-card)", color: showFilters ? "var(--accent)" : "var(--text-secondary)", fontSize: 13.5, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.18s" }}>
-          <Filter size={14} />Filters
-          <ChevronDown size={13} style={{ transform: showFilters ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
-        </button>
-        <div style={{ marginLeft: "auto" }}>
-          <span style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}>
+        {/* Row 2: Count + Export */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
             {jobs.length} {jobs.length === 1 ? "job" : "jobs"}
           </span>
+          <div style={{ marginLeft: "auto" }}>
+            <ExportButtons
+              onPdf={()   => exportToPdf("Repair Jobs", JOB_HEADERS, jobRows(), jobFilename)}
+              onExcel={()  => exportToExcel(jobFilename, "Repair Jobs", JOB_HEADERS, jobRows())}
+              onPng={() => { if (!tableRef.current) return; return exportToPng(tableRef.current, jobFilename); }}
+            />
+          </div>
         </div>
-        <ExportButtons
-          onPdf={()   => exportToPdf("Repair Jobs", JOB_HEADERS, jobRows(), jobFilename)}
-          onExcel={()  => exportToExcel(jobFilename, "Repair Jobs", JOB_HEADERS, jobRows())}
-onPng={() => {
-  if (!tableRef.current) return;
-  return exportToPng(tableRef.current, jobFilename);
-}}        />
       </div>
 
       {showFilters && (
@@ -1310,9 +1226,8 @@ onPng={() => {
       )}
 
       {/* Table */}
-      <div className="table-scroll">
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <div className="table-scroll" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
                 {["Job ID", "Customer", "Device", "Issue", "Technician", "Status", "Priority", "Est. Cost", "Advance", "Balance", "Date", ""].map((h, i) => (
@@ -1392,14 +1307,12 @@ onPng={() => {
               })}
             </tbody>
           </table>
-        </div>
       </div>
 
       {/* Modals */}
       {detailsJob && (
         <JobDetailsModal
           job={detailsJob}
-          allJobs={allJobs}
           onClose={() => setDetailsJob(null)}
           onFinishJob={() => openFinish(detailsJob)}
           onIssueJob={() => openIssueJob(detailsJob)}

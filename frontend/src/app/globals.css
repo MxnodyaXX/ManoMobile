@@ -106,7 +106,12 @@ body {
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
 select option { background: var(--bg-card); color: var(--text-primary); }
 
-.table-scroll { overflow-x: auto; }
+.table-scroll {
+  overflow: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
 
 @keyframes shimmer {
   from { background-position: -400px 0; }
@@ -202,4 +207,36 @@ select option { background: var(--bg-card); color: var(--text-primary); }
 /* ── Responsive chart/card min-width ─────────────────────────────── */
 @media (max-width: 768px) {
   [data-pdf-chart], .recharts-wrapper { min-width: 0 !important; }
+}
+
+/* ── Mobile scroll fix for managed pages ─────────────────────────── */
+@media (max-width: 768px) {
+  /* Allow managed-page main area to scroll; children render at natural height */
+  .resp-main-tight {
+    overflow-y: auto !important;
+  }
+  .resp-main-tight > * {
+    flex: none !important;
+    min-height: auto !important;
+  }
+
+  /* Fix iOS Safari: typed text invisible when system overrides input colour */
+  input, textarea {
+    -webkit-text-fill-color: var(--text-primary);
+    -webkit-box-shadow: 0 0 0 100px var(--bg-card) inset;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    -webkit-text-fill-color: var(--text-muted);
+    opacity: 1;
+  }
+
+  /* Horizontally-scrollable tab/nav strip (hide scrollbar) */
+  .tabs-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .tabs-scroll::-webkit-scrollbar { display: none; }
 }

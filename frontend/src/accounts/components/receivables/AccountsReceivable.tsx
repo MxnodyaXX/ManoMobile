@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { ArrowDownCircle, Search, Plus, CheckCircle, AlertTriangle, X, Phone, Calendar } from "lucide-react";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useAccounts, type ARRecord } from "@/accounts/contexts/AccountsContext";
 
 const AA = "#f59e0b";
@@ -169,6 +170,7 @@ export default function AccountsReceivable() {
   const overdueTotal     = aging.slice(1).reduce((s, b) => s + b.total, 0);
 
   const inputStyle: React.CSSProperties = { background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: "var(--text-primary)", fontFamily: ff, outline: "none" };
+  const isMobile = useIsMobile();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, fontFamily: ff }}>
@@ -207,16 +209,20 @@ export default function AccountsReceivable() {
       )}
 
       {/* Filters */}
-      <div className="fade-up" style={{ display: "flex", gap: 10 }}>
-        <div style={{ position: "relative", flex: 1 }}>
+      <div className="fade-up" style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 10 }}>
+        <div style={{ position: "relative", flex: isMobile ? undefined : 1 }}>
           <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
           <input placeholder="Search by customer or invoice…" value={search} onChange={e => setSearch(e.target.value)} style={{ ...inputStyle, paddingLeft: 32, width: "100%", boxSizing: "border-box" }} />
         </div>
-        {(["All", "Outstanding", "Partial", "Overdue", "Paid"] as const).map(s => (
-          <button key={s} onClick={() => setFilterStatus(s)} style={{ padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: filterStatus === s ? 600 : 400, background: filterStatus === s ? `${AA}12` : "var(--bg-secondary)", border: `1px solid ${filterStatus === s ? AA + "30" : "var(--border)"}`, color: filterStatus === s ? AA : "var(--text-secondary)", cursor: "pointer", fontFamily: ff }}>
-            {s}
-          </button>
-        ))}
+        <div className={isMobile ? "tabs-scroll" : undefined}>
+        <div style={{ display: "flex", gap: 6, width: "fit-content" }}>
+          {(["All", "Outstanding", "Partial", "Overdue", "Paid"] as const).map(s => (
+            <button key={s} onClick={() => setFilterStatus(s)} style={{ padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: filterStatus === s ? 600 : 400, background: filterStatus === s ? `${AA}12` : "var(--bg-secondary)", border: `1px solid ${filterStatus === s ? AA + "30" : "var(--border)"}`, color: filterStatus === s ? AA : "var(--text-secondary)", cursor: "pointer", fontFamily: ff, whiteSpace: "nowrap" }}>
+              {s}
+            </button>
+          ))}
+        </div>
+        </div>
       </div>
 
       {/* Table */}

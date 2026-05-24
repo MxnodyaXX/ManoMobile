@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import Barcode from "react-barcode";
 import {
   Tag, Layers, Truck, Barcode as BarcodeIcon, Settings,
@@ -563,15 +564,17 @@ const tabs: { id: AdminTab; icon: React.ComponentType<{ size?: number; strokeWid
 
 export default function AdminControl() {
   const [tab, setTab] = useState<AdminTab>("Categories");
+  const isMobile = useIsMobile();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24, flex: 1, minHeight: 0 }}>
-      <div className="fade-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+      <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div>
           <h1 className="heading-xl" style={{ fontSize: 24, color: "var(--text-primary)" }}>Admin Control</h1>
           <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 5 }}>Manage reference data used across the inventory system.</p>
         </div>
-        <div style={{ display: "flex", gap: 6, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 6 }}>
+        <div className={isMobile ? "tabs-scroll" : undefined}>
+        <div style={{ display: "flex", gap: 6, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 6, width: "fit-content" }}>
           {tabs.map(({ id, icon: Icon, label }) => {
             const isActive = tab === id;
             return (
@@ -583,6 +586,7 @@ export default function AdminControl() {
               </button>
             );
           })}
+        </div>
         </div>
       </div>
       <div className="fade-up fade-up-2" style={{ borderTop: "1px solid var(--border)", marginTop: -8 }} />

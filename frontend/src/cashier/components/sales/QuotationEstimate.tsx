@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import {
   Plus, Trash2, Printer, FileText, X, CheckCircle,
   Clock, ChevronDown, Copy,
@@ -356,6 +357,7 @@ function QuoteForm({ existing, onSave, onCancel }: {
 // ─── Main QuotationEstimate Component ─────────────────────────────────────────
 
 export default function QuotationEstimate() {
+  const isMobile = useIsMobile();
   const [quotes,      setQuotes]      = useState<Quote[]>(SEED_QUOTES);
   const [mode,        setMode]        = useState<"list" | "new" | "edit">("list");
   const [editing,     setEditing]     = useState<Quote | undefined>(undefined);
@@ -399,45 +401,89 @@ export default function QuotationEstimate() {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* Toolbar */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ position: "relative" }}>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} style={{ ...inputStyle, paddingRight: 28, appearance: "none" as const, cursor: "pointer", minWidth: 140 }}>
-            <option value="All">All Quotes</option>
-            <option value="Active">Active</option>
-            <option value="Converted">Converted</option>
-            <option value="Expired">Expired</option>
-          </select>
-          <ChevronDown size={12} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
-        </div>
-
-        <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
-          {[
-            { label: "Total",     value: quotes.length,                                     color: "var(--text-primary)" },
-            { label: "Active",    value: quotes.filter(q => q.status === "Active").length,    color: "#4ade80"             },
-            { label: "Converted", value: quotes.filter(q => q.status === "Converted").length, color: "#60a5fa"             },
-            { label: "Expired",   value: quotes.filter(q => q.status === "Expired").length,   color: "#f87171"             },
-          ].map(c => (
-            <div key={c.label} style={{
-              background: "var(--bg-card)", border: "1px solid var(--border)",
-              borderRadius: 9, padding: "7px 12px", display: "flex", alignItems: "center", gap: 6,
-            }}>
-              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{c.label}</span>
-              <span style={{ fontSize: 14, fontWeight: 800, color: c.color }}>{c.value}</span>
+      {isMobile ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} style={{ ...inputStyle, paddingRight: 28, appearance: "none" as const, cursor: "pointer", width: "100%" }}>
+                <option value="All">All Quotes</option>
+                <option value="Active">Active</option>
+                <option value="Converted">Converted</option>
+                <option value="Expired">Expired</option>
+              </select>
+              <ChevronDown size={12} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
             </div>
-          ))}
+            <button
+              onClick={() => { setEditing(undefined); setMode("new"); }}
+              style={{
+                display: "flex", alignItems: "center", gap: 6, padding: "9px 14px",
+                borderRadius: 9, border: "1px solid var(--accent-glow)", background: "var(--accent-dim)",
+                color: "var(--accent)", cursor: "pointer", fontSize: 13, fontWeight: 600,
+                fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap", flexShrink: 0,
+              }}>
+              <Plus size={14} /> New Quotation
+            </button>
+          </div>
+          <div className="tabs-scroll">
+            <div style={{ display: "flex", gap: 8, width: "fit-content" }}>
+              {[
+                { label: "Total",     value: quotes.length,                                     color: "var(--text-primary)" },
+                { label: "Active",    value: quotes.filter(q => q.status === "Active").length,    color: "#4ade80"             },
+                { label: "Converted", value: quotes.filter(q => q.status === "Converted").length, color: "#60a5fa"             },
+                { label: "Expired",   value: quotes.filter(q => q.status === "Expired").length,   color: "#f87171"             },
+              ].map(c => (
+                <div key={c.label} style={{
+                  background: "var(--bg-card)", border: "1px solid var(--border)",
+                  borderRadius: 9, padding: "7px 12px", display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
+                }}>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{c.label}</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: c.color }}>{c.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
+      ) : (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ position: "relative" }}>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} style={{ ...inputStyle, paddingRight: 28, appearance: "none" as const, cursor: "pointer", minWidth: 140 }}>
+              <option value="All">All Quotes</option>
+              <option value="Active">Active</option>
+              <option value="Converted">Converted</option>
+              <option value="Expired">Expired</option>
+            </select>
+            <ChevronDown size={12} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+          </div>
 
-        <button
-          onClick={() => { setEditing(undefined); setMode("new"); }}
-          style={{
-            display: "flex", alignItems: "center", gap: 7, padding: "9px 16px",
-            borderRadius: 9, border: "1px solid var(--accent-glow)", background: "var(--accent-dim)",
-            color: "var(--accent)", cursor: "pointer", fontSize: 13, fontWeight: 600,
-            fontFamily: "'Plus Jakarta Sans', sans-serif",
-          }}>
-          <Plus size={14} /> New Quotation
-        </button>
-      </div>
+          <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+            {[
+              { label: "Total",     value: quotes.length,                                     color: "var(--text-primary)" },
+              { label: "Active",    value: quotes.filter(q => q.status === "Active").length,    color: "#4ade80"             },
+              { label: "Converted", value: quotes.filter(q => q.status === "Converted").length, color: "#60a5fa"             },
+              { label: "Expired",   value: quotes.filter(q => q.status === "Expired").length,   color: "#f87171"             },
+            ].map(c => (
+              <div key={c.label} style={{
+                background: "var(--bg-card)", border: "1px solid var(--border)",
+                borderRadius: 9, padding: "7px 12px", display: "flex", alignItems: "center", gap: 6,
+              }}>
+                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{c.label}</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: c.color }}>{c.value}</span>
+              </div>
+            ))}
+          </div>
+
+          <button
+            onClick={() => { setEditing(undefined); setMode("new"); }}
+            style={{
+              display: "flex", alignItems: "center", gap: 7, padding: "9px 16px",
+              borderRadius: 9, border: "1px solid var(--accent-glow)", background: "var(--accent-dim)",
+              color: "var(--accent)", cursor: "pointer", fontSize: 13, fontWeight: 600,
+              fontFamily: "'Plus Jakarta Sans', sans-serif",
+            }}>
+            <Plus size={14} /> New Quotation
+          </button>
+        </div>
+      )}
 
       {/* Table */}
       <div style={{ borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden" }}>
