@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "8vaWUdHFUEk=",
+  "dgSpecHash": "OvlAxxbl61U=",
   "success": true,
-  "projectFilePath": "D:\\Mano Mobile\\ManoMobile\\ManoMobile.API\\ManoMobile.API.csproj",
+  "projectFilePath": "D:\\Mano Mobile\\ManoMobile\\backend\\ManoMobile.API\\ManoMobile.API.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\mxnod\\.nuget\\packages\\humanizer.core\\2.14.1\\humanizer.core.2.14.1.nupkg.sha512",
     "C:\\Users\\mxnod\\.nuget\\packages\\microsoft.aspnetcore.authentication.jwtbearer\\8.0.0\\microsoft.aspnetcore.authentication.jwtbearer.8.0.0.nupkg.sha512",

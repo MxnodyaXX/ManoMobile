@@ -8,7 +8,10 @@
       "PowerShell(New-Item -ItemType Directory -Force \"d:\\\\Mano Mobile\\\\ManoMobile\\\\database\\\\seeds\")",
       "PowerShell(New-Item -ItemType Directory -Force \"d:\\\\Mano Mobile\\\\ManoMobile\\\\database\\\\schemas\")",
       "Bash(git rm *)",
-      "Bash(echo \"Exit: $?\")"
+      "Bash(echo \"Exit: $?\")",
+      "Bash(Get-ChildItem -Path \"d:\\\\Mano Mobile\\\\ManoMobile\\\\frontend\\\\src\\\\cashier\" -Recurse -Force)",
+      "Bash(Select-Object FullName, PSIsContainer)",
+      "Bash(Sort-Object FullName)"
     ],
     "additionalDirectories": [
       "d:\\Mano Mobile\\ManoMobile"

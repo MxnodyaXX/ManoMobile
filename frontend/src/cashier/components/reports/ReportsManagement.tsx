@@ -1802,6 +1802,516 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
   );
 }
 
+/* ── P&L Report ── */
+function PLReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const monthlyData = [
+    { month: "Jan", revenue: 580000, cogs: 310000, gross: 270000, expenses: 95000, net: 175000 },
+    { month: "Feb", revenue: 620000, cogs: 330000, gross: 290000, expenses: 98000, net: 192000 },
+    { month: "Mar", revenue: 710000, cogs: 370000, gross: 340000, expenses: 102000, net: 238000 },
+    { month: "Apr", revenue: 690000, cogs: 355000, gross: 335000, expenses: 105000, net: 230000 },
+    { month: "May", revenue: 755000, cogs: 390000, gross: 365000, expenses: 108000, net: 257000 },
+  ];
+  const categoryPL = [
+    { category: "Mobile Sales",  revenue: 320000, cogs: 245000, gross: 75000,  margin: 23.4 },
+    { category: "Accessories",   revenue: 85000,  cogs: 42000,  gross: 43000,  margin: 50.6 },
+    { category: "Repair Services",revenue: 290000, cogs: 88000,  gross: 202000, margin: 69.7 },
+    { category: "Other Services", revenue: 60000,  cogs: 15000,  gross: 45000,  margin: 75.0 },
+  ];
+  const totalRevenue = 755000; const totalCOGS = 390000; const grossProfit = 365000;
+  const expenses = 108000; const netProfit = 257000; const grossMargin = 48.3; const netMargin = 34.0;
+  return (
+    <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <ReportFilters dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}
+        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => containerRef.current && exportToPng(containerRef.current, "pl-report")} />}
+      />
+      {/* KPI strip */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 12 }}>
+        {[
+          { label: "Total Revenue",  value: fmtRs(totalRevenue), color: "#34d399" },
+          { label: "Total COGS",     value: fmtRs(totalCOGS),   color: "#f87171" },
+          { label: "Gross Profit",   value: fmtRs(grossProfit), color: "#60a5fa" },
+          { label: "Gross Margin",   value: `${grossMargin}%`,  color: "#a78bfa" },
+          { label: "Net Profit",     value: fmtRs(netProfit),   color: "#fbbf24" },
+        ].map(k => (
+          <div key={k.label} style={{ padding: "14px 16px", background: "var(--bg-card)", borderRadius: 12, border: "1px solid var(--border)" }}>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, marginBottom: 6 }}>{k.label}</p>
+            <p style={{ fontSize: 18, fontWeight: 800, color: k.color, fontFamily: ff }}>{k.value}</p>
+          </div>
+        ))}
+      </div>
+      {/* Monthly trend */}
+      <div style={{ padding: "18px 20px", background: "var(--bg-card)", borderRadius: 14, border: "1px solid var(--border)" }}>
+        <p style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff, marginBottom: 14 }}>Monthly P&L Trend</p>
+        <ResponsiveContainer width="100%" height={240}>
+          <ComposedChart data={monthlyData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <XAxis dataKey="month" tick={{ fill: "var(--text-muted)", fontSize: 11, fontFamily: ff }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11, fontFamily: ff }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}K`} />
+            <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => fmtRs(v)} />
+            <Legend wrapperStyle={{ fontSize: 12, fontFamily: ff }} />
+            <Bar dataKey="revenue" name="Revenue" fill="#34d39940" radius={[4,4,0,0]} />
+            <Bar dataKey="cogs"    name="COGS"    fill="#f8717140" radius={[4,4,0,0]} />
+            <Line dataKey="net"    name="Net Profit" stroke="#fbbf24" strokeWidth={2.5} dot={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+      {/* Category breakdown */}
+      <div style={{ borderRadius: 14, border: "1px solid var(--border)", overflow: "hidden" }}>
+        <div style={{ padding: "12px 16px", background: "var(--bg-secondary)", borderBottom: "1px solid var(--border)" }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>P&L by Category</p>
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <thead><tr style={{ background: "var(--bg-secondary)", borderBottom: "1px solid var(--border)" }}>
+            {["Category","Revenue","COGS","Gross Profit","Gross Margin"].map(h => (
+              <th key={h} style={{ padding: "9px 14px", textAlign: "left", fontSize: 10.5, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600, fontFamily: ff }}>{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>
+            {categoryPL.map((r, i) => (
+              <tr key={r.category} style={{ borderBottom: "1px solid var(--border)", background: i % 2 === 0 ? "transparent" : "var(--bg-secondary)" }}>
+                <td style={{ padding: "10px 14px", fontWeight: 600, color: "var(--text-primary)", fontFamily: ff }}>{r.category}</td>
+                <td style={{ padding: "10px 14px", color: "#34d399", fontWeight: 700, fontFamily: ff }}>{fmtRs(r.revenue)}</td>
+                <td style={{ padding: "10px 14px", color: "#f87171", fontFamily: ff }}>{fmtRs(r.cogs)}</td>
+                <td style={{ padding: "10px 14px", color: "#60a5fa", fontWeight: 700, fontFamily: ff }}>{fmtRs(r.gross)}</td>
+                <td style={{ padding: "10px 14px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ flex: 1, height: 6, background: "var(--bg-secondary)", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ width: `${r.margin}%`, height: "100%", background: r.margin > 60 ? "#34d399" : r.margin > 40 ? "#60a5fa" : "#fbbf24", borderRadius: 3 }} />
+                    </div>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff, minWidth: 40 }}>{r.margin}%</span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ── Stock Valuation ── */
+function StockValuation({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const categories = [
+    { name: "Smartphones",  items: 24, units: 18, costValue: 1240000, sellValue: 1620000, potentialProfit: 380000 },
+    { name: "Accessories",  items: 87, units: 342, costValue: 185000, sellValue: 298000, potentialProfit: 113000 },
+    { name: "Repair Parts", items: 56, units: 218, costValue: 320000, sellValue: 495000, potentialProfit: 175000 },
+    { name: "Equipment",    items: 8,  units: 12,  costValue: 95000,  sellValue: 130000, potentialProfit: 35000  },
+  ];
+  const stockItems = [
+    { sku: "SAM-A55-128-BLK", name: "Samsung Galaxy A55 128GB",  category: "Smartphones",  units: 3,  cost: 65000, sell: 89900, totalCost: 195000, status: "Normal" },
+    { sku: "IPH-14-256-MID",  name: "iPhone 14 256GB Midnight",  category: "Smartphones",  units: 2,  cost: 145000,sell: 198000,totalCost: 290000, status: "Normal" },
+    { sku: "SCR-IP14-OLED",   name: "iPhone 14 Screen Assembly", category: "Repair Parts", units: 3,  cost: 14500, sell: 21000, totalCost: 43500,  status: "Low"    },
+    { sku: "BAT-A54",         name: "Samsung A54 Battery",       category: "Repair Parts", units: 10, cost: 1800,  sell: 3500,  totalCost: 18000,  status: "Normal" },
+    { sku: "CASE-ASST-50",    name: "Phone Cases Assorted (50)", category: "Accessories",  units: 4,  cost: 4500,  sell: 8500,  totalCost: 18000,  status: "Normal" },
+    { sku: "CHRG-65W-10",     name: "Fast Chargers 65W (10pcs)", category: "Accessories",  units: 2,  cost: 6500,  sell: 11000, totalCost: 13000,  status: "Low"    },
+    { sku: "SCR-IP12-OLED",   name: "iPhone 12 Screen (OLED)",   category: "Repair Parts", units: 0,  cost: 8500,  sell: 13500, totalCost: 0,      status: "Out"    },
+  ];
+  const totalCost = categories.reduce((s, c) => s + c.costValue, 0);
+  const totalSell = categories.reduce((s, c) => s + c.sellValue, 0);
+  return (
+    <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <ReportFilters dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}
+        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => containerRef.current && exportToPng(containerRef.current, "stock-valuation")} />}
+      />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+        {[
+          { label: "Total Cost Value",       value: fmtRs(totalCost), color: "#f59e0b" },
+          { label: "Total Selling Value",    value: fmtRs(totalSell), color: "#34d399" },
+          { label: "Potential Gross Profit", value: fmtRs(totalSell - totalCost), color: "#a78bfa" },
+        ].map(k => (
+          <div key={k.label} style={{ padding: "16px 18px", background: "var(--bg-card)", borderRadius: 12, border: "1px solid var(--border)" }}>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, marginBottom: 6 }}>{k.label}</p>
+            <p style={{ fontSize: 20, fontWeight: 800, color: k.color, fontFamily: ff }}>{k.value}</p>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ padding: "18px 20px", background: "var(--bg-card)", borderRadius: 14, border: "1px solid var(--border)" }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff, marginBottom: 14 }}>Value by Category</p>
+          <ResponsiveContainer width="100%" height={180}>
+            <PieChart>
+              <Pie data={categories} dataKey="costValue" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={({ name, percent }: any) => `${name} ${(percent*100).toFixed(0)}%`} labelLine={false}>
+                {categories.map((_, i) => <Cell key={i} fill={["#6355ff","#34d399","#f59e0b","#60a5fa"][i]} />)}
+              </Pie>
+              <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => fmtRs(v)} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+        <div style={{ borderRadius: 14, border: "1px solid var(--border)", overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <thead><tr style={{ background: "var(--bg-secondary)", borderBottom: "1px solid var(--border)" }}>
+              {["Category","SKUs","Units","Cost Value","Sell Value"].map(h => (
+                <th key={h} style={{ padding: "9px 12px", textAlign: "left", fontSize: 10.5, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, fontFamily: ff }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {categories.map((c, i) => (
+                <tr key={c.name} style={{ borderBottom: "1px solid var(--border)", background: i % 2 === 0 ? "transparent" : "var(--bg-secondary)" }}>
+                  <td style={{ padding: "9px 12px", fontWeight: 600, color: "var(--text-primary)", fontFamily: ff }}>{c.name}</td>
+                  <td style={{ padding: "9px 12px", color: "var(--text-secondary)", fontFamily: ff }}>{c.items}</td>
+                  <td style={{ padding: "9px 12px", color: "var(--text-secondary)", fontFamily: ff }}>{c.units}</td>
+                  <td style={{ padding: "9px 12px", color: "#f59e0b", fontWeight: 700, fontFamily: ff }}>{fmtRs(c.costValue)}</td>
+                  <td style={{ padding: "9px 12px", color: "#34d399", fontWeight: 700, fontFamily: ff }}>{fmtRs(c.sellValue)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div style={{ borderRadius: 14, border: "1px solid var(--border)", overflow: "hidden" }}>
+        <div style={{ padding: "12px 16px", background: "var(--bg-secondary)", borderBottom: "1px solid var(--border)" }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Stock Items Detail</p>
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <thead><tr style={{ background: "var(--bg-secondary)", borderBottom: "1px solid var(--border)" }}>
+            {["SKU","Item","Category","Units","Unit Cost","Unit Price","Total Cost","Stock"].map(h => (
+              <th key={h} style={{ padding: "9px 14px", textAlign: "left", fontSize: 10.5, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, fontFamily: ff }}>{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>
+            {stockItems.map((s, i) => {
+              const sc = s.status === "Out" ? "#f87171" : s.status === "Low" ? "#fbbf24" : "#34d399";
+              return (
+                <tr key={s.sku} style={{ borderBottom: "1px solid var(--border)", background: i % 2 === 0 ? "transparent" : "var(--bg-secondary)" }}>
+                  <td style={{ padding: "9px 14px", fontSize: 11, color: "var(--text-muted)", fontFamily: ff }}>{s.sku}</td>
+                  <td style={{ padding: "9px 14px", fontWeight: 600, color: "var(--text-primary)", fontFamily: ff }}>{s.name}</td>
+                  <td style={{ padding: "9px 14px", color: "var(--text-secondary)", fontFamily: ff }}>{s.category}</td>
+                  <td style={{ padding: "9px 14px", fontWeight: 700, color: s.units === 0 ? "#f87171" : "var(--text-primary)", fontFamily: ff }}>{s.units}</td>
+                  <td style={{ padding: "9px 14px", color: "var(--text-secondary)", fontFamily: ff }}>{fmtRs(s.cost)}</td>
+                  <td style={{ padding: "9px 14px", color: "var(--text-secondary)", fontFamily: ff }}>{fmtRs(s.sell)}</td>
+                  <td style={{ padding: "9px 14px", fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>{fmtRs(s.totalCost)}</td>
+                  <td style={{ padding: "9px 14px" }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20, background: `${sc}15`, color: sc, border: `1px solid ${sc}30`, fontFamily: ff }}>{s.status}</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ── Cashier Performance ── */
+function CashierPerformance({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cashiers = [
+    { name: "Ruwan Perera",    transactions: 48, revenue: 385000, avgTicket: 8021, discountsGiven: 3, refunds: 1, cashHandled: 215000 },
+    { name: "Niluka Fernando", transactions: 41, revenue: 312000, avgTicket: 7610, discountsGiven: 5, refunds: 2, cashHandled: 178000 },
+  ];
+  const dailyData = [
+    { day: "Mon", ruwan: 78000, niluka: 65000 },
+    { day: "Tue", ruwan: 92000, niluka: 58000 },
+    { day: "Wed", ruwan: 65000, niluka: 82000 },
+    { day: "Thu", ruwan: 88000, niluka: 71000 },
+    { day: "Fri", ruwan: 62000, niluka: 36000 },
+  ];
+  return (
+    <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <ReportFilters dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}
+        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => containerRef.current && exportToPng(containerRef.current, "cashier-performance")} />}
+      />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 14 }}>
+        {cashiers.map(c => (
+          <div key={c.name} style={{ padding: "18px 20px", background: "var(--bg-card)", borderRadius: 14, border: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 11, background: "rgba(99,85,255,0.12)", border: "1px solid rgba(99,85,255,0.25)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 800, color: "#6355ff", fontFamily: ff }}>
+                {c.name[0]}
+              </div>
+              <div>
+                <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>{c.name}</p>
+                <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff }}>Cashier</p>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+              {[
+                { label: "Transactions", value: c.transactions, color: "#6355ff" },
+                { label: "Revenue",      value: fmtRs(c.revenue), color: "#34d399" },
+                { label: "Avg Ticket",   value: fmtRs(c.avgTicket), color: "#60a5fa" },
+                { label: "Discounts",    value: c.discountsGiven, color: "#fbbf24" },
+                { label: "Refunds",      value: c.refunds, color: "#f87171" },
+                { label: "Cash Handled", value: fmtRs(c.cashHandled), color: "#a78bfa" },
+              ].map(m => (
+                <div key={m.label} style={{ padding: "10px 12px", background: "var(--bg-secondary)", borderRadius: 9, border: "1px solid var(--border)" }}>
+                  <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff, marginBottom: 4 }}>{m.label}</p>
+                  <p style={{ fontSize: 14, fontWeight: 800, color: m.color, fontFamily: ff }}>{m.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ padding: "18px 20px", background: "var(--bg-card)", borderRadius: 14, border: "1px solid var(--border)" }}>
+        <p style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff, marginBottom: 14 }}>Daily Revenue Comparison</p>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={dailyData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <XAxis dataKey="day" tick={{ fill: "var(--text-muted)", fontSize: 11, fontFamily: ff }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11, fontFamily: ff }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}K`} />
+            <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => fmtRs(v)} />
+            <Legend wrapperStyle={{ fontSize: 12, fontFamily: ff }} />
+            <Bar dataKey="ruwan"  name="Ruwan Perera"    fill="#6355ff" radius={[4,4,0,0]} />
+            <Bar dataKey="niluka" name="Niluka Fernando" fill="#34d399" radius={[4,4,0,0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+/* ── Supplier Report ── */
+function SupplierReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const suppliers = [
+    { name: "TechParts Lanka",     category: "Parts",       orders: 8,  totalSpend: 420000, avgLeadDays: 5,  onTimeRate: 95, lastOrder: "2026-05-05" },
+    { name: "Samsung Distributors",category: "Phones",      orders: 4,  totalSpend: 890000, avgLeadDays: 8,  onTimeRate: 88, lastOrder: "2026-05-15" },
+    { name: "Accessory World",     category: "Accessories", orders: 12, totalSpend: 185000, avgLeadDays: 3,  onTimeRate: 100,lastOrder: "2026-05-18" },
+    { name: "Fix-It Tools",        category: "Equipment",   orders: 2,  totalSpend: 48000,  avgLeadDays: 10, onTimeRate: 100,lastOrder: "2026-04-20" },
+    { name: "Oppo/Huawei Partners",category: "Phones",      orders: 3,  totalSpend: 620000, avgLeadDays: 7,  onTimeRate: 90, lastOrder: "2026-05-10" },
+  ];
+  const spendData = suppliers.map(s => ({ name: s.name.split(" ")[0], spend: s.totalSpend }));
+  const totalSpend = suppliers.reduce((a, s) => a + s.totalSpend, 0);
+  return (
+    <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <ReportFilters dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}
+        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => containerRef.current && exportToPng(containerRef.current, "supplier-report")} />}
+      />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+        {[
+          { label: "Total Suppliers", value: suppliers.length, color: "#a78bfa" },
+          { label: "Total Spend",     value: fmtRs(totalSpend), color: "#f59e0b" },
+          { label: "Total Orders",    value: suppliers.reduce((a,s)=>a+s.orders,0), color: "#60a5fa" },
+        ].map(k => (
+          <div key={k.label} style={{ padding: "16px 18px", background: "var(--bg-card)", borderRadius: 12, border: "1px solid var(--border)" }}>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, marginBottom: 6 }}>{k.label}</p>
+            <p style={{ fontSize: 20, fontWeight: 800, color: k.color, fontFamily: ff }}>{k.value}</p>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ padding: "18px 20px", background: "var(--bg-card)", borderRadius: 14, border: "1px solid var(--border)" }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff, marginBottom: 14 }}>Spend by Supplier</p>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={spendData} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+              <XAxis type="number" tick={{ fill: "var(--text-muted)", fontSize: 10, fontFamily: ff }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}K`} />
+              <YAxis dataKey="name" type="category" tick={{ fill: "var(--text-muted)", fontSize: 11, fontFamily: ff }} axisLine={false} tickLine={false} width={80} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => fmtRs(v)} />
+              <Bar dataKey="spend" fill="#f59e0b" radius={[0,4,4,0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div style={{ borderRadius: 14, border: "1px solid var(--border)", overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead><tr style={{ background: "var(--bg-secondary)", borderBottom: "1px solid var(--border)" }}>
+              {["Supplier","Orders","Spend","Lead Days","On-Time"].map(h => (
+                <th key={h} style={{ padding: "9px 12px", textAlign: "left", fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, fontFamily: ff }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {suppliers.map((s, i) => (
+                <tr key={s.name} style={{ borderBottom: "1px solid var(--border)", background: i%2===0?"transparent":"var(--bg-secondary)" }}>
+                  <td style={{ padding: "9px 12px" }}>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff }}>{s.name}</p>
+                    <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff }}>{s.category}</p>
+                  </td>
+                  <td style={{ padding: "9px 12px", color: "var(--text-secondary)", fontFamily: ff }}>{s.orders}</td>
+                  <td style={{ padding: "9px 12px", color: "#f59e0b", fontWeight: 700, fontFamily: ff }}>{fmtRs(s.totalSpend)}</td>
+                  <td style={{ padding: "9px 12px", color: "var(--text-secondary)", fontFamily: ff }}>{s.avgLeadDays}d</td>
+                  <td style={{ padding: "9px 12px" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: s.onTimeRate >= 95 ? "#34d399" : s.onTimeRate >= 85 ? "#fbbf24" : "#f87171", fontFamily: ff }}>{s.onTimeRate}%</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Credit Aging ── */
+function CreditAging({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const customers = [
+    { name: "Telecom Hub (Pvt) Ltd",   total: 120000, current: 45000, d30: 35000, d60: 25000, d90: 15000, overdue: 75000 },
+    { name: "City Mobile Repair",       total: 85000,  current: 30000, d30: 28000, d60: 15000, d90: 12000, overdue: 55000 },
+    { name: "Lanka Electronics",        total: 62000,  current: 20000, d30: 22000, d60: 12000, d90: 8000,  overdue: 42000 },
+    { name: "QuickFix Services",        total: 38000,  current: 18000, d30: 12000, d60: 5000,  d90: 3000,  overdue: 20000 },
+    { name: "Colombo Mobile Center",    total: 25000,  current: 25000, d30: 0,     d60: 0,     d90: 0,     overdue: 0     },
+  ];
+  const buckets = [
+    { label: "Current (0–30d)", value: customers.reduce((s,c)=>s+c.current,0), color: "#34d399" },
+    { label: "31–60 days",      value: customers.reduce((s,c)=>s+c.d30,0),     color: "#fbbf24" },
+    { label: "61–90 days",      value: customers.reduce((s,c)=>s+c.d60,0),     color: "#f97316" },
+    { label: "90+ days",        value: customers.reduce((s,c)=>s+c.d90,0),     color: "#f87171" },
+  ];
+  const totalOutstanding = customers.reduce((s,c)=>s+c.total,0);
+  const totalOverdue     = customers.reduce((s,c)=>s+c.overdue,0);
+  return (
+    <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <ReportFilters dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}
+        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => containerRef.current && exportToPng(containerRef.current, "credit-aging")} />}
+      />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
+        {[
+          { label: "Total Outstanding", value: fmtRs(totalOutstanding), color: "#a78bfa" },
+          { label: "Total Overdue",     value: fmtRs(totalOverdue),     color: "#f87171" },
+          { label: "Credit Customers",  value: customers.length,         color: "#60a5fa" },
+          { label: "Overdue Rate",      value: `${((totalOverdue/totalOutstanding)*100).toFixed(1)}%`, color: "#fbbf24" },
+        ].map(k => (
+          <div key={k.label} style={{ padding: "14px 16px", background: "var(--bg-card)", borderRadius: 12, border: "1px solid var(--border)" }}>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, marginBottom: 6 }}>{k.label}</p>
+            <p style={{ fontSize: 18, fontWeight: 800, color: k.color, fontFamily: ff }}>{k.value}</p>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ padding: "18px 20px", background: "var(--bg-card)", borderRadius: 14, border: "1px solid var(--border)" }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff, marginBottom: 14 }}>Aging Buckets</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {buckets.map(b => (
+              <div key={b.label}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                  <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: ff }}>{b.label}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: b.color, fontFamily: ff }}>{fmtRs(b.value)}</span>
+                </div>
+                <div style={{ height: 7, background: "var(--bg-secondary)", borderRadius: 4, overflow: "hidden" }}>
+                  <div style={{ width: `${(b.value/totalOutstanding)*100}%`, height: "100%", background: b.color, borderRadius: 4 }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ borderRadius: 14, border: "1px solid var(--border)", overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead><tr style={{ background: "var(--bg-secondary)", borderBottom: "1px solid var(--border)" }}>
+              {["Customer","Total","Current","31–60d","61–90d","90+d"].map(h => (
+                <th key={h} style={{ padding: "9px 12px", textAlign: "left", fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, fontFamily: ff }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {customers.map((c, i) => (
+                <tr key={c.name} style={{ borderBottom: "1px solid var(--border)", background: i%2===0?"transparent":"var(--bg-secondary)" }}>
+                  <td style={{ padding: "9px 12px", fontWeight: 600, color: "var(--text-primary)", fontFamily: ff, fontSize: 11.5 }}>{c.name}</td>
+                  <td style={{ padding: "9px 12px", fontWeight: 700, color: "#a78bfa", fontFamily: ff }}>{fmtRs(c.total)}</td>
+                  <td style={{ padding: "9px 12px", color: "#34d399", fontFamily: ff }}>{c.current > 0 ? fmtRs(c.current) : "—"}</td>
+                  <td style={{ padding: "9px 12px", color: c.d30 > 0 ? "#fbbf24" : "var(--text-muted)", fontFamily: ff }}>{c.d30 > 0 ? fmtRs(c.d30) : "—"}</td>
+                  <td style={{ padding: "9px 12px", color: c.d60 > 0 ? "#f97316" : "var(--text-muted)", fontFamily: ff }}>{c.d60 > 0 ? fmtRs(c.d60) : "—"}</td>
+                  <td style={{ padding: "9px 12px", color: c.d90 > 0 ? "#f87171" : "var(--text-muted)", fontFamily: ff }}>{c.d90 > 0 ? fmtRs(c.d90) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Repair SLA ── */
+function RepairSLA({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const technicians = [
+    { name: "Kamal",  jobs: 18, completed: 16, withinSLA: 14, avgDays: 2.1, breach: 2, slaRate: 87.5 },
+    { name: "Nimal",  jobs: 15, completed: 13, withinSLA: 12, avgDays: 2.8, breach: 1, slaRate: 92.3 },
+    { name: "Suresh", jobs: 11, completed: 9,  withinSLA: 7,  avgDays: 3.4, breach: 2, slaRate: 77.8 },
+  ];
+  const slaData = technicians.map(t => ({ name: t.name, "Within SLA": t.withinSLA, Breach: t.breach }));
+  const trendData = [
+    { week: "W1", slaRate: 88 }, { week: "W2", slaRate: 91 }, { week: "W3", slaRate: 85 },
+    { week: "W4", slaRate: 93 }, { week: "W5", slaRate: 90 },
+  ];
+  const totalJobs    = technicians.reduce((s,t)=>s+t.jobs,0);
+  const totalBreaches= technicians.reduce((s,t)=>s+t.breach,0);
+  const avgSLA       = (technicians.reduce((s,t)=>s+t.slaRate,0)/technicians.length).toFixed(1);
+  return (
+    <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <ReportFilters dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}
+        actions={<ExportButtons onPdf={() => {}} onExcel={() => {}} onPng={() => containerRef.current && exportToPng(containerRef.current, "repair-sla")} />}
+      />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
+        {[
+          { label: "Total Jobs",    value: totalJobs,             color: "#60a5fa" },
+          { label: "SLA Breaches",  value: totalBreaches,         color: "#f87171" },
+          { label: "Avg SLA Rate",  value: `${avgSLA}%`,          color: "#34d399" },
+          { label: "SLA Target",    value: "90%",                 color: "#a78bfa" },
+        ].map(k => (
+          <div key={k.label} style={{ padding: "14px 16px", background: "var(--bg-card)", borderRadius: 12, border: "1px solid var(--border)" }}>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, marginBottom: 6 }}>{k.label}</p>
+            <p style={{ fontSize: 18, fontWeight: 800, color: k.color, fontFamily: ff }}>{k.value}</p>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ padding: "18px 20px", background: "var(--bg-card)", borderRadius: 14, border: "1px solid var(--border)" }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff, marginBottom: 14 }}>SLA Performance by Technician</p>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={slaData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="name" tick={{ fill: "var(--text-muted)", fontSize: 11, fontFamily: ff }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11, fontFamily: ff }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Legend wrapperStyle={{ fontSize: 12, fontFamily: ff }} />
+              <Bar dataKey="Within SLA" fill="#34d399" stackId="a" radius={[0,0,0,0]} />
+              <Bar dataKey="Breach"     fill="#f87171" stackId="a" radius={[4,4,0,0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div style={{ padding: "18px 20px", background: "var(--bg-card)", borderRadius: 14, border: "1px solid var(--border)" }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff, marginBottom: 14 }}>Weekly SLA Rate Trend</p>
+          <ResponsiveContainer width="100%" height={180}>
+            <LineChart data={trendData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="week" tick={{ fill: "var(--text-muted)", fontSize: 11, fontFamily: ff }} axisLine={false} tickLine={false} />
+              <YAxis domain={[70,100]} tick={{ fill: "var(--text-muted)", fontSize: 11, fontFamily: ff }} axisLine={false} tickLine={false} tickFormatter={v => `${v}%`} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => `${v}%`} />
+              <Line dataKey="slaRate" name="SLA Rate" stroke="#34d399" strokeWidth={2.5} dot={{ fill: "#34d399", r: 4 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+      <div style={{ borderRadius: 14, border: "1px solid var(--border)", overflow: "hidden" }}>
+        <div style={{ padding: "12px 16px", background: "var(--bg-secondary)", borderBottom: "1px solid var(--border)" }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Technician SLA Summary</p>
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <thead><tr style={{ background: "var(--bg-secondary)", borderBottom: "1px solid var(--border)" }}>
+            {["Technician","Total Jobs","Completed","Within SLA","Avg Days","Breaches","SLA Rate"].map(h => (
+              <th key={h} style={{ padding: "9px 14px", textAlign: "left", fontSize: 10.5, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, fontFamily: ff }}>{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>
+            {technicians.map((t, i) => (
+              <tr key={t.name} style={{ borderBottom: "1px solid var(--border)", background: i%2===0?"transparent":"var(--bg-secondary)" }}>
+                <td style={{ padding: "10px 14px", fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>{t.name}</td>
+                <td style={{ padding: "10px 14px", color: "var(--text-secondary)", fontFamily: ff }}>{t.jobs}</td>
+                <td style={{ padding: "10px 14px", color: "var(--text-secondary)", fontFamily: ff }}>{t.completed}</td>
+                <td style={{ padding: "10px 14px", color: "#34d399", fontWeight: 700, fontFamily: ff }}>{t.withinSLA}</td>
+                <td style={{ padding: "10px 14px", color: "var(--text-secondary)", fontFamily: ff }}>{t.avgDays}d</td>
+                <td style={{ padding: "10px 14px", color: t.breach > 0 ? "#f87171" : "var(--text-muted)", fontWeight: t.breach > 0 ? 700 : 400, fontFamily: ff }}>{t.breach}</td>
+                <td style={{ padding: "10px 14px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ flex: 1, height: 6, background: "var(--bg-secondary)", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ width: `${t.slaRate}%`, height: "100%", background: t.slaRate >= 90 ? "#34d399" : t.slaRate >= 80 ? "#fbbf24" : "#f87171", borderRadius: 3 }} />
+                    </div>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: t.slaRate >= 90 ? "#34d399" : t.slaRate >= 80 ? "#fbbf24" : "#f87171", fontFamily: ff, minWidth: 40 }}>{t.slaRate}%</span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 /* ── Main Component ── */
 export default function ReportsManagement() {
   const [active, setActive] = useState<ReportTab>("Daily Report");
