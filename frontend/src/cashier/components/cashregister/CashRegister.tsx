@@ -374,8 +374,10 @@ function Transactions({ log, onAdd }: { log: CashEntry[]; onAdd: (type: "in" | "
           <ExportButtons
             onPdf={()   => exportToPdf("Cash Transactions", TX_HEADERS, txRows(), txFilename, "portrait")}
             onExcel={()  => exportToExcel(txFilename, "Transactions", TX_HEADERS, txRows())}
-            onPng={()   => containerRef.current && exportToPng(containerRef.current, txFilename)}
-          />
+onPng={() => {
+  if (!containerRef.current) return;
+  return exportToPng(containerRef.current, txFilename);
+}}          />
         </div>
       </div>
 
