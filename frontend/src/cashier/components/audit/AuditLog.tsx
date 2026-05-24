@@ -156,8 +156,10 @@ export default function AuditLog() {
           <ExportButtons
             onPdf={()   => exportToPdf("Audit Log", PDF_HEADERS, excelRows(), filename, "landscape")}
             onExcel={()  => exportToExcel(filename, "Audit Log", PDF_HEADERS, excelRows())}
-            onPng={()   => containerRef.current && exportToPng(containerRef.current, filename)}
-          />
+            onPng={() => {
+              if (!containerRef.current) return;
+              return exportToPng(containerRef.current, filename);
+            }}          />
         </div>
       </div>
 
