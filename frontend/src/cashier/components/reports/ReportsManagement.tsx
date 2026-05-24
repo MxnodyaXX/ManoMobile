@@ -235,8 +235,10 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
               return exportReportToPdf(`Daily Report — ${dateFrom}`, buildSections(), charts, drFilename);
             }}
             onExcel={() => exportMultiSectionToExcel(drFilename, buildSections())}
-            onPng={()  => containerRef.current && exportToPng(containerRef.current, drFilename)}
-          />
+onPng={() => {
+  if (!containerRef.current) return;
+  return exportToPng(containerRef.current, drFilename);
+}}          />
         </div>
       </div>
 
