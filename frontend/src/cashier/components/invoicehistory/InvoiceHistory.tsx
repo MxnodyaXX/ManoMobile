@@ -264,8 +264,10 @@ export default function InvoiceHistory() {
           <ExportButtons
             onPdf={()   => exportToPdf("Invoice History", INV_HEADERS, invRows(), invFilename)}
             onExcel={()  => exportToExcel(invFilename, "Invoices", INV_HEADERS, invRows())}
-            onPng={()   => containerRef.current && exportToPng(containerRef.current, invFilename)}
-          />
+onPng={() => {
+  if (!containerRef.current) return;
+  return exportToPng(containerRef.current, invFilename);
+}}          />
         </div>
       </div>
 
