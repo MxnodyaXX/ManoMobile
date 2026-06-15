@@ -10,6 +10,10 @@ import {
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
+import JobReceiptSlip from "@/cashier/components/repair/JobReceiptSlip";
+import SignaturePad from "@/cashier/components/shared/SignaturePad";
+import { useRepair } from "@/cashier/contexts/RepairContext";
+import type { RepairJob } from "@/cashier/contexts/RepairContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -167,7 +171,7 @@ function CreditRecordConfirmModal({ dealer, dueAmount, onConfirm, onSkip, onCanc
 
 // ─── Invoice View ─────────────────────────────────────────────────────────────
 
-function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountReceivedNow, dueAmount, totalAdvance, creditRecordMade, repairs, onBack }: {
+function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountReceivedNow, dueAmount, totalAdvance, creditRecordMade, repairs, signatureImage, onBack }: {
   invoiceNo: string;
   createdAt: string;
   dealer: string;
@@ -178,12 +182,35 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
   totalAdvance: number;
   creditRecordMade: boolean;
   repairs: CompletedRepair[];
+  signatureImage?: string;
   onBack: () => void;
 }) {
   const invoiceRef = useRef<HTMLDivElement>(null);
   const grandTotal  = repairs.reduce((s, r) => s + r.unitPrice - r.discount, 0);
   const paidAmount  = totalAdvance + amountReceivedNow;
   const paymentType = isCredit ? "CREDIT" : "CASH / FULL";
+  // Mano Mobile's own customers get the job-receipt template; external dealers get a sales invoice.
+  const isManoMobile = (dealer ?? "").toUpperCase().includes("MANO MOBILE");
+  const today = new Date().toISOString().slice(0, 10);
+  const mapToJob = (r: CompletedRepair): RepairJob => ({
+    id: r.id,
+    customerName: customer.name || r.customerName,
+    phone: customer.phone || "—",
+    brand: r.brand,
+    model: r.model,
+    issue: "Repair",
+    technician: "—",
+    status: "Completed",
+    priority: "Normal",
+    estimatedCost: r.unitPrice - r.discount,
+    advancePaid: r.advance,
+    createdAt: today,
+    estimatedCompletion: today,
+    completedAt: today,
+    imei: r.imei,
+    jobWarranty: r.warranty,
+    dealer: r.dealer,
+  });
 
   const handlePrint = () => {
     if (!invoiceRef.current) return;
@@ -194,7 +221,7 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
     const styleEl = document.createElement("style");
     styleEl.id = "__rp_inv_style__";
     styleEl.textContent = `
-      @page { size: A4 landscape; margin: 12mm; }
+      @page { size: ${isManoMobile ? "A5 portrait" : "A4 landscape"}; margin: ${isManoMobile ? "10mm" : "12mm"}; }
       #__rp_inv__ { display: none; }
       @media print {
         body { visibility: hidden; }
@@ -211,7 +238,7 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 4 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <button
           onClick={onBack}
@@ -230,6 +257,16 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
       </div>
 
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+        {isManoMobile ? (
+          /* Mano Mobile → the Repair Management job-receipt template, one per device */
+          <div ref={invoiceRef} style={{ background: "#ffffff" }}>
+            {repairs.map((r, i) => (
+              <div key={r.id} style={{ pageBreakAfter: i < repairs.length - 1 ? "always" : "auto", borderBottom: i < repairs.length - 1 ? "2px dashed #bbb" : "none" }}>
+                <JobReceiptSlip job={mapToJob(r)} signatureOverride={signatureImage} title="Job Completion Invoice" hideStatusNote />
+              </div>
+            ))}
+          </div>
+        ) : (
         <div ref={invoiceRef} style={{ background: "#ffffff", padding: "36px 44px", fontFamily: "Arial, Helvetica, sans-serif", color: "#000000" }}>
 
           <h1 style={{ textAlign: "center", fontWeight: 900, textDecoration: "underline", fontSize: 24, margin: 0, letterSpacing: "0.06em" }}>
@@ -353,6 +390,7 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
             This is a computer-generated invoice. No signature required.
           </p>
         </div>
+        )}
       </div>
     </div>
   );
@@ -363,7 +401,9 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
 export default function RepairSales() {
   const { addEntry } = useCashRegister();
   const { addSale } = useSales();
+  const { updateJob } = useRepair();
   const [view,           setView]           = useState<"search" | "invoice">("search");
+  const [showIssuedMsg,  setShowIssuedMsg]  = useState(false);
   const [selectedDealer, setSelectedDealer] = useState("");
   const [checkedIds,     setCheckedIds]     = useState<Set<string>>(new Set());
   const [search,         setSearch]         = useState("");
@@ -372,6 +412,10 @@ export default function RepairSales() {
   const [custName,  setCustName]  = useState("");
   const [custPhone, setCustPhone] = useState("");
   const [custNic,   setCustNic]   = useState("");
+
+  // Step 3 — Terms & signature (Mano Mobile only, replaces the dealer panel)
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [signature,     setSignature]     = useState("");
 
   // Step 3 — Amount received now
   const [amountReceived, setAmountReceived] = useState("");
@@ -417,7 +461,8 @@ export default function RepairSales() {
   const showStep3 = !!selectedDealer && checkedIds.size > 0;
 
   const canGenerate = showStep3 &&
-    (useCreditPicker ? !!selectedCreditCustomer : !!custName.trim());
+    (useCreditPicker ? !!selectedCreditCustomer : !!custName.trim()) &&
+    (!isManoMobile || (termsAccepted && signature.trim() !== ""));
 
   // Effective customer for invoice
   const invoiceCustomer = useCreditPicker && selectedCreditCustomer
@@ -438,12 +483,14 @@ export default function RepairSales() {
     setSelectedDealer(""); setCheckedIds(new Set()); setSearch("");
     setCustName(""); setCustPhone(""); setCustNic(""); setAmountReceived("");
     setSelectedCreditCustomer(null); setShowCreditConfirm(false); setCreditRecordMade(false);
+    setTermsAccepted(false); setSignature("");
   };
 
   const handleDealerChange = (val: string) => {
     setSelectedDealer(val); setCheckedIds(new Set()); setSearch("");
     setCustName(""); setCustPhone(""); setCustNic(""); setAmountReceived("");
     setSelectedCreditCustomer(null); setShowCreditConfirm(false); setCreditRecordMade(false);
+    setTermsAccepted(false); setSignature("");
   };
 
   const recordRepairSale = () => {
@@ -458,7 +505,29 @@ export default function RepairSales() {
     });
   };
 
+  // Mark the selected repair jobs as issued (collected by the customer).
+  // Safe for jobs not present in the live repair list — updateJob simply no-ops.
+  const markIssued = () => {
+    const nowISO = new Date().toISOString();
+    selectedRepairs.forEach(r => {
+      updateJob(r.id, {
+        status: "Delivered",
+        handover: {
+          collectedBy: invoiceCustomer.name || r.customerName,
+          relationship: "Owner",
+          idVerified: true,
+          balanceSettled: effectiveReceived,
+          handoverSignature: isManoMobile ? signature : "",
+          warrantyCardIssued: false,
+          handedOverBy: "Cashier",
+          handedOverAt: nowISO,
+        },
+      });
+    });
+  };
+
   const handleGenerateInvoice = () => {
+    markIssued();
     if (!isManoMobile && isCredit) {
       setShowCreditConfirm(true);
     } else {
@@ -468,6 +537,16 @@ export default function RepairSales() {
       recordRepairSale();
       setView("invoice");
     }
+  };
+
+  // Mark as issued only — no print/invoice.
+  const handleMarkIssued = () => {
+    markIssued();
+    if (effectiveReceived > 0) {
+      addEntry("in", `Cash — Repair Issued ${selectedDealer}`, effectiveReceived);
+    }
+    recordRepairSale();
+    setShowIssuedMsg(true);
   };
 
   if (view === "invoice") {
@@ -483,13 +562,14 @@ export default function RepairSales() {
         totalAdvance={totalAdvance}
         creditRecordMade={creditRecordMade}
         repairs={selectedRepairs}
+        signatureImage={signature}
         onBack={() => setView("search")}
       />
     );
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20, flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 4 }}>
 
       {/* Step 1 */}
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -657,7 +737,27 @@ export default function RepairSales() {
               </div>
             </div>
 
-            {/* ── Dealer Info ── */}
+            {/* ── Dealer Info  OR  Terms & Signature (Mano Mobile) ── */}
+            {isManoMobile ? (
+              <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={cardHead}>Terms &amp; Signature</div>
+                <div style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
+                  <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.65, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                    <li>I have received the device(s) in working order.</li>
+                    <li>Warranty applies only to the repair work listed on this receipt.</li>
+                    <li>The shop is not liable for any data loss during repair.</li>
+                    <li>Devices uncollected after 90 days may be disposed of to recover costs.</li>
+                  </ul>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9, cursor: "pointer" }}>
+                    <div onClick={() => setTermsAccepted(v => !v)} style={{ width: 17, height: 17, borderRadius: 5, border: `2px solid ${termsAccepted ? "var(--accent)" : "var(--border)"}`, background: termsAccepted ? "var(--accent)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {termsAccepted && <span style={{ color: "var(--accent-fg)", fontSize: 10, fontWeight: 700 }}>✓</span>}
+                    </div>
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Customer accepts the terms above</span>
+                  </label>
+                </div>
+                <SignaturePad value={signature} onChange={setSignature} label="Customer Signature *" height={120} />
+              </div>
+            ) : (
             <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={cardHead}>Dealer Info</div>
 
@@ -717,6 +817,7 @@ export default function RepairSales() {
                 </>
               )}
             </div>
+            )}
 
             {/* ── Customer Info ── */}
             <div style={{ background: "var(--bg-secondary)", border: `1px solid ${useCreditPicker ? "rgba(251,191,36,0.3)" : "var(--border)"}`, borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -767,11 +868,18 @@ export default function RepairSales() {
               <X size={12} style={{ display: "inline", marginRight: 5, verticalAlign: "middle" }} />Cancel
             </button>
             <button
+              onClick={handleMarkIssued}
+              disabled={!canGenerate}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 20px", borderRadius: 9, fontSize: 12, fontWeight: 600, border: `1px solid ${canGenerate ? "var(--accent-glow)" : "var(--border)"}`, background: canGenerate ? "var(--accent-dim)" : "transparent", color: canGenerate ? "var(--accent)" : "var(--text-muted)", cursor: canGenerate ? "pointer" : "not-allowed", opacity: canGenerate ? 1 : 0.5, fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s" }}
+            >
+              <CheckCircle size={13} />Mark As Issued
+            </button>
+            <button
               onClick={handleGenerateInvoice}
               disabled={!canGenerate}
               style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 24px", borderRadius: 9, fontSize: 12, fontWeight: 700, border: `1px solid ${canGenerate ? "var(--accent)" : "var(--border)"}`, background: canGenerate ? "var(--accent)" : "var(--border)", color: canGenerate ? "var(--accent-fg)" : "var(--text-muted)", cursor: canGenerate ? "pointer" : "not-allowed", opacity: canGenerate ? 1 : 0.5, fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s" }}
             >
-              <Printer size={13} />Generate Invoice
+              <Printer size={13} />Issue &amp; Generate Invoice
             </button>
           </div>
         </div>
@@ -786,6 +894,31 @@ export default function RepairSales() {
           onSkip={() => { setCreditRecordMade(false); setShowCreditConfirm(false); recordRepairSale(); setView("invoice"); }}
           onCancel={() => setShowCreditConfirm(false)}
         />
+      )}
+
+      {/* "Marked as Issued" info message */}
+      {showIssuedMsg && typeof document !== "undefined" && createPortal(
+        <div
+          onClick={() => { setShowIssuedMsg(false); handleReset(); }}
+          style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 420, background: "var(--bg-card)", borderRadius: 16, border: "1px solid var(--border)", boxShadow: "0 32px 80px rgba(0,0,0,0.5)", padding: "26px 24px", textAlign: "center", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            <div style={{ width: 52, height: 52, borderRadius: "50%", background: "rgba(74,222,128,0.12)", border: "2px solid #4ade80", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
+              <CheckCircle size={26} color="#4ade80" />
+            </div>
+            <p style={{ fontSize: 17, fontWeight: 800, color: "var(--text-primary)" }}>Job Marked as Issued</p>
+            <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 8, lineHeight: 1.55 }}>
+              This won&apos;t generate a print. If you need to print, you can find the job in <strong style={{ color: "var(--text-primary)" }}>Repair Management</strong>.
+            </p>
+            <button
+              onClick={() => { setShowIssuedMsg(false); handleReset(); }}
+              style={{ marginTop: 18, width: "100%", padding: "10px", borderRadius: 10, border: "none", background: "var(--accent)", color: "var(--accent-fg)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+            >
+              OK
+            </button>
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* Cancel button when step 3 not visible yet */}

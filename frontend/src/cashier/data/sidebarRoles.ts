@@ -2,6 +2,7 @@ export const roleMenus: Record<string, string[]> = {
   admin: [
     "Home",
     "Repair Management",
+    "Warranty Center",
     "Sales Management",
     "Inventory Management",
     "Customer Management",

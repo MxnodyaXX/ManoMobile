@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Wrench, ArrowRight, History, CheckCircle, XCircle, User } from "lucide-react";
 import { RepairProvider, useRepair } from "@/cashier/contexts/RepairContext";
+import { WarrantyProvider } from "@/cashier/contexts/WarrantyContext";
 import { TechProvider }   from "@/technician/contexts/TechContext";
 import TechSidebar, { type TechPage } from "@/technician/components/layout/TechSidebar";
 import TechNavbar    from "@/technician/components/layout/TechNavbar";
@@ -166,6 +167,7 @@ function TechPageInner() {
 
   return (
     <RepairProvider>
+    <WarrantyProvider>
     <TechProvider technicianName={techName}>
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
 
@@ -200,6 +202,7 @@ function TechPageInner() {
         </div>
       </div>
     </TechProvider>
+    </WarrantyProvider>
     </RepairProvider>
   );
 }

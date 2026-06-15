@@ -1,8 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
-import { useRepair } from "@/cashier/contexts/RepairContext";
+import { useRepair, type ConditionGrade, type DeviceConditionMap, type RepairJob } from "@/cashier/contexts/RepairContext";
+import { useWarranty, effectiveStatus } from "@/cashier/contexts/WarrantyContext";
+import { usePersistentState } from "@/cashier/hooks/usePersistentState";
+import SignaturePad from "@/cashier/components/shared/SignaturePad";
+import Combobox from "@/cashier/components/shared/Combobox";
+import { lookupModelNumber } from "@/cashier/data/modelNumbers";
+import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +30,7 @@ interface FormData {
 
   // Step 2
   deviceModel: string;
+  deviceModelNumber: string;
   deviceIMEI: string;
   receivedItems: string[];
   faultCheckboxes: string[];
@@ -39,7 +46,33 @@ interface FormData {
   // Step 4
   assignedRepairman: string;
   estimatedCompletion: string;
+
+  // Step 5 — Evidence & Sign
+  condition: DeviceConditionMap;
+  intakePhotos: string[];
+  passcodeType: "PIN" | "Pattern" | "Password" | "None" | "Provided Separately";
+  passcode: string;
+  signature: string;
+  termsAccepted: boolean;
 }
+
+const CONDITION_ZONES: { key: keyof Omit<DeviceConditionMap, "notes">; label: string }[] = [
+  { key: "front",   label: "Front / Screen" },
+  { key: "back",    label: "Back" },
+  { key: "frame",   label: "Frame / Sides" },
+  { key: "camera",  label: "Camera Glass" },
+  { key: "ports",   label: "Ports" },
+  { key: "buttons", label: "Buttons" },
+];
+
+const GRADES: { value: ConditionGrade; color: string }[] = [
+  { value: "Pristine", color: "#4ade80" },
+  { value: "Good",     color: "#60a5fa" },
+  { value: "Worn",     color: "#fbbf24" },
+  { value: "Damaged",  color: "#f87171" },
+];
+
+const TERMS_VERSION = "v1.0";
 
 // ─── Sample Data ──────────────────────────────────────────────────────────────
 
@@ -79,7 +112,7 @@ const DEVICE_MODELS = [
   "Samsung Galaxy S25 Ultra", "Samsung Galaxy S25", "Samsung Galaxy A55", "Samsung Galaxy A35",
   "Xiaomi 14 Pro", "Xiaomi 14", "Redmi Note 13 Pro", "Redmi 13C",
   "OPPO Reno 12 Pro", "OPPO A60", "OnePlus 12", "Realme GT 6",
-  "Huawei Nova 12", "Vivo Y200 Pro", "Other",
+  "Huawei Nova 12", "Vivo Y200 Pro",
 ];
 
 // ─── Step Indicator ───────────────────────────────────────────────────────────
@@ -89,6 +122,7 @@ const STEPS = [
   { num: 2, label: "Device & Faults" },
   { num: 3, label: "Costs & Job Info" },
   { num: 4, label: "Assign Repairman" },
+  { num: 5, label: "Evidence & Sign" },
 ];
 
 function StepIndicator({ current }: { current: number }) {
@@ -182,16 +216,16 @@ function Step1({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
         <div style={sectionHeaderStyle}>🏪 Dealer Information</div>
         <div style={{ marginBottom: 14 }}>
           <label style={labelStyle}>Select Dealer</label>
-          <select
-            value={data.dealerId}
-            onChange={(e) => onChange({ dealerId: e.target.value })}
-            style={{ ...inputStyle, appearance: "none", cursor: "pointer" }}
-          >
-            <option value="">— Choose a dealer —</option>
-            {DEALERS.map((d) => (
-              <option key={d.id} value={d.id}>{d.name}</option>
-            ))}
-          </select>
+          <Combobox
+            value={dealer?.name ?? ""}
+            options={DEALERS.map((d) => d.name)}
+            allowAdd={false}
+            placeholder="— Choose a dealer —"
+            onChange={(name) => {
+              const match = DEALERS.find((d) => d.name === name);
+              onChange({ dealerId: match ? String(match.id) : "" });
+            }}
+          />
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12, opacity: dealer ? 1 : 0.4, transition: "opacity 0.2s" }}>
@@ -263,9 +297,24 @@ function Step1({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
 
 // ─── Step 2: Device & Faults ──────────────────────────────────────────────────
 
-function Step2({ data, onChange, isMobile }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean }) {
+function Step2({ data, onChange, isMobile, models, onAddModel }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; models: string[]; onAddModel: (m: string) => void }) {
   const toggleItem = (list: string[], item: string) =>
     list.includes(item) ? list.filter((i) => i !== item) : [...list, item];
+
+  // When a model number is entered, try to resolve the device model.
+  const [lookupResult, setLookupResult] = useState<string | null>(null);
+  const handleModelNumber = (raw: string) => {
+    onChange({ deviceModelNumber: raw });
+    const hit = lookupModelNumber(raw);
+    if (hit) {
+      onChange({ deviceModelNumber: raw, deviceModel: hit.model });
+      // make sure the resolved model is in the combobox list
+      if (!models.includes(hit.model)) onAddModel(hit.model);
+      setLookupResult(`${hit.brand} ${hit.model}`);
+    } else {
+      setLookupResult(raw.trim() ? "no-match" : null);
+    }
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
@@ -274,15 +323,33 @@ function Step2({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
         <div style={sectionHeaderStyle}>📱 Device Information</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
           <div>
+            <label style={labelStyle}><Hash size={11} style={{ verticalAlign: "-1px" }} /> Model Number</label>
+            <input
+              style={inputStyle}
+              placeholder="e.g. M2006C3LMG — auto-fills the model"
+              value={data.deviceModelNumber}
+              onChange={(e) => handleModelNumber(e.target.value)}
+            />
+            {lookupResult && lookupResult !== "no-match" && (
+              <p style={{ fontSize: 11, color: "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                <CheckCircle2 size={12} /> Identified: <strong>{lookupResult}</strong>
+              </p>
+            )}
+            {lookupResult === "no-match" && (
+              <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4 }}>
+                Not in the local database — select or type the model below.
+              </p>
+            )}
+          </div>
+          <div>
             <label style={labelStyle}>Device Model *</label>
-            <select
-              style={{ ...inputStyle, appearance: "none", cursor: "pointer" }}
+            <Combobox
               value={data.deviceModel}
-              onChange={(e) => onChange({ deviceModel: e.target.value })}
-            >
-              <option value="">— Select Model —</option>
-              {DEVICE_MODELS.map((m) => <option key={m}>{m}</option>)}
-            </select>
+              options={models}
+              onAddOption={onAddModel}
+              placeholder="Type or select a model…"
+              onChange={(m) => onChange({ deviceModel: m })}
+            />
           </div>
           <div>
             <label style={labelStyle}>IMEI Number</label>
@@ -398,17 +465,13 @@ function Step3({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
           </div>
           <div>
             <label style={labelStyle}>Payment Method</label>
-            <select
-              style={{ ...inputStyle, appearance: "none", cursor: "pointer" }}
+            <Combobox
               value={data.paymentMethod}
-              onChange={(e) => onChange({ paymentMethod: e.target.value })}
-            >
-              <option value="">— Select Method —</option>
-              <option>Cash</option>
-              <option>Card</option>
-              <option>Bank Transfer</option>
-              <option>Online Payment</option>
-            </select>
+              options={["Cash", "Card", "Bank Transfer", "Online Payment"]}
+              allowAdd={false}
+              placeholder="— Select Method —"
+              onChange={(m) => onChange({ paymentMethod: m })}
+            />
           </div>
 
           {/* Balance Summary Card */}
@@ -615,13 +678,150 @@ function Step4({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
   );
 }
 
+// ─── Step 5: Evidence & Sign ──────────────────────────────────────────────────
+
+function Step5({ data, onChange, isMobile }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const setCond = (key: keyof Omit<DeviceConditionMap, "notes">, grade: ConditionGrade) =>
+    onChange({ condition: { ...data.condition, [key]: grade } });
+
+  const onFiles = (files: FileList | null) => {
+    if (!files) return;
+    Array.from(files).slice(0, 6).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = () => onChange({ intakePhotos: [...data.intakePhotos, reader.result as string] });
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const removePhoto = (i: number) =>
+    onChange({ intakePhotos: data.intakePhotos.filter((_, idx) => idx !== i) });
+
+  return (
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
+      {/* Left: Condition + Passcode */}
+      <div style={panelStyle}>
+        <div style={sectionHeaderStyle}>🩹 Device Cosmetic Condition</div>
+        <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 12, lineHeight: 1.5 }}>
+          Record the device&apos;s condition <strong>at drop-off</strong> — this protects both the
+          customer and the shop in any dispute.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 16 }}>
+          {CONDITION_ZONES.map(zone => (
+            <div key={zone.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", width: isMobile ? 90 : 110, flexShrink: 0 }}>{zone.label}</span>
+              <div style={{ display: "flex", gap: 4, flex: 1 }}>
+                {GRADES.map(g => {
+                  const active = data.condition[zone.key] === g.value;
+                  return (
+                    <button key={g.value} type="button" onClick={() => setCond(zone.key, g.value)}
+                      style={{
+                        flex: 1, padding: "5px 4px", borderRadius: 6, fontSize: 10.5, fontWeight: 600,
+                        border: `1px solid ${active ? g.color : "var(--border)"}`,
+                        background: active ? `${g.color}1e` : "transparent",
+                        color: active ? g.color : "var(--text-muted)",
+                        cursor: "pointer", transition: "all 0.12s", fontFamily: "'Plus Jakarta Sans', sans-serif",
+                      }}>
+                      {g.value}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <label style={labelStyle}>Condition Notes</label>
+          <textarea
+            style={{ ...inputStyle, resize: "vertical", minHeight: 56 }}
+            placeholder="e.g. deep scratch top-left corner, small dent on right frame…"
+            value={data.condition.notes ?? ""}
+            onChange={e => onChange({ condition: { ...data.condition, notes: e.target.value } })}
+          />
+        </div>
+
+        <div style={sectionHeaderStyle}><Lock size={12} style={{ verticalAlign: "-1px" }} /> Device Unlock</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div>
+            <label style={labelStyle}>Passcode Type</label>
+            <select
+              style={{ ...inputStyle, appearance: "none", cursor: "pointer" }}
+              value={data.passcodeType}
+              onChange={e => onChange({ passcodeType: e.target.value as FormData["passcodeType"] })}
+            >
+              {["None", "PIN", "Pattern", "Password", "Provided Separately"].map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+          {(data.passcodeType === "PIN" || data.passcodeType === "Pattern" || data.passcodeType === "Password") && (
+            <div>
+              <label style={labelStyle}>{data.passcodeType} (visible only to technician)</label>
+              <input
+                style={inputStyle}
+                placeholder={data.passcodeType === "Pattern" ? "e.g. 1-2-3-6-9" : "Enter unlock code"}
+                value={data.passcode}
+                onChange={e => onChange({ passcode: e.target.value })}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Right: Photos + Terms + Signature */}
+      <div style={panelStyle}>
+        <div style={sectionHeaderStyle}><Camera size={12} style={{ verticalAlign: "-1px" }} /> Intake Photos *</div>
+        <input ref={fileRef} type="file" accept="image/*" multiple capture="environment" style={{ display: "none" }} onChange={e => onFiles(e.target.files)} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", gap: 8, marginBottom: 8 }}>
+          {data.intakePhotos.map((src, i) => (
+            <div key={i} style={{ position: "relative", aspectRatio: "1", borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={src} alt={`intake ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              <button type="button" onClick={() => removePhoto(i)} style={{ position: "absolute", top: 3, right: 3, width: 18, height: 18, borderRadius: "50%", background: "rgba(0,0,0,0.6)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <XIcon size={11} />
+              </button>
+            </div>
+          ))}
+          <button type="button" onClick={() => fileRef.current?.click()}
+            style={{ aspectRatio: "1", borderRadius: 8, border: "1px dashed var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, fontSize: 10.5, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            <Camera size={18} /> Add
+          </button>
+        </div>
+        <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 16 }}>
+          Recommended: front, back, and both sides. At least one is required.
+        </p>
+
+        {/* Terms */}
+        <div style={{ padding: "12px 14px", borderRadius: 10, background: "var(--bg-primary)", border: "1px solid var(--border)", marginBottom: 14 }}>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.06em", textTransform: "uppercase", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 8 }}>Terms &amp; Conditions ({TERMS_VERSION})</p>
+          <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.6 }}>
+            <li>Repair warranty covers only the parts/labour listed on completion.</li>
+            <li>The shop is not liable for data loss; please back up your device.</li>
+            <li>Devices uncollected after 90 days may be disposed of to recover costs.</li>
+            <li>Condition above is agreed as the device&apos;s state at drop-off.</li>
+          </ul>
+          <label style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 10, cursor: "pointer" }}>
+            <div onClick={() => onChange({ termsAccepted: !data.termsAccepted })} style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${data.termsAccepted ? "var(--accent)" : "var(--border)"}`, background: data.termsAccepted ? "var(--accent)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              {data.termsAccepted && <span style={{ color: "var(--accent-fg)", fontSize: 11, fontWeight: 700 }}>✓</span>}
+            </div>
+            <span style={{ fontSize: 12, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Customer has read and accepts the terms above</span>
+          </label>
+        </div>
+
+        <SignaturePad value={data.signature} onChange={s => onChange({ signature: s })} label="Customer Signature *" />
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Form Component ──────────────────────────────────────────────────────
 
 const INITIAL: FormData = {
   dealerId: "", customerName: "", customerNIC: "", customerContact: "", customerEmail: "",
-  deviceModel: "", deviceIMEI: "", receivedItems: [], faultCheckboxes: [], faultDescription: "",
+  deviceModel: "", deviceModelNumber: "", deviceIMEI: "", receivedItems: [], faultCheckboxes: [], faultDescription: "",
   estimatedCost: "", advancePaid: "", paymentMethod: "", jobPriority: "Normal", jobNotes: "",
   assignedRepairman: "", estimatedCompletion: "",
+  condition: { front: "Good", back: "Good", frame: "Good", camera: "Good", ports: "Good", buttons: "Good" },
+  intakePhotos: [], passcodeType: "None", passcode: "", signature: "", termsAccepted: false,
 };
 
 function detectBrand(model: string): string {
@@ -640,12 +840,35 @@ function detectBrand(model: string): string {
 
 export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
   const { addJob } = useRepair();
+  const { warranties } = useWarranty();
+  const [customModels, setCustomModels] = usePersistentState<string[]>("mano_custom_models", []);
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<FormData>(INITIAL);
-  const [submitted, setSubmitted] = useState(false);
+  const [createdJob, setCreatedJob] = useState<RepairJob | null>(null);
   const isMobile = useIsMobile();
 
+  // Base catalogue + any models the user has typed/saved before.
+  const modelOptions = [...new Set([...DEVICE_MODELS, ...customModels])].sort();
+  const addModel = (m: string) => {
+    const v = m.trim();
+    if (v && !DEVICE_MODELS.includes(v) && !customModels.includes(v)) {
+      setCustomModels((prev) => [...prev, v]);
+    }
+  };
+
   const update = (partial: Partial<FormData>) => setForm((f) => ({ ...f, ...partial }));
+
+  // Warranty lookup — does this device already have an active warranty?
+  const existingWarranty = (() => {
+    const imei = form.deviceIMEI.replace(/\s/g, "");
+    const phone = form.customerContact.replace(/\s/g, "");
+    if (!imei && !phone) return undefined;
+    return warranties.find(w =>
+      effectiveStatus(w) === "Active" &&
+      ((imei && w.imei?.replace(/\s/g, "") === imei) ||
+       (phone.length >= 7 && w.customerPhone.replace(/\s/g, "").endsWith(phone.slice(-7)))),
+    );
+  })();
 
   const canProceed = () => {
     if (step === 1) return form.customerName.trim() && form.customerContact.trim();
@@ -654,6 +877,9 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
     return true;
   };
 
+  const canSubmit =
+    form.intakePhotos.length > 0 && form.signature.trim() !== "" && form.termsAccepted;
+
   const handleSubmit = () => {
     const repairman = REPAIRMEN.find(r => String(r.id) === form.assignedRepairman);
     const issueFaults = [
@@ -661,52 +887,35 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
       ...(form.faultDescription.trim() ? [form.faultDescription.trim()] : []),
     ].join(", ") || "General Repair";
 
-    addJob({
+    const job = addJob({
       customerName: form.customerName || "Walk-in",
       phone: form.customerContact,
       brand: detectBrand(form.deviceModel),
       model: form.deviceModel,
+      modelNumber: form.deviceModelNumber || undefined,
       issue: issueFaults,
       technician: repairman?.name ?? "Unassigned",
       status: "Non-Issued",
       priority: (form.jobPriority as "Low" | "Normal" | "High" | "Urgent") || "Normal",
       estimatedCost: parseFloat(form.estimatedCost) || 0,
+      originalEstimate: parseFloat(form.estimatedCost) || 0,
       advancePaid: parseFloat(form.advancePaid) || 0,
       createdAt: new Date().toISOString().slice(0, 10),
       estimatedCompletion: form.estimatedCompletion || new Date().toISOString().slice(0, 10),
       imei: form.deviceIMEI || undefined,
       dealer: "MANO MOBILE",
       receivedItems: form.receivedItems.length ? form.receivedItems : undefined,
+      cosmeticCondition: form.condition,
+      intakePhotos: form.intakePhotos.length ? form.intakePhotos : undefined,
+      passcodeType: form.passcodeType,
+      devicePasscode: form.passcode || undefined,
+      customerConsentSignature: form.signature || undefined,
+      termsVersionAccepted: form.termsAccepted ? TERMS_VERSION : undefined,
     });
-    setSubmitted(true);
+    setCreatedJob(job);
   };
 
-  if (submitted) {
-    return (
-      <div style={{
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        height: "100%", gap: 16, textAlign: "center",
-      }}>
-        <div style={{ fontSize: 56 }}>✅</div>
-        <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)" }}>
-          Repair Job Created!
-        </div>
-        <div style={{ fontSize: 14, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-          Job card has been generated and repairman notified.
-        </div>
-        <button
-          onClick={() => { setForm(INITIAL); setStep(1); setSubmitted(false); }}
-          style={{
-            marginTop: 10, padding: "10px 28px", borderRadius: 8, border: "none",
-            background: "var(--accent)", color: "var(--accent-fg)", fontWeight: 700, fontSize: 14,
-            cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif",
-          }}
-        >
-          New Repair
-        </button>
-      </div>
-    );
-  }
+  const startNewRepair = () => { setForm(INITIAL); setStep(1); setCreatedJob(null); };
 
   return (
     <div
@@ -724,12 +933,25 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
         <StepIndicator current={step} />
       </div>
 
+      {/* Active-warranty alert — surfaced once IMEI / phone is known */}
+      {existingWarranty && (
+        <div style={{ margin: isMobile ? "0 16px 10px" : "0 28px 10px", display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 14px", borderRadius: 10, background: "rgba(167,139,250,0.08)", border: "1px solid rgba(167,139,250,0.3)" }}>
+          <ShieldCheck size={15} color="#a78bfa" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
+            <strong style={{ color: "#a78bfa" }}>Active warranty found</strong> — {existingWarranty.id} covering{" "}
+            {existingWarranty.partsCovered.join(", ")} (expires {existingWarranty.expiresAt?.slice(0, 10)}). If this
+            is the same fault, open a <strong>warranty claim</strong> in the Warranty Center instead of a paid job.
+          </p>
+        </div>
+      )}
+
       {/* Step Content */}
       <div style={{ flex: isMobile ? "none" : 1, padding: isMobile ? "0 16px" : "0 28px", minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>
         {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} />}
-        {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} />}
+        {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} models={modelOptions} onAddModel={addModel} />}
         {step === 3 && <Step3 data={form} onChange={update} isMobile={isMobile} />}
         {step === 4 && <Step4 data={form} onChange={update} isMobile={isMobile} />}
+        {step === 5 && <Step5 data={form} onChange={update} isMobile={isMobile} />}
       </div>
 
       {/* Footer Navigation */}
@@ -754,7 +976,7 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
         </button>
 
         <div style={{ display: "flex", gap: 6 }}>
-          {[1, 2, 3, 4].map((s) => (
+          {[1, 2, 3, 4, 5].map((s) => (
             <div key={s} style={{
               width: s === step ? 20 : 6, height: 6, borderRadius: 3,
               background: s <= step ? "var(--accent)" : "var(--border)",
@@ -763,7 +985,7 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
           ))}
         </div>
 
-        {step < 4 ? (
+        {step < 5 ? (
           <button
             onClick={() => setStep((s) => s + 1)}
             disabled={!canProceed()}
@@ -780,17 +1002,124 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
           </button>
         ) : (
           <button
-            onClick={handleSubmit}
+            onClick={() => canSubmit && handleSubmit()}
+            disabled={!canSubmit}
+            title={canSubmit ? "" : "Add at least one photo, capture the signature, and accept the terms"}
             style={{
               padding: "9px 24px", borderRadius: 8, border: "none",
-              background: "var(--accent)", color: "var(--accent-fg)",
-              cursor: "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif",
+              background: canSubmit ? "var(--accent)" : "var(--border)",
+              color: canSubmit ? "var(--accent-fg)" : "var(--text-secondary)",
+              cursor: canSubmit ? "pointer" : "not-allowed",
+              fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif",
               fontWeight: 700,
             }}
           >
             ✓ Create Repair Job
           </button>
         )}
+      </div>
+
+      {createdJob && <JobReceiptPopup job={createdJob} onNew={startNewRepair} onClose={onClose} />}
+    </div>
+  );
+}
+
+// ─── Job-created popup with printable receipt ─────────────────────────────────
+
+function JobReceiptPopup({ job, onNew, onClose }: { job: RepairJob; onNew: () => void; onClose?: () => void }) {
+  const slipRef = useRef<HTMLDivElement>(null);
+  const balance = job.estimatedCost - job.advancePaid;
+
+  const handlePrint = () => {
+    if (!slipRef.current) return;
+    const el = document.createElement("div"); el.id = "__jobslip__"; el.innerHTML = slipRef.current.outerHTML;
+    document.body.appendChild(el);
+    const st = document.createElement("style"); st.id = "__jobslip_style__";
+    st.textContent = `@page{size:A5 portrait;margin:10mm}#__jobslip__{display:none}@media print{body{visibility:hidden}#__jobslip__{display:block!important;visibility:visible;position:fixed;top:0;left:0;width:100%}#__jobslip__ *{visibility:visible}}`;
+    document.head.appendChild(st); window.print();
+    setTimeout(() => { document.getElementById("__jobslip__")?.remove(); document.getElementById("__jobslip_style__")?.remove(); }, 500);
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 1200, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 18,
+    }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 18, width: "min(440px, calc(100vw - 24px))", maxHeight: "92vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.55)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+        <div style={{ padding: "26px 24px 18px", textAlign: "center" }}>
+          <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(74,222,128,0.12)", border: "2px solid #4ade80", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
+            <CheckCircle2 size={28} color="#4ade80" />
+          </div>
+          <p style={{ fontSize: 19, fontWeight: 800, color: "var(--text-primary)" }}>Repair Job Created</p>
+          <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>
+            Job <strong style={{ color: "var(--accent)" }}>{job.id}</strong> · {job.brand} {job.model}
+          </p>
+          <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 10, lineHeight: 1.5 }}>
+            Print the job receipt for the customer, or hand-write the job number on a chit if you prefer.
+          </p>
+        </div>
+
+        {/* Hidden printable slip */}
+        <div style={{ position: "absolute", left: -99999, top: 0 }}>
+          <div ref={slipRef} style={{ background: "#fff", color: "#000", padding: "26px 30px", fontFamily: "Arial, sans-serif", width: 480 }}>
+            <div style={{ textAlign: "center", borderBottom: "2px solid #000", paddingBottom: 10, marginBottom: 14 }}>
+              <h2 style={{ margin: 0, fontWeight: 900, fontSize: 18, letterSpacing: "0.05em" }}>MANO MOBILE CENTRE</h2>
+              <p style={{ margin: "3px 0 0", fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>New Job Receipt</p>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+              <tbody>
+                {[
+                  ["Job No.", job.id],
+                  ["Date Received", job.createdAt],
+                  ["Customer", `${job.customerName} · ${job.phone}`],
+                  ["Device", `${job.brand} ${job.model}${job.modelNumber ? ` (${job.modelNumber})` : ""}`],
+                  ["IMEI", job.imei || "—"],
+                  ["Reported fault", job.issue],
+                  ["Items received", (job.receivedItems || []).join(", ") || "—"],
+                  ["Technician", job.technician],
+                  ["Est. completion", job.estimatedCompletion],
+                ].map(([k, v]) => (
+                  <tr key={k}><td style={{ padding: "3px 8px 3px 0", fontWeight: 700, width: 110, verticalAlign: "top" }}>{k}:</td><td style={{ padding: "3px 0" }}>{v}</td></tr>
+                ))}
+              </tbody>
+            </table>
+            <table style={{ width: "100%", borderCollapse: "collapse", border: "1px solid #999", marginTop: 12, fontSize: 11 }}>
+              <tbody>
+                <tr style={{ background: "#f0f0f0" }}>
+                  <th style={{ padding: "4px 8px", textAlign: "left" }}>Estimated</th>
+                  <th style={{ padding: "4px 8px", textAlign: "left", borderLeft: "1px solid #999" }}>Advance</th>
+                  <th style={{ padding: "4px 8px", textAlign: "left", borderLeft: "1px solid #999" }}>Balance</th>
+                </tr>
+                <tr>
+                  <td style={{ padding: "4px 8px" }}>Rs. {job.estimatedCost.toLocaleString()}</td>
+                  <td style={{ padding: "4px 8px", borderLeft: "1px solid #999" }}>Rs. {job.advancePaid.toLocaleString()}</td>
+                  <td style={{ padding: "4px 8px", borderLeft: "1px solid #999", fontWeight: 700 }}>Rs. {balance.toLocaleString()}</td>
+                </tr>
+              </tbody>
+            </table>
+            <p style={{ fontSize: 8.5, color: "#666", marginTop: 12, lineHeight: 1.4 }}>
+              Please keep this receipt and present it when collecting your device. Mano Mobile is not
+              responsible for pre-existing damage not noted at intake. Warranty applies only to the work performed.
+            </p>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div style={{ padding: "0 20px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <button onClick={handlePrint} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "11px", borderRadius: 10, border: "none", background: "var(--accent)", color: "var(--accent-fg)", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            <Printer size={16} /> Print Job Receipt
+          </button>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={onNew} style={{ flex: 1, padding: "10px", borderRadius: 10, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              + New Repair
+            </button>
+            {onClose && (
+              <button onClick={onClose} style={{ flex: 1, padding: "10px", borderRadius: 10, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                Done
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

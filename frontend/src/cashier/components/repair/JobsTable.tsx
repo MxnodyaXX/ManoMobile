@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, forwardRef } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import ExportButtons from "@/cashier/components/shared/ExportButtons";
 import { exportToPdf, exportToExcel, exportToPng } from "@/cashier/utils/exportUtils";
-import { useRepair } from "@/cashier/contexts/RepairContext";
-import type { JobStatus, RepairJob } from "@/cashier/contexts/RepairContext";
+import { useRepair, jobLabel, jobMatchesView, VIEW_META } from "@/cashier/contexts/RepairContext";
+import type { JobStatus, RepairJob, RepairView } from "@/cashier/contexts/RepairContext";
 export type { JobStatus, RepairJob } from "@/cashier/contexts/RepairContext";
 import { createPortal } from "react-dom";
 import {
@@ -104,6 +104,10 @@ function InfoBlock({ label, children }: { label: string; children: React.ReactNo
 
 function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void }) {
   const slipRef = useRef<HTMLDivElement>(null);
+  // Mano Mobile's own jobs print as the job-card slip (with signature); external-dealer
+  // jobs print as a SALES INVOICE that bills the dealer.
+  const isManoMobile = (job.dealer ?? "").toUpperCase().includes("MANO MOBILE");
+  const useInvoiceFormat = !isManoMobile;
 
   const handlePrint = () => {
     if (!slipRef.current) return;
@@ -114,7 +118,7 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
     const st = document.createElement("style");
     st.id = "__slip_style__";
     st.textContent = `
-      @page { size: A5 portrait; margin: 10mm; }
+      @page { size: ${useInvoiceFormat ? "A4 landscape" : "A5 portrait"}; margin: ${useInvoiceFormat ? "12mm" : "10mm"}; }
       #__slip__ { display: none; }
       @media print {
         body { visibility: hidden; }
@@ -131,6 +135,17 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
   };
 
   const d = new Date(job.createdAt);
+  const receiptTitle = `${jobLabel(job)} Job Receipt`;
+  const fmtSlipDate = (s?: string) => s ? new Date(s).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+  const timeline: [string, string][] = [
+    ["Date Received",   fmtSlipDate(job.createdAt)],
+    ["Est. Completion", fmtSlipDate(job.estimatedCompletion)],
+    ["Date Started",    fmtSlipDate(job.startedAt)],
+    ...(job.pausedAt ? ([["Date Paused", fmtSlipDate(job.pausedAt)]] as [string, string][]) : []),
+    ["Date Finished",   fmtSlipDate(job.completedAt)],
+    ["Date Issued",     fmtSlipDate(job.handover?.handedOverAt)],
+    ...(job.cancelledAt ? ([["Date Cancelled", fmtSlipDate(job.cancelledAt)]] as [string, string][]) : []),
+  ];
 
   if (typeof document === "undefined") return null;
   return createPortal(
@@ -142,7 +157,7 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <FileText size={15} color="var(--accent)" />
             <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-              Job Intake Slip — {job.id}
+              {useInvoiceFormat ? "Sales Invoice" : receiptTitle} — {job.id}
             </p>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -155,12 +170,15 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
           </div>
         </div>
 
-        <div style={{ overflowY: "auto", padding: 20 }}>
+        <div style={{ overflowX: "auto", overflowY: "auto", padding: 20 }}>
+          {useInvoiceFormat ? (
+            <SalesInvoiceSlip ref={slipRef} job={job} fmtSlipDate={fmtSlipDate} />
+          ) : (
           <div ref={slipRef} style={{ background: "#ffffff", padding: "28px 32px", fontFamily: "Arial, Helvetica, sans-serif", color: "#000", fontSize: 11 }}>
 
             <div style={{ textAlign: "center", borderBottom: "2px solid #000", paddingBottom: 12, marginBottom: 16 }}>
               <h2 style={{ margin: 0, fontWeight: 900, fontSize: 18, letterSpacing: "0.05em" }}>MANO MOBILE CENTRE</h2>
-              <p style={{ margin: "4px 0 0", fontSize: 10, color: "#555" }}>Repair Intake Job Card</p>
+              <p style={{ margin: "4px 0 0", fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>{receiptTitle}</p>
             </div>
 
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14, gap: 20 }}>
@@ -184,6 +202,12 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
               <div style={{ border: "1px solid #000", padding: "6px 12px", textAlign: "center", minWidth: 110 }}>
                 <p style={{ fontSize: 9, fontWeight: 700, marginBottom: 4 }}>EST. COMPLETION</p>
                 <p style={{ fontSize: 12, fontWeight: 700 }}>{job.estimatedCompletion}</p>
+                {job.completedAt && (
+                  <>
+                    <p style={{ fontSize: 8.5, fontWeight: 700, marginTop: 6, color: "#16a34a" }}>COMPLETED</p>
+                    <p style={{ fontSize: 11, fontWeight: 700, color: "#16a34a" }}>{job.completedAt}</p>
+                  </>
+                )}
               </div>
             </div>
 
@@ -213,6 +237,22 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
                   <td style={{ padding: "3px 8px", fontWeight: 700 }}>Fault</td>
                   <td style={{ padding: "3px 8px" }}>{job.issue}</td>
                 </tr>
+              </tbody>
+            </table>
+
+            <table style={{ width: "100%", borderCollapse: "collapse", border: "1px solid #999", marginBottom: 12, fontSize: 10.5 }}>
+              <thead>
+                <tr style={{ background: "#f0f0f0" }}>
+                  <th colSpan={2} style={{ padding: "5px 8px", borderBottom: "1px solid #999", textAlign: "left", fontWeight: 700 }}>JOB TIMELINE</th>
+                </tr>
+              </thead>
+              <tbody>
+                {timeline.map(([k, v], i) => (
+                  <tr key={k} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
+                    <td style={{ padding: "3px 8px", fontWeight: 700, width: 150, borderRight: "1px solid #eee" }}>{k}</td>
+                    <td style={{ padding: "3px 8px" }}>{v}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
 
@@ -246,24 +286,187 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
               </tbody>
             </table>
 
+            {/* ── Status-specific section ── */}
+            {/* Pending (paused) — show the reason */}
+            {job.status === "Pending" && (
+              <div style={{ border: "1px solid #d97706", background: "#fffbeb", borderRadius: 4, padding: "7px 10px", marginBottom: 12, fontSize: 10.5 }}>
+                <strong>Status:</strong> On Hold (Pending){job.pauseReason ? <> — <em>{job.pauseReason}</em></> : null}
+              </div>
+            )}
+
+            {/* Non-Issued (repaired, awaiting collection) — completion details */}
+            {job.status === "Completed" && (
+              <div style={{ border: "1px solid #999", borderRadius: 4, padding: "8px 10px", marginBottom: 12, fontSize: 10.5 }}>
+                <p style={{ fontWeight: 700, marginBottom: 4 }}>REPAIR COMPLETED — AWAITING COLLECTION</p>
+                {job.partsUsed && job.partsUsed.length > 0 && (
+                  <p style={{ marginBottom: 3 }}><strong>Parts used:</strong> {job.partsUsed.join(", ")}</p>
+                )}
+                {job.techRemarks && <p style={{ marginBottom: 3 }}><strong>Technician remarks:</strong> {job.techRemarks}</p>}
+                {job.futureFaults && (
+                  <p style={{ color: "#b45309" }}><strong>⚠ Future faults noted:</strong> {job.futureFaults}</p>
+                )}
+              </div>
+            )}
+
+            {/* Cancelled — reason, date, requested-by */}
+            {job.status === "Cancelled" && (
+              <div style={{ border: "1px solid #dc2626", background: "#fef2f2", borderRadius: 4, padding: "8px 10px", marginBottom: 12, fontSize: 10.5 }}>
+                <p style={{ fontWeight: 700, marginBottom: 3 }}>JOB CANCELLED</p>
+                {job.cancelReason && <p style={{ marginBottom: 2 }}><strong>Reason:</strong> {job.cancelReason}</p>}
+                {job.cancelledAt && <p style={{ marginBottom: 2 }}><strong>Cancelled on:</strong> {job.cancelledAt}</p>}
+                {job.cancelledBy && <p><strong>Requested by:</strong> {job.cancelledBy}</p>}
+              </div>
+            )}
+
             <div style={{ borderTop: "1px dashed #999", paddingTop: 10, display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
               <div>
                 <p style={{ fontSize: 9, color: "#666", maxWidth: 260, lineHeight: 1.4 }}>
                   Please keep this slip safe. Present it when collecting your device. Mano Mobile is not responsible for pre-existing damage not noted at intake.
                 </p>
+                {/* Issued — show issued date */}
+                {job.status === "Delivered" && job.handover && (
+                  <p style={{ fontSize: 9.5, color: "#16a34a", fontWeight: 700, marginTop: 6 }}>
+                    ISSUED &amp; collected on {job.handover.handedOverAt.slice(0, 10)}
+                    {job.handover.collectedBy ? ` by ${job.handover.collectedBy}` : ""}
+                  </p>
+                )}
               </div>
               <div style={{ textAlign: "center" }}>
-                <div style={{ borderTop: "1px solid #000", width: 120, marginBottom: 4 }} />
+                {/* Issued — show captured signature; otherwise a signature line */}
+                {job.status === "Delivered" && job.handover?.handoverSignature ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={job.handover.handoverSignature} alt="signature" style={{ width: 130, height: 44, objectFit: "contain", display: "block", marginBottom: 2 }} />
+                ) : (
+                  <div style={{ borderTop: "1px solid #000", width: 120, marginBottom: 4 }} />
+                )}
                 <p style={{ fontSize: 9, fontWeight: 700 }}>Customer Signature</p>
               </div>
             </div>
           </div>
+          )}
         </div>
       </div>
     </div>,
     document.body
   );
 }
+
+// ─── Mano Mobile Sales-Invoice slip (single job) ──────────────────────────────
+
+const SalesInvoiceSlip = forwardRef<HTMLDivElement, { job: RepairJob; fmtSlipDate: (s?: string) => string }>(
+  function SalesInvoiceSlip({ job, fmtSlipDate }, ref) {
+    const balance   = Math.max(0, job.estimatedCost - job.advancePaid);
+    const settled   = balance === 0;
+    const lineTotal = job.estimatedCost;
+    const invTh: React.CSSProperties = { padding: "5px 7px", border: "1px solid #999", fontWeight: 700, fontStyle: "italic", textAlign: "left", whiteSpace: "nowrap", fontSize: 10.5, background: "#f0f0f0" };
+    const invTd: React.CSSProperties = { padding: "5px 7px", border: "1px solid #ccc", fontSize: 10.5, fontStyle: "italic" };
+    const issuedDate = job.handover?.handedOverAt ?? job.completedAt ?? job.createdAt;
+
+    return (
+      <div ref={ref} style={{ background: "#fff", padding: "30px 36px", fontFamily: "Arial, Helvetica, sans-serif", color: "#000", minWidth: 720 }}>
+        <h1 style={{ textAlign: "center", fontWeight: 900, textDecoration: "underline", fontSize: 24, margin: 0, letterSpacing: "0.06em" }}>SALES INVOICE</h1>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 22 }}>
+          <table style={{ borderCollapse: "collapse" }}>
+            <tbody>
+              <tr>
+                <td style={{ padding: "3px 10px", fontWeight: 700, fontSize: 11, textAlign: "right", whiteSpace: "nowrap" }}>INVOICE NUMBER:</td>
+                <td style={{ padding: "4px 14px", background: "#e0e0e0", border: "1px solid #aaa", minWidth: 160, fontWeight: 700, fontSize: 14 }}>{job.id}</td>
+              </tr>
+              <tr>
+                <td style={{ padding: "3px 10px", fontWeight: 700, fontSize: 11, textAlign: "right", whiteSpace: "nowrap" }}>DATE and CREATED BY:</td>
+                <td style={{ padding: "4px 14px", background: "#e0e0e0", border: "1px solid #aaa", fontWeight: 700, fontSize: 11 }}>{fmtSlipDate(issuedDate)} | MANOMOBILE</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ marginTop: 18, display: "flex", gap: 48 }}>
+          <div>
+            <p style={{ fontSize: 12, fontWeight: 700, color: "#555" }}>DEALER</p>
+            <p style={{ fontSize: 13, fontWeight: 700 }}>{job.dealer || "MANO MOBILE"}</p>
+          </div>
+          <div>
+            <p style={{ fontSize: 12, fontWeight: 700, color: "#555" }}>CUSTOMER</p>
+            <p style={{ fontSize: 13, fontWeight: 700 }}>{(job.customerName || "WALK-IN").toUpperCase()}</p>
+            {job.phone && <p style={{ fontSize: 11, color: "#555", marginTop: 1 }}>Tel: {job.phone}</p>}
+          </div>
+        </div>
+
+        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 16, border: "1px solid #999" }}>
+          <thead>
+            <tr>
+              <th style={invTh}>No.</th>
+              <th style={invTh}>Item type</th>
+              <th style={invTh}>Item name</th>
+              <th style={invTh}>IMEI no.</th>
+              <th style={invTh}>Warranty</th>
+              <th style={{ ...invTh, textAlign: "right" }}>Qty</th>
+              <th style={{ ...invTh, textAlign: "right" }}>Advance</th>
+              <th style={{ ...invTh, textAlign: "right" }}>Unit price</th>
+              <th style={{ ...invTh, textAlign: "right" }}>Discount</th>
+              <th style={{ ...invTh, textAlign: "right" }}>Line total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style={invTd}>1.</td>
+              <td style={invTd}>Repair</td>
+              <td style={invTd}>{job.id} | {job.brand} | {job.model}</td>
+              <td style={invTd}>{job.imei || "—"}</td>
+              <td style={invTd}>{job.jobWarranty || "NO WARRANTY"}</td>
+              <td style={{ ...invTd, textAlign: "right" }}>1</td>
+              <td style={{ ...invTd, textAlign: "right" }}>{job.advancePaid.toLocaleString()}</td>
+              <td style={{ ...invTd, textAlign: "right" }}>{job.estimatedCost.toLocaleString()}</td>
+              <td style={{ ...invTd, textAlign: "right" }}>—</td>
+              <td style={{ ...invTd, textAlign: "right", fontWeight: 700, fontStyle: "normal" }}>{lineTotal.toLocaleString()}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+          <div style={{ width: 280, display: "flex", flexDirection: "column", gap: 3 }}>
+            <div style={{ borderTop: "2px solid #000", paddingTop: 5, display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700 }}>
+              <span>TOTAL</span><span>Rs. {job.estimatedCost.toLocaleString()}</span>
+            </div>
+            {job.advancePaid > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                <span style={{ color: "#555" }}>Advance (previously paid)</span>
+                <span style={{ fontWeight: 600 }}>Rs. {job.advancePaid.toLocaleString()}</span>
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, borderTop: "1px solid #e0e0e0", paddingTop: 3, marginTop: 1 }}>
+              <span style={{ color: "#555" }}>Total Paid</span>
+              <span style={{ fontWeight: 700 }}>Rs. {job.advancePaid.toLocaleString()}</span>
+            </div>
+            {settled ? (
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: "#f0fdf4", border: "1px solid #4ade80", borderRadius: 4, padding: "3px 6px", marginTop: 2 }}>
+                <span style={{ fontWeight: 700, color: "#166534" }}>SETTLED</span>
+                <span style={{ fontWeight: 700, color: "#166534" }}>✓</span>
+              </div>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: "#fff8e1", border: "1px solid #f59e0b", borderRadius: 4, padding: "3px 6px", marginTop: 2 }}>
+                <span style={{ fontWeight: 700, color: "#b45309" }}>BALANCE DUE</span>
+                <span style={{ fontWeight: 700, color: "#b45309" }}>Rs. {balance.toLocaleString()}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 14, fontSize: 11 }}>
+          <span style={{ fontWeight: 700 }}>Payment Type: </span>
+          <span style={{ fontWeight: 700, color: settled ? "#166534" : "#b45309", background: settled ? "#f0fdf4" : "#fff8e1", border: `1px solid ${settled ? "#4ade80" : "#f59e0b"}`, borderRadius: 4, padding: "2px 8px" }}>
+            {settled ? "CASH / FULL" : "CREDIT"}
+          </span>
+        </div>
+
+        <p style={{ marginTop: 28, fontSize: 9.5, color: "#888", textAlign: "center" }}>
+          This is a computer-generated invoice. No signature required.
+        </p>
+      </div>
+    );
+  },
+);
 
 // ─── Cancel Job Modal ─────────────────────────────────────────────────────────
 
@@ -489,7 +692,7 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <span style={{ fontSize: 15, fontWeight: 700, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{job.id}</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 9px", borderRadius: 7, background: sc.bg, border: `1px solid ${sc.border}`, color: sc.color, fontSize: 11, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-              <StatusIcon size={9} strokeWidth={2.5} />{job.status}
+              <StatusIcon size={9} strokeWidth={2.5} />{jobLabel(job)}
             </span>
             <span style={{ fontSize: 11, fontWeight: 600, color: priorityColor[job.priority], fontFamily: "'Plus Jakarta Sans', sans-serif" }}>● {job.priority}</span>
           </div>
@@ -1060,11 +1263,11 @@ function FinishJobModal({ job, onClose, onFinish }: {
 // ─── Jobs Table ───────────────────────────────────────────────────────────────
 
 interface JobsTableProps {
-  filterStatus?: JobStatus | "All";
+  view?: RepairView;
   title: string;
 }
 
-export default function JobsTable({ filterStatus = "All" }: JobsTableProps) {
+export default function JobsTable({ view = "All" }: JobsTableProps) {
   const { addEntry } = useCashRegister();
   const { jobs: allJobs, updateJob } = useRepair();
   const isMobile = useIsMobile();
@@ -1082,12 +1285,12 @@ export default function JobsTable({ filterStatus = "All" }: JobsTableProps) {
   const [intakeSlipJob,  setIntakeSlipJob]  = useState<RepairJob | null>(null);
 
   const jobs = useMemo(() => allJobs.filter(j => {
-    const matchStatus   = filterStatus === "All" || j.status === filterStatus;
+    const matchView     = jobMatchesView(j, view);
     const matchSearch   = !search || j.customerName.toLowerCase().includes(search.toLowerCase()) || j.id.toLowerCase().includes(search.toLowerCase()) || j.model.toLowerCase().includes(search.toLowerCase()) || j.brand.toLowerCase().includes(search.toLowerCase());
     const matchPriority = priorityFilter === "All" || j.priority === priorityFilter;
     const matchBrand    = brandFilter === "All" || j.brand === brandFilter;
-    return matchStatus && matchSearch && matchPriority && matchBrand;
-  }), [allJobs, filterStatus, search, priorityFilter, brandFilter]);
+    return matchView && matchSearch && matchPriority && matchBrand;
+  }), [allJobs, view, search, priorityFilter, brandFilter]);
 
   const handleFinish = (data: FinishJobData) => {
     const job = allJobs.find(j => j.id === finishJob!.id);
@@ -1101,7 +1304,12 @@ export default function JobsTable({ filterStatus = "All" }: JobsTableProps) {
   };
 
   const handleCancel = (reason: string) => {
-    updateJob(cancelJob!.id, { status: "Cancelled", cancelReason: reason });
+    updateJob(cancelJob!.id, {
+      status: "Cancelled",
+      cancelReason: reason,
+      cancelledAt: new Date().toISOString().slice(0, 10),
+      cancelledBy: "Cashier",
+    });
     setCancelJob(null);
     setDetailsJob(null);
   };
@@ -1138,14 +1346,13 @@ export default function JobsTable({ filterStatus = "All" }: JobsTableProps) {
     setIssueJobTarget(null);
   };
 
-  // Count stats
+  // Count stats (by shop-facing label)
   const stats = useMemo(() => {
-    const base = filterStatus === "All" ? allJobs : allJobs.filter(j => j.status === filterStatus);
-    const nonIssued  = allJobs.filter(j => j.status === "Non-Issued").length;
-    const pending    = allJobs.filter(j => j.status === "Pending").length;
-    const completed  = allJobs.filter(j => j.status === "Completed").length;
-    return { nonIssued, pending, completed, total: base.length };
-  }, [allJobs, filterStatus]);
+    const notStarted = allJobs.filter(j => jobLabel(j) === "Not Started").length;
+    const pending    = allJobs.filter(j => jobLabel(j) === "Pending").length;
+    const nonIssued  = allJobs.filter(j => jobLabel(j) === "Non-Issued").length;
+    return { notStarted, pending, nonIssued };
+  }, [allJobs]);
 
   const tableRef  = useRef<HTMLDivElement>(null);
   const JOB_HEADERS = ["Job ID", "Customer", "Phone", "Brand", "Model", "Issue", "Technician", "Status", "Priority", "Est. Cost (Rs.)", "Advance (Rs.)"];
@@ -1156,12 +1363,12 @@ export default function JobsTable({ filterStatus = "All" }: JobsTableProps) {
     <div ref={tableRef} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* Quick stat chips */}
-      {filterStatus === "All" && (
+      {view === "All" && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {[
-            { label: "Unassigned", value: stats.nonIssued, color: "#94a3b8" },
-            { label: "Pending",    value: stats.pending,   color: "#fbbf24" },
-            { label: "Ready",      value: stats.completed, color: "#4ade80" },
+            { label: "Not Started",      value: stats.notStarted, color: "#fbbf24" },
+            { label: "Pending (paused)", value: stats.pending,    color: "#f59e0b" },
+            { label: "Awaiting pickup",  value: stats.nonIssued,  color: "#a78bfa" },
           ].map(({ label, value, color }) => (
             <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 8, background: "var(--bg-card)", border: "1px solid var(--border)" }}>
               <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, display: "inline-block" }} />
@@ -1241,6 +1448,8 @@ export default function JobsTable({ filterStatus = "All" }: JobsTableProps) {
               ) : jobs.map((job, i) => {
                 const sc = statusConfig[job.status];
                 const StatusIcon = sc.icon;
+                const label = jobLabel(job);
+                const meta = VIEW_META[label as Exclude<RepairView, "All">] ?? sc;
                 const balance = job.estimatedCost - job.advancePaid;
                 return (
                   <tr key={job.id} style={{ borderBottom: i < jobs.length - 1 ? "1px solid var(--border)" : "none", transition: "background 0.15s" }}
@@ -1263,9 +1472,12 @@ export default function JobsTable({ filterStatus = "All" }: JobsTableProps) {
                       <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{job.technician}</span>
                     </td>
                     <td style={{ padding: "13px 14px" }}>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, background: sc.bg, border: `1px solid ${sc.border}`, color: sc.color, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
-                        <StatusIcon size={9} strokeWidth={2.5} />{job.status}
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, background: meta.bg, border: `1px solid ${meta.border}`, color: meta.color, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
+                        <StatusIcon size={9} strokeWidth={2.5} />{label}
                       </span>
+                      {job.status === "Pending" && job.pauseReason && (
+                        <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 4, maxWidth: 160, lineHeight: 1.35 }}>⏸ {job.pauseReason}</p>
+                      )}
                     </td>
                     <td style={{ padding: "13px 14px" }}>
                       <span style={{ fontSize: 11, fontWeight: 600, color: priorityColor[job.priority] }}>● {job.priority}</span>

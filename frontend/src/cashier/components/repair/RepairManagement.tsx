@@ -1,43 +1,53 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
-import { Plus, Briefcase, AlertCircle, Clock, CheckSquare, LayoutGrid, XCircle, Truck } from "lucide-react";
+import { Plus, Briefcase, AlertCircle, Clock, Hourglass, LayoutGrid, XCircle, PackageCheck, CheckCheck } from "lucide-react";
 import NewRepairForm from "./NewRepairForm";
-import JobsTable, { JobStatus } from "./JobsTable";
+import JobsTable from "./JobsTable";
+import type { RepairView } from "@/cashier/contexts/RepairContext";
 
-type RepairSection =
+export type RepairSection =
   | "New Repair"
-  | "Non-Issued Jobs"
-  | "Issued Jobs"
-  | "Pending Jobs"
-  | "Completed Jobs"
-  | "Cancelled Jobs"
+  | "New"
+  | "Not Started"
+  | "Started"
+  | "Pending"
+  | "Non-Issued"
+  | "Issued"
+  | "Cancelled"
   | "All Jobs";
 
-const sections: { id: RepairSection; icon: any; label: string; status?: JobStatus | "All" }[] = [
-  { id: "New Repair",       icon: Plus,        label: "New Repair" },
-  { id: "Non-Issued Jobs",  icon: Clock,       label: "Non-Issued",  status: "Non-Issued" },
-  { id: "Issued Jobs",      icon: Briefcase,   label: "Issued",      status: "Issued" },
-  { id: "Pending Jobs",     icon: AlertCircle, label: "Pending",     status: "Pending" },
-  { id: "Completed Jobs",   icon: CheckSquare, label: "Completed",   status: "Completed" },
-  { id: "Cancelled Jobs",   icon: XCircle,     label: "Cancelled",   status: "Cancelled" },
-  { id: "All Jobs",         icon: LayoutGrid,  label: "All Jobs",    status: "All" },
+const sections: { id: RepairSection; icon: any; label: string; view?: RepairView }[] = [
+  { id: "New Repair",   icon: Plus,         label: "New Repair" },
+  { id: "New",          icon: Clock,        label: "New",          view: "New" },
+  { id: "Not Started",  icon: AlertCircle,  label: "Not Started",  view: "Not Started" },
+  { id: "Started",      icon: Briefcase,    label: "Started",      view: "Started" },
+  { id: "Pending",      icon: Hourglass,    label: "Pending",      view: "Pending" },
+  { id: "Non-Issued",   icon: PackageCheck, label: "Non-Issued",   view: "Non-Issued" },
+  { id: "Issued",       icon: CheckCheck,   label: "Issued",       view: "Issued" },
+  { id: "Cancelled",    icon: XCircle,      label: "Cancelled",    view: "Cancelled" },
+  { id: "All Jobs",     icon: LayoutGrid,   label: "All Jobs",     view: "All" },
 ];
 
 const sectionDescriptions: Record<RepairSection, string> = {
-  "New Repair":      "Register a new device repair job",
-  "Non-Issued Jobs": "Jobs logged but not yet assigned to a technician",
-  "Issued Jobs":     "Jobs currently assigned and in progress",
-  "Pending Jobs":    "Jobs awaiting parts, approval, or follow-up",
-  "Completed Jobs":  "Finished repairs ready for customer pickup",
-  "Cancelled Jobs":  "Voided or cancelled repair jobs",
-  "All Jobs":        "Complete list of all repair jobs",
+  "New Repair":   "Register a new device repair job",
+  "New":          "Jobs received today, not yet started",
+  "Not Started":  "Received earlier but still not started — needs attention",
+  "Started":      "Repairs currently in progress",
+  "Pending":      "Started jobs that are paused — with the reason",
+  "Non-Issued":   "Repaired and waiting for the customer to collect",
+  "Issued":       "Collected & signed for by the customer",
+  "Cancelled":    "Cancelled repair jobs — with reason and date",
+  "All Jobs":     "Complete list of all repair jobs",
 };
 
-export default function RepairManagement() {
-  const [active, setActive] = useState<RepairSection>("New Repair");
+export default function RepairManagement({ initialSection }: { initialSection?: RepairSection }) {
+  const [active, setActive] = useState<RepairSection>(initialSection ?? "New Repair");
   const isMobile = useIsMobile();
+
+  // Allow the dashboard (or other callers) to deep-link a tab.
+  useEffect(() => { if (initialSection) setActive(initialSection); }, [initialSection]);
 
   const activeSection = sections.find(s => s.id === active)!;
   const ActiveIcon = activeSection.icon;
@@ -137,7 +147,7 @@ export default function RepairManagement() {
         ) : (
           <JobsTable
             title={active}
-            filterStatus={activeSection.status as JobStatus | "All"}
+            view={activeSection.view ?? "All"}
           />
         )}
       </div>

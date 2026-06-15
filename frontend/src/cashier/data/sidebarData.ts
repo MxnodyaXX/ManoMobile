@@ -9,11 +9,13 @@ import {
   Calculator,
   Receipt,
   Shield,
+  ShieldCheck,
 } from "lucide-react";
 
 export const sidebarData = [
   { title: "Home",               icon: Home },
   { title: "Repair Management",  icon: Wrench },
+  { title: "Warranty Center",    icon: ShieldCheck },
   { title: "Sales Management",   icon: DollarSign },
   { title: "Inventory Management", icon: Boxes },
   { title: "Customer Management", icon: Users },

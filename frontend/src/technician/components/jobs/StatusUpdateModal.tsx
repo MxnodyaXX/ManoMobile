@@ -4,10 +4,12 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import {
   X, AlertTriangle, Play, Pause, CheckCircle,
-  XCircle, ArrowRight, Shield, CheckSquare,
+  XCircle, ArrowRight, Shield, CheckSquare, DollarSign,
 } from "lucide-react";
-import { type RepairJob, type JobStatus, useRepair } from "@/cashier/contexts/RepairContext";
+import { type RepairJob, type JobStatus, type EstimateApproval, type ApprovalChannel, useRepair } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
+import { useWarranty, type WarrantyScope } from "@/cashier/contexts/WarrantyContext";
+import SignaturePad from "@/cashier/components/shared/SignaturePad";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -69,7 +71,8 @@ function StatusBadge({ status }: { status: JobStatus }) {
 
 export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; onClose: () => void }) {
   const { jobs, updateJob } = useRepair();
-  const { technicianName, setJobMeta, getElapsedMinutes, diagnostics, addActivity, saveFunctionalTest, saveWarranty } = useTech();
+  const { technicianName, setJobMeta, getElapsedMinutes, diagnostics, addActivity, saveFunctionalTest, saveWarranty, partRequests } = useTech();
+  const { issueWarranty } = useWarranty();
 
   const [selectedNext, setSelectedNext] = useState<JobStatus | null>(null);
   const [pauseReason, setPauseReason]   = useState("");
@@ -83,6 +86,24 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
   );
   const [testNotes, setTestNotes]       = useState("");
   const [warrantyDays, setWarrantyDays] = useState(30);
+  const [warrantyScope, setWarrantyScope] = useState<WarrantyScope>("Parts & Labour");
+
+  // Parts used (prefilled from installed part requests) + future faults — both printed on the receipt.
+  const installedParts = partRequests
+    .filter(r => r.jobId === job.id && r.installedAt)
+    .map(r => `${r.partName}${r.quantity > 1 ? ` ×${r.quantity}` : ""}`);
+  const [partsUsedText, setPartsUsedText] = useState(installedParts.join("\n"));
+  const [futureFaults, setFutureFaults]   = useState("");
+
+  // ── Estimate approval gate ──
+  const originalEstimate = job.originalEstimate ?? job.estimatedCost;
+  const [revisedCost, setRevisedCost]   = useState(String(job.estimatedCost));
+  const [apprChannel, setApprChannel]   = useState<ApprovalChannel>("In-store");
+  const [apprRef, setApprRef]           = useState("");
+  const [apprSig, setApprSig]           = useState("");
+  const revisedNum   = parseFloat(revisedCost) || 0;
+  const needsApproval = revisedNum > originalEstimate + 0.001 && !job.approval;
+  const approvalCaptured = apprChannel === "In-store" ? apprSig.trim() !== "" : apprRef.trim().length > 2;
 
   const conflictJob = selectedNext === "Issued"
     ? jobs.find(j => j.technician === technicianName && j.status === "Issued" && j.id !== job.id)
@@ -98,7 +119,7 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
   const canSubmit = (() => {
     if (!selectedNext) return false;
     if (selectedNext === "Pending")   return pauseReason.trim().length > 3;
-    if (selectedNext === "Completed") return completionNotes.trim().length > 5;
+    if (selectedNext === "Completed") return completionNotes.trim().length > 5 && (!needsApproval || approvalCaptured);
     if (selectedNext === "Cancelled") return cancelReason.trim().length > 3;
     return true;
   })();
@@ -112,30 +133,70 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
     }
 
     const now = new Date();
+    const completedPatch: Partial<RepairJob> = {};
 
     if (selectedNext === "Issued") {
       const elapsed = getElapsedMinutes(job.id);
       setJobMeta(job.id, { startedAt: now, lastPausedAt: undefined, pauseReason: undefined, accumulatedMinutes: elapsed });
+      completedPatch.startedAt = now.toISOString();
+      completedPatch.pauseReason = undefined;
       addActivity({ jobId: job.id, type: "status_change", description: `Job started${hasDiagnostic ? " (diagnostic on record)" : " (no pre-repair diagnostic)"}` });
     } else if (selectedNext === "Pending") {
       setJobMeta(job.id, { lastPausedAt: now, pauseReason: pauseReason.trim() });
+      completedPatch.pauseReason = pauseReason.trim();
+      completedPatch.pausedAt = now.toISOString();
       addActivity({ jobId: job.id, type: "status_change", description: `Job paused — ${pauseReason.trim()}` });
     } else if (selectedNext === "Completed") {
       setJobMeta(job.id, { completedAt: now, completionNotes, lastPausedAt: now });
+      completedPatch.completedAt = now.toISOString().slice(0, 10);
+      completedPatch.techRemarks = completionNotes.trim();
+      const partsList = partsUsedText.split("\n").map(s => s.trim()).filter(Boolean);
+      if (partsList.length) completedPatch.partsUsed = partsList;
+      if (futureFaults.trim()) completedPatch.futureFaults = futureFaults.trim();
       // Save functional test
       const overallPass = testsFailed === 0;
       saveFunctionalTest({ jobId: job.id, completedAt: now, results: testResults, overallPass, notes: testNotes || undefined });
-      // Save warranty
+
+      // Capture estimate approval if the cost went up
+      let approval: EstimateApproval | undefined;
+      if (revisedNum > originalEstimate + 0.001 && !job.approval) {
+        approval = {
+          amount: revisedNum, approvedBy: job.customerName, channel: apprChannel,
+          signature: apprChannel === "In-store" ? apprSig : undefined,
+          reference: apprChannel !== "In-store" ? apprRef : undefined,
+          approvedAt: now.toISOString(), recordedByStaff: technicianName,
+        };
+        addActivity({ jobId: job.id, type: "note_added", description: `Revised estimate Rs. ${revisedNum.toLocaleString()} approved by customer (${apprChannel})` });
+      }
+
+      // Issue the unified warranty (status: Pending Activation — clock starts at handover)
       if (warrantyDays > 0) {
+        const wid = issueWarranty({
+          jobId: job.id,
+          customerName: job.customerName,
+          customerPhone: job.phone,
+          deviceModel: `${job.brand} ${job.model}`,
+          imei: job.imei,
+          partsCovered: [job.issue],
+          scope: warrantyScope,
+          durationDays: warrantyDays,
+        });
+        completedPatch.warrantyId = wid;
+        // Legacy record kept for technician-side views
         const expiresAt = new Date(now.getTime() + warrantyDays * 86_400_000);
         saveWarranty({ jobId: job.id, issuedAt: now, durationDays: warrantyDays, expiresAt });
-        addActivity({ jobId: job.id, type: "warranty_issued", description: `Warranty issued: ${WARRANTY_OPTIONS.find(w => w.days === warrantyDays)?.label}` });
+        addActivity({ jobId: job.id, type: "warranty_issued", description: `Warranty issued: ${WARRANTY_OPTIONS.find(w => w.days === warrantyDays)?.label} (${warrantyScope}) — activates on collection` });
       }
+
+      completedPatch.estimatedCost = revisedNum;
+      completedPatch.revisedEstimate = revisedNum;
+      if (approval) completedPatch.approval = approval;
+
       addActivity({ jobId: job.id, type: "test_completed", description: `Functional tests: ${testsPassed}/${testsTotal} passed${testsFailed > 0 ? `, ${testsFailed} failed` : ""}` });
       addActivity({ jobId: job.id, type: "status_change", description: `Job completed. ${completionNotes.slice(0, 80)}${completionNotes.length > 80 ? "…" : ""}` });
     }
 
-    updateJob(job.id, { status: selectedNext });
+    updateJob(job.id, { status: selectedNext, ...completedPatch });
     setConfirmed(true);
     setTimeout(onClose, 1400);
   };
@@ -263,13 +324,71 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
             {selectedNext === "Completed" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-                {/* Work summary */}
+                {/* Estimate & approval gate */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {sec("Work Summary * (required)")}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <DollarSign size={13} color="#fbbf24" />
+                    {sec("Final Cost")}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginBottom: 3 }}>Quoted at intake</p>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-secondary)", fontFamily: ff }}>Rs. {originalEstimate.toLocaleString()}</p>
+                    </div>
+                    <ArrowRight size={14} color="var(--text-muted)" />
+                    <div style={{ flex: 1 }}>
+                      <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginBottom: 3 }}>Final cost (Rs.)</p>
+                      <input type="number" min={0} value={revisedCost} onChange={e => setRevisedCost(e.target.value)} style={inputStyle} />
+                    </div>
+                  </div>
+
+                  {needsApproval && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "12px 13px", borderRadius: 10, background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.3)" }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
+                        <AlertTriangle size={14} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+                        <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                          Final cost is <strong style={{ color: "#fbbf24" }}>Rs. {(revisedNum - originalEstimate).toLocaleString()} higher</strong> than quoted.
+                          Customer approval is required before completing.
+                        </p>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {(["In-store", "SMS", "WhatsApp", "Phone"] as ApprovalChannel[]).map(c => (
+                          <button key={c} onClick={() => setApprChannel(c)} style={{
+                            padding: "5px 11px", borderRadius: 7, fontSize: 11.5, fontWeight: 600,
+                            border: `1px solid ${apprChannel === c ? "#fbbf24" : "var(--border)"}`,
+                            background: apprChannel === c ? "rgba(251,191,36,0.14)" : "var(--bg-secondary)",
+                            color: apprChannel === c ? "#fbbf24" : "var(--text-muted)", cursor: "pointer", fontFamily: ff,
+                          }}>{c}</button>
+                        ))}
+                      </div>
+                      {apprChannel === "In-store" ? (
+                        <SignaturePad value={apprSig} onChange={setApprSig} height={110} label="Customer Approval Signature *" />
+                      ) : (
+                        <input value={apprRef} onChange={e => setApprRef(e.target.value)} placeholder={`${apprChannel} reference / note (e.g. "approved by reply at 14:32")`} style={inputStyle} />
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Work summary (technician remarks → printed on the Non-Issued receipt) */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {sec("Job Remarks / Work Summary * (required)")}
                   <textarea placeholder="Describe all work performed — parts replaced, tests done, issues found…" value={completionNotes} onChange={e => setCompletionNotes(e.target.value)} rows={3} style={inputStyle} />
                   <p style={{ fontSize: 11, color: completionNotes.trim().length > 5 ? TA : "var(--text-muted)", fontFamily: ff }}>
                     {completionNotes.trim().length} chars {completionNotes.trim().length > 5 ? "✓" : "(min 6)"}
                   </p>
+                </div>
+
+                {/* Parts used (prefilled from installed part requests) */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {sec("Parts Used (one per line)")}
+                  <textarea placeholder="e.g. iPhone 13 Rear Camera Module" value={partsUsedText} onChange={e => setPartsUsedText(e.target.value)} rows={2} style={inputStyle} />
+                </div>
+
+                {/* Future faults the technician spotted */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {sec("Future Faults Identified (optional)")}
+                  <textarea placeholder="e.g. Battery health at 82% — may need replacement soon" value={futureFaults} onChange={e => setFutureFaults(e.target.value)} rows={2} style={inputStyle} />
                 </div>
 
                 {/* Functional tests */}
@@ -327,6 +446,24 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
                       }}>{o.label}</button>
                     ))}
                   </div>
+                  {warrantyDays > 0 && (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {(["Parts & Labour", "Parts Only", "Labour Only"] as WarrantyScope[]).map(sc => (
+                        <button key={sc} onClick={() => setWarrantyScope(sc)} style={{
+                          padding: "5px 11px", borderRadius: 7, fontSize: 11, fontWeight: 600,
+                          border: `1px solid ${warrantyScope === sc ? "#a78bfa50" : "var(--border)"}`,
+                          background: warrantyScope === sc ? "rgba(167,139,250,0.10)" : "var(--bg-secondary)",
+                          color: warrantyScope === sc ? "#a78bfa" : "var(--text-muted)",
+                          cursor: "pointer", fontFamily: ff,
+                        }}>{sc}</button>
+                      ))}
+                    </div>
+                  )}
+                  {warrantyDays > 0 && (
+                    <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff }}>
+                      Warranty is issued now but <strong style={{ color: "#a78bfa" }}>activates when the customer collects</strong> the device.
+                    </p>
+                  )}
                 </div>
               </div>
             )}

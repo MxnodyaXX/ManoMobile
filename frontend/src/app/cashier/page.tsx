@@ -8,7 +8,9 @@ import StatGroup from "@/cashier/components/dashboard/StatGroup";
 import InfoCard from "@/cashier/components/dashboard/InfoCard";
 import ChartCard from "@/cashier/components/dashboard/ChartCard";
 import FilterBar from "@/cashier/components/dashboard/FilterBar";
-import RepairManagement from "@/cashier/components/repair/RepairManagement";
+import RepairManagement, { type RepairSection } from "@/cashier/components/repair/RepairManagement";
+import WarrantyCenter from "@/cashier/components/warranty/WarrantyCenter";
+import { useRepair, jobLabel } from "@/cashier/contexts/RepairContext";
 import SalesManagement from "@/cashier/components/sales/SalesManagement";
 import InventoryManagement from "@/cashier/components/inventory/InventoryManagement";
 import AdminControl from "@/admin/components/AdminControl";
@@ -20,6 +22,7 @@ import AuditLog from "@/cashier/components/audit/AuditLog";
 import { InventoryProvider } from "@/cashier/contexts/InventoryContext";
 import { CashRegisterProvider } from "@/cashier/contexts/CashRegisterContext";
 import { RepairProvider } from "@/cashier/contexts/RepairContext";
+import { WarrantyProvider } from "@/cashier/contexts/WarrantyContext";
 import { SalesProvider } from "@/cashier/contexts/SalesContext";
 import { ShiftProvider } from "@/cashier/contexts/ShiftContext";
 import { HeldSalesProvider } from "@/cashier/contexts/HeldSalesContext";
@@ -39,6 +42,7 @@ import {
 export type ActivePage =
   | "Home"
   | "Repair Management"
+  | "Warranty Center"
   | "Sales Management"
   | "Inventory Management"
   | "Customer Management"
@@ -50,7 +54,7 @@ export type ActivePage =
 
 /* Pages where the main area should be overflow-hidden (have their own scroll) */
 const MANAGED_PAGES: ActivePage[] = [
-  "Repair Management", "Sales Management", "Inventory Management",
+  "Repair Management", "Warranty Center", "Sales Management", "Inventory Management",
   "Admin Control", "Customer Management", "Reports",
   "Cash Register", "Invoice History", "Audit Trail",
 ];
@@ -80,31 +84,40 @@ function QuickAction({ label, sub, color, onClick }: { label: string; sub: strin
   );
 }
 
-/* ── Pending-jobs alert banner ── */
-function AlertBanner({ pendingCount, onNavigate }: { pendingCount: number; onNavigate: () => void }) {
-  if (pendingCount === 0) return null;
+/* ── Pending-jobs alert banner (started jobs that are paused, with reasons) ── */
+function PendingAlert({ onView }: { onView: () => void }) {
+  const { jobs } = useRepair();
+  const paused = jobs.filter(j => jobLabel(j) === "Pending");
+  if (paused.length === 0) return null;
   return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 12,
-      background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.22)",
-      borderRadius: 12, padding: "12px 16px",
-    }}>
-      <AlertTriangle size={16} color="#fbbf24" style={{ flexShrink: 0 }} />
-      <p style={{ fontSize: 13, color: "var(--text-primary)", flex: 1 }}>
-        <strong>{pendingCount} repair jobs</strong> are awaiting parts or technician assignment.
-      </p>
-      <button
-        onClick={onNavigate}
-        style={{
-          fontSize: 12, fontWeight: 600, color: "#fbbf24",
-          background: "none", border: "none", cursor: "pointer",
-          fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap",
-          display: "flex", alignItems: "center", gap: 4,
-        }}
-      >
-        View Jobs <ArrowRight size={12} />
-      </button>
-    </div>
+    <button
+      onClick={onView}
+      style={{
+        display: "flex", alignItems: "flex-start", gap: 12, width: "100%", textAlign: "left",
+        background: "rgba(245,158,11,0.07)", border: "1px solid rgba(245,158,11,0.25)",
+        borderRadius: 12, padding: "12px 16px", cursor: "pointer",
+        fontFamily: "'Plus Jakarta Sans', sans-serif",
+      }}
+    >
+      <AlertTriangle size={16} color="#f59e0b" style={{ flexShrink: 0, marginTop: 2 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontSize: 13, color: "var(--text-primary)" }}>
+          <strong>{paused.length} started {paused.length === 1 ? "job is" : "jobs are"} paused</strong> — waiting on the reasons below.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 6 }}>
+          {paused.slice(0, 3).map(j => (
+            <p key={j.id} style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
+              <span style={{ color: "var(--accent)", fontWeight: 600 }}>{j.id}</span> {j.brand} {j.model}
+              {j.pauseReason ? <> — ⏸ {j.pauseReason}</> : <> — no reason recorded</>}
+            </p>
+          ))}
+          {paused.length > 3 && <p style={{ fontSize: 11, color: "var(--text-muted)" }}>+{paused.length - 3} more…</p>}
+        </div>
+      </div>
+      <span style={{ fontSize: 12, fontWeight: 600, color: "#f59e0b", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+        View <ArrowRight size={12} />
+      </span>
+    </button>
   );
 }
 
@@ -175,7 +188,10 @@ function TodaySnapshot() {
 export default function CashierPage() {
   const [filter, setFilter] = useState<FilterPeriod>("Daily");
   const [activePage, setActivePage] = useState<ActivePage>("Home");
+  const [repairSection, setRepairSection] = useState<RepairSection | undefined>(undefined);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const goToRepair = (section?: RepairSection) => { setRepairSection(section); setActivePage("Repair Management"); };
   const dateLabel = getDateLabel(filter);
 
   const s = DASHBOARD_STATS[filter];
@@ -186,13 +202,14 @@ export default function CashierPage() {
     <ShiftProvider>
     <CashRegisterProvider>
     <RepairProvider>
+    <WarrantyProvider>
     <SalesProvider>
     <HeldSalesProvider>
     <InventoryProvider>
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
         <Sidebar
           activePage={activePage}
-          onNavigate={setActivePage as (p: string) => void}
+          onNavigate={(p) => { setRepairSection(undefined); setActivePage(p as ActivePage); }}
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
         />
@@ -212,7 +229,8 @@ export default function CashierPage() {
             }}
           >
 
-            {activePage === "Repair Management"    && <RepairManagement />}
+            {activePage === "Repair Management"    && <RepairManagement initialSection={repairSection} />}
+            {activePage === "Warranty Center"      && <WarrantyCenter />}
             {activePage === "Sales Management"     && <SalesManagement />}
             {activePage === "Inventory Management" && <InventoryManagement />}
             {activePage === "Admin Control"        && <AdminControl />}
@@ -249,8 +267,8 @@ export default function CashierPage() {
                   </p>
                 </div>
 
-                {/* Alert banner */}
-                <AlertBanner pendingCount={4} onNavigate={() => setActivePage("Repair Management")} />
+                {/* Paused-jobs alert */}
+                <PendingAlert onView={() => goToRepair("Pending")} />
 
                 {/* Today snapshot */}
                 <TodaySnapshot />
@@ -292,7 +310,7 @@ export default function CashierPage() {
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <p style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Quick Actions</p>
                     <div className="resp-grid-2">
-                      <QuickAction label="New Repair Job"   sub="Register a device"       color="#34d399" onClick={() => setActivePage("Repair Management")} />
+                      <QuickAction label="New Repair Job"   sub="Register a device"       color="#34d399" onClick={() => goToRepair("New Repair")} />
                       <QuickAction label="New Sale"         sub="Process a transaction"   color="#60a5fa" onClick={() => setActivePage("Sales Management")} />
                       <QuickAction label="Cash Register"    sub="Manage the drawer"       color="#fbbf24" onClick={() => setActivePage("Cash Register")} />
                       <QuickAction label="View Reports"     sub="Daily & sales reports"   color="#a78bfa" onClick={() => setActivePage("Reports")} />
@@ -321,6 +339,7 @@ export default function CashierPage() {
     </InventoryProvider>
     </HeldSalesProvider>
     </SalesProvider>
+    </WarrantyProvider>
     </RepairProvider>
     </CashRegisterProvider>
     </ShiftProvider>
