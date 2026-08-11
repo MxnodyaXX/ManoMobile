@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ManoMobile.API")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+eb2de3680bd8c2ec62178d36605bb50065ac579b")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+77d94b884491d19003614aea8078855eac9ea012")]
 [assembly: System.Reflection.AssemblyProductAttribute("ManoMobile.API")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ManoMobile.API")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

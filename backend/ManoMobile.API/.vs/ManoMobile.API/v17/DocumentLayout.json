@@ -1,9 +1,9 @@
 {
   "Version": 1,
-  "WorkspaceRootPath": "D:\\Mano Mobile\\ManoMobile\\backend\\ManoMobile.API\\",
+  "WorkspaceRootPath": "C:\\ManoMobile\\ManoMobile\\backend\\ManoMobile.API\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{148BB57B-7638-4B94-B53B-28ABBBE3A1F2}|ManoMobile.API.csproj|d:\\mano mobile\\manomobile\\backend\\manomobile.api\\controllers\\weatherforecastcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "AbsoluteMoniker": "D:0:0:{148BB57B-7638-4B94-B53B-28ABBBE3A1F2}|ManoMobile.API.csproj|c:\\manomobile\\manomobile\\backend\\manomobile.api\\controllers\\weatherforecastcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{148BB57B-7638-4B94-B53B-28ABBBE3A1F2}|ManoMobile.API.csproj|solutionrelative:controllers\\weatherforecastcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     }
   ],
@@ -14,15 +14,23 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 0,
+          "SelectedChildIndex": 2,
           "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{b1e99781-ab81-11d0-b683-00aa00a3ee26}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{56df62a4-05a3-4e5b-aa1a-99371ccfb997}"
+            },
             {
               "$type": "Document",
               "DocumentIndex": 0,
               "Title": "WeatherForecastController.cs",
-              "DocumentMoniker": "D:\\Mano Mobile\\ManoMobile\\backend\\ManoMobile.API\\Controllers\\WeatherForecastController.cs",
+              "DocumentMoniker": "C:\\ManoMobile\\ManoMobile\\backend\\ManoMobile.API\\Controllers\\WeatherForecastController.cs",
               "RelativeDocumentMoniker": "Controllers\\WeatherForecastController.cs",
-              "ToolTip": "D:\\Mano Mobile\\ManoMobile\\backend\\ManoMobile.API\\Controllers\\WeatherForecastController.cs",
+              "ToolTip": "C:\\ManoMobile\\ManoMobile\\backend\\ManoMobile.API\\Controllers\\WeatherForecastController.cs",
               "RelativeToolTip": "Controllers\\WeatherForecastController.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAABAAAAAJAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",

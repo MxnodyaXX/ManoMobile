@@ -11,7 +11,16 @@
       "Bash(echo \"Exit: $?\")",
       "Bash(Get-ChildItem -Path \"d:\\\\Mano Mobile\\\\ManoMobile\\\\frontend\\\\src\\\\cashier\" -Recurse -Force)",
       "Bash(Select-Object FullName, PSIsContainer)",
-      "Bash(Sort-Object FullName)"
+      "Bash(Sort-Object FullName)",
+      "PowerShell(\"---\")",
+      "PowerShell(git add frontend/src/admin/components/AdminControl.tsx frontend/src/cashier/components/repair/JobReceiptSlip.tsx frontend/src/cashier/components/repair/JobsTable.tsx frontend/src/cashier/components/repair/NewRepairForm.tsx frontend/src/cashier/components/sales/RepairSales.tsx frontend/src/cashier/components/warranty/WarrantyCenter.tsx frontend/src/cashier/contexts/RepairContext.tsx)",
+      "PowerShell(git push -u origin repair-warranty-workflow)",
+      "PowerShell(git add -A)",
+      "PowerShell($s = git diff --cached --name-only; \"TOTAL staged: $\\($s.Count\\)\"; \"build artifacts \\(.vs/bin/obj\\): $\\(\\($s | Where-Object { $_ -match '/\\(\\\\.vs|bin|obj\\)/' }\\).Count\\)\"; \"other: $\\(\\($s | Where-Object { $_ -notmatch '/\\(\\\\.vs|bin|obj\\)/' }\\) -join ', '\\)\"; \"---\"; \"already-tracked vs new:\"; git diff --cached --name-status | Group-Object { $_.Substring\\(0,1\\) } | Select-Object Name,Count)",
+      "PowerShell(git reset --quiet)",
+      "PowerShell(\"...\")",
+      "PowerShell(\"\\(unstaged again - nothing committed\\)\")",
+      "PowerShell(git commit -m \"Commit local build output and editor session state\" -m \"Snapshot of the working tree as-is: Visual Studio .vs/bin/obj artifacts, the Claude settings permission entry, and the editor session file.\" 2>&1)"
     ],
     "additionalDirectories": [
       "d:\\Mano Mobile\\ManoMobile"
