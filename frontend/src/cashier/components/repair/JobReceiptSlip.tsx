@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef } from "react";
-import { type RepairJob, jobLabel } from "@/cashier/contexts/RepairContext";
+import { type RepairJob, jobLabel, useRepair, findDealer, IN_HOUSE_DEALER } from "@/cashier/contexts/RepairContext";
 
 /**
  * The Mano Mobile job-receipt slip (the Repair Management print template):
@@ -12,6 +12,8 @@ import { type RepairJob, jobLabel } from "@/cashier/contexts/RepairContext";
  * the exact same template. forwardRef lets the caller grab it for printing.
  */
 const JobReceiptSlip = forwardRef<HTMLDivElement, { job: RepairJob; signatureOverride?: string; title?: string; hideStatusNote?: boolean }>(function JobReceiptSlip({ job, signatureOverride, title, hideStatusNote }, ref) {
+  const { dealers } = useRepair();
+  const dealerRecord = findDealer(dealers, job);
   const d = new Date(job.createdAt);
   const dateValid = !isNaN(d.getTime());
   const receiptTitle = title ?? `${jobLabel(job)} Job Receipt`;
@@ -45,7 +47,8 @@ const JobReceiptSlip = forwardRef<HTMLDivElement, { job: RepairJob; signatureOve
               {[
                 ["Job ID", job.id],
                 ["Date", dateValid ? d.toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric" }) : "—"],
-                ["Dealer", job.dealer || "MANO MOBILE"],
+                ["Dealer", dealerRecord?.name || job.dealer || IN_HOUSE_DEALER],
+                ...(dealerRecord?.contact ? ([["Dealer Tel", dealerRecord.contact]] as [string, string][]) : []),
                 ["Priority", job.priority],
               ].map(([k, v]) => (
                 <tr key={k}>

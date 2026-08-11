@@ -154,7 +154,8 @@ export default function WarrantyCenter() {
           issue: `[Warranty Claim ${claim.id}] ${claim.reportedIssue}`, technician: "Unassigned",
           status: "Non-Issued", priority: "High", estimatedCost: 0, originalEstimate: 0, advancePaid: 0,
           createdAt: new Date().toISOString().slice(0, 10), estimatedCompletion: new Date().toISOString().slice(0, 10),
-          imei: orig.imei, dealer: "MANO MOBILE",
+          // The re-repair stays with whichever dealer brought the device in.
+          imei: orig.imei, dealer: orig.dealer, dealerId: orig.dealerId,
         });
       }
       updateClaim(claim.id, { status: "Resolved", withinCoverage: true, inspectionNotes: notes, resolution: "Re-repair (free)" as ClaimResolution, newJobId: newId, resolvedAt: new Date().toISOString() });

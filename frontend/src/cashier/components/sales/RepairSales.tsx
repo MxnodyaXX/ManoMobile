@@ -12,7 +12,7 @@ import { createPortal } from "react-dom";
 import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
 import JobReceiptSlip from "@/cashier/components/repair/JobReceiptSlip";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
-import { useRepair } from "@/cashier/contexts/RepairContext";
+import { useRepair, findDealer, isInHouseDealer, dealerKey } from "@/cashier/contexts/RepairContext";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -32,6 +32,7 @@ interface CompletedRepair {
 
 interface DealerProfile {
   phone: string;
+  address: string;
   since: string;
   stats: { total: number; completed: number; pending: number; inProgress: number };
   totalEarned: number;
@@ -51,12 +52,12 @@ const COMPLETED_REPAIRS: CompletedRepair[] = [
   { id: "RM-014", dealer: "SMART FIX SOLUTIONS", customerName: "Samantha Bandara",  brand: "Oppo",    model: "A78",           imei: "867543210987654", warranty: "1 MONTH WARRANTY [NORMAL]",  advance: 0,     unitPrice: 1800,  discount: 100 },
 ];
 
-const DEALERS = Array.from(new Set(COMPLETED_REPAIRS.map(r => r.dealer))).sort();
-
-const DEALER_PROFILES: Record<string, DealerProfile> = {
-  "MANO MOBILE CENTRE":  { phone: "0112 345 678", since: "2022", stats: { total: 47, completed: 38, pending: 5, inProgress: 4 }, totalEarned: 285000, outstanding: 12500 },
-  "CITY PHONE REPAIRS":  { phone: "0114 567 890", since: "2023", stats: { total: 22, completed: 17, pending: 3, inProgress: 2 }, totalEarned: 112000, outstanding: 8000 },
-  "SMART FIX SOLUTIONS": { phone: "0117 890 123", since: "2024", stats: { total: 14, completed: 10, pending: 2, inProgress: 2 }, totalEarned: 76000,  outstanding: 0 },
+/** Canned figures for the demo dealers that only exist in COMPLETED_REPAIRS.
+ *  Dealers managed in Admin Control get their stats computed from live jobs. */
+const DEALER_PROFILES: Record<string, Pick<DealerProfile, "stats" | "totalEarned" | "outstanding">> = {
+  "MANO MOBILE CENTRE":  { stats: { total: 47, completed: 38, pending: 5, inProgress: 4 }, totalEarned: 285000, outstanding: 12500 },
+  "CITY PHONE REPAIRS":  { stats: { total: 22, completed: 17, pending: 3, inProgress: 2 }, totalEarned: 112000, outstanding: 8000 },
+  "SMART FIX SOLUTIONS": { stats: { total: 14, completed: 10, pending: 2, inProgress: 2 }, totalEarned: 76000,  outstanding: 0 },
 };
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -185,12 +186,14 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
   signatureImage?: string;
   onBack: () => void;
 }) {
+  const { dealers } = useRepair();
   const invoiceRef = useRef<HTMLDivElement>(null);
   const grandTotal  = repairs.reduce((s, r) => s + r.unitPrice - r.discount, 0);
   const paidAmount  = totalAdvance + amountReceivedNow;
   const paymentType = isCredit ? "CREDIT" : "CASH / FULL";
   // Mano Mobile's own customers get the job-receipt template; external dealers get a sales invoice.
-  const isManoMobile = (dealer ?? "").toUpperCase().includes("MANO MOBILE");
+  const isManoMobile = isInHouseDealer(dealers, dealer);
+  const dealerRecord = findDealer(dealers, dealer);
   const today = new Date().toISOString().slice(0, 10);
   const mapToJob = (r: CompletedRepair): RepairJob => ({
     id: r.id,
@@ -291,7 +294,9 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
           <div style={{ marginTop: 18, display: "flex", gap: 48 }}>
             <div>
               <p style={{ fontSize: 12, fontWeight: 700, color: "#555" }}>DEALER</p>
-              <p style={{ fontSize: 13, fontWeight: 700 }}>{dealer}</p>
+              <p style={{ fontSize: 13, fontWeight: 700 }}>{dealerRecord?.name ?? dealer}</p>
+              {dealerRecord?.address && <p style={{ fontSize: 11, color: "#555", marginTop: 1 }}>{dealerRecord.address}</p>}
+              {dealerRecord?.contact && <p style={{ fontSize: 11, color: "#555", marginTop: 1 }}>Tel: {dealerRecord.contact}</p>}
             </div>
             {customer.name && (
               <div>
@@ -401,7 +406,7 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
 export default function RepairSales() {
   const { addEntry } = useCashRegister();
   const { addSale } = useSales();
-  const { updateJob } = useRepair();
+  const { updateJob, jobs, dealers } = useRepair();
   const [view,           setView]           = useState<"search" | "invoice">("search");
   const [showIssuedMsg,  setShowIssuedMsg]  = useState(false);
   const [selectedDealer, setSelectedDealer] = useState("");
@@ -431,16 +436,48 @@ export default function RepairSales() {
   const invoiceNo = useMemo(() => Date.now().toString().slice(-10).padStart(10, "0"), []);
   const createdAt = useMemo(() => new Date().toLocaleString("en-US", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: true }), []);
 
-  const dealerRepairs = COMPLETED_REPAIRS.filter(r =>
-    r.dealer === selectedDealer &&
-    (!search || r.id.toLowerCase().includes(search.toLowerCase()) ||
-      r.brand.toLowerCase().includes(search.toLowerCase()) ||
-      r.model.toLowerCase().includes(search.toLowerCase()) ||
+  // Dealers managed in Admin Control, plus any legacy dealer still attached to
+  // a repair row so historic work stays invoiceable.
+  const dealerOptions = useMemo(() => {
+    const names = dealers.map(d => d.name);
+    const known = new Set(names.map(n => dealerKey(dealers, n)));
+    const extra = [...COMPLETED_REPAIRS.map(r => r.dealer), ...jobs.map(j => j.dealer ?? "")]
+      .filter(n => n && !known.has(dealerKey(dealers, n)));
+    return [...names, ...Array.from(new Set(extra)).sort()];
+  }, [dealers, jobs]);
+
+  // Repaired-and-awaiting-collection jobs from the live register, shaped like
+  // the invoice rows, plus the demo rows that aren't in the register.
+  const invoiceable: CompletedRepair[] = useMemo(() => {
+    const live: CompletedRepair[] = jobs
+      .filter(j => j.status === "Completed")
+      .map(j => ({
+        id: j.id,
+        dealer: findDealer(dealers, j)?.name ?? j.dealer ?? "",
+        customerName: j.customerName,
+        brand: j.brand,
+        model: j.model,
+        imei: j.imei ?? "",
+        warranty: j.jobWarranty || "NO WARRANTY [NORMAL]",
+        advance: j.advancePaid,
+        unitPrice: j.estimatedCost,
+        discount: 0,
+      }));
+    const liveIds = new Set(live.map(r => r.id));
+    return [...live, ...COMPLETED_REPAIRS.filter(r => !liveIds.has(r.id))];
+  }, [jobs, dealers]);
+
+  const q = search.toLowerCase();
+  const dealerRepairs = invoiceable.filter(r =>
+    !!selectedDealer && dealerKey(dealers, r.dealer) === dealerKey(dealers, selectedDealer) &&
+    (!search || r.id.toLowerCase().includes(q) ||
+      r.brand.toLowerCase().includes(q) ||
+      r.model.toLowerCase().includes(q) ||
       r.imei.includes(search) ||
-      r.customerName.toLowerCase().includes(search.toLowerCase()))
+      r.customerName.toLowerCase().includes(q))
   );
 
-  const selectedRepairs = COMPLETED_REPAIRS.filter(r => checkedIds.has(r.id));
+  const selectedRepairs = invoiceable.filter(r => checkedIds.has(r.id));
 
   // Billing calculations
   const grandTotal    = selectedRepairs.reduce((s, r) => s + r.unitPrice - r.discount, 0);
@@ -453,10 +490,35 @@ export default function RepairSales() {
   const effectiveReceived = parseFloat(receivedDisplay) || 0;
   const finalDue          = Math.max(0, netDue - effectiveReceived);
   const isCredit          = finalDue > 0;
-  const isManoMobile      = selectedDealer === "MANO MOBILE CENTRE";
+  const isManoMobile      = isInHouseDealer(dealers, selectedDealer);
   const useCreditPicker   = isManoMobile && isCredit;
 
-  const dealerProfile = DEALER_PROFILES[selectedDealer];
+  // Identity comes from the Admin Control registry; the stats come from live
+  // jobs, falling back to the canned figures for the demo-only dealers.
+  const dealerProfile: DealerProfile | undefined = useMemo(() => {
+    if (!selectedDealer) return undefined;
+    const record  = findDealer(dealers, selectedDealer);
+    const canned  = DEALER_PROFILES[selectedDealer];
+    const key     = dealerKey(dealers, selectedDealer);
+    const mine    = jobs.filter(j => dealerKey(dealers, j) === key);
+    const live = {
+      stats: {
+        total:      mine.length,
+        completed:  mine.filter(j => j.status === "Completed" || j.status === "Delivered").length,
+        pending:    mine.filter(j => j.status === "Pending").length,
+        inProgress: mine.filter(j => j.status === "Issued").length,
+      },
+      totalEarned: mine.filter(j => j.status === "Delivered").reduce((s, j) => s + j.estimatedCost, 0),
+      outstanding: mine.filter(j => j.status === "Completed").reduce((s, j) => s + Math.max(0, j.estimatedCost - j.advancePaid), 0),
+    };
+    const figures = mine.length > 0 || !canned ? live : canned;
+    return {
+      phone:   record?.contact || "—",
+      address: record?.address || "",
+      since:   record?.joinedAt ? new Date(record.joinedAt).getFullYear().toString() : "—",
+      ...figures,
+    };
+  }, [selectedDealer, dealers, jobs]);
 
   const showStep3 = !!selectedDealer && checkedIds.size > 0;
 
@@ -581,7 +643,7 @@ export default function RepairSales() {
             style={{ width: "100%", padding: "10px 36px 10px 14px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg-primary)", color: selectedDealer ? "var(--text-primary)" : "var(--text-muted)", fontSize: 13, outline: "none", cursor: "pointer", appearance: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
           >
             <option value="">— PLEASE SELECT A DEALER —</option>
-            {DEALERS.map(d => <option key={d} value={d}>{d}</option>)}
+            {dealerOptions.map(d => <option key={d} value={d}>{d}</option>)}
           </select>
           <ChevronDown size={14} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
         </div>
@@ -770,6 +832,9 @@ export default function RepairSales() {
                   <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{selectedDealer}</p>
                   {dealerProfile && (
                     <>
+                      {dealerProfile.address && (
+                        <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 2 }}>{dealerProfile.address}</p>
+                      )}
                       <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 2 }}>{dealerProfile.phone}</p>
                       <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 1 }}>Partner since {dealerProfile.since}</p>
                     </>

@@ -7,11 +7,13 @@ import Barcode from "react-barcode";
 import {
   Tag, Layers, Truck, Barcode as BarcodeIcon, Settings,
   Plus, Edit2, Trash2, X, Search, Phone, Mail, Eye, KeyRound, Check,
+  Store, MapPin, CalendarDays,
 } from "lucide-react";
 import {
   useInventory,
   type Brand, type Category, type Supplier, type BarcodeSettings,
 } from "@/cashier/contexts/InventoryContext";
+import { useRepair, type RepairDealer } from "@/cashier/contexts/RepairContext";
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
@@ -415,6 +417,161 @@ function SuppliersManager() {
   );
 }
 
+// ─── Repair Dealer Modal ──────────────────────────────────────────────────────
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+/** "2021-07-05" → "05 Jul 2021" (falls back to the raw value if unparseable). */
+function fmtJoined(iso: string) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function DealerModal({ dealer, onSave, onClose }: { dealer: RepairDealer | null; onSave: (d: RepairDealer) => void; onClose: () => void }) {
+  const blank: RepairDealer = { id: 0, name: "", address: "", contact: "", joinedAt: today(), remarks: "" };
+  const [form, setForm] = useState<RepairDealer>(dealer ?? blank);
+  const [errors, setErrors] = useState<Partial<Record<keyof RepairDealer, string>>>({});
+
+  const set = (k: keyof RepairDealer, v: string) => {
+    setForm(f => ({ ...f, [k]: v }));
+    setErrors(p => ({ ...p, [k]: undefined }));
+  };
+
+  function handleSave() {
+    const e: typeof errors = {};
+    if (!form.name.trim())    e.name    = "Dealer name is required";
+    if (!form.contact.trim()) e.contact = "Contact number is required";
+    setErrors(e);
+    if (Object.keys(e).length) return;
+    onSave({
+      ...form,
+      id: form.id || Date.now(),
+      name: form.name.trim(),
+      address: form.address.trim(),
+      contact: form.contact.trim(),
+      joinedAt: form.joinedAt || today(),
+      remarks: form.remarks?.trim() || "",
+    });
+  }
+
+  return createPortal(
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+        <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 1 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{dealer ? "Edit Repair Dealer" : "Add Repair Dealer"}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>Shown in the dealer dropdown when logging a new repair</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><X size={18} /></button>
+        </div>
+
+        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+          <div>
+            <label style={labelStyle}>Dealer Name *</label>
+            <input autoFocus type="text" value={form.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Tech Hub Colombo" style={{ ...inputStyle, borderColor: errors.name ? "#dc2626" : "var(--border)" }} />
+            {errors.name && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{errors.name}</div>}
+          </div>
+          <div>
+            <label style={labelStyle}>Address</label>
+            <textarea value={form.address} onChange={e => set("address", e.target.value)} placeholder="e.g. 123 Galle Road, Colombo 03" style={{ ...inputStyle, resize: "vertical", minHeight: 60 }} />
+          </div>
+          <div>
+            <label style={labelStyle}>Contact Number *</label>
+            <input type="text" value={form.contact} onChange={e => set("contact", e.target.value)} placeholder="+94 11 234 5678" style={{ ...inputStyle, borderColor: errors.contact ? "#dc2626" : "var(--border)" }} />
+            {errors.contact && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{errors.contact}</div>}
+          </div>
+          <div>
+            <label style={labelStyle}>Joining Date</label>
+            <input type="date" value={form.joinedAt} max={today()} onChange={e => set("joinedAt", e.target.value)} style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>Remarks</label>
+            <textarea value={form.remarks ?? ""} onChange={e => set("remarks", e.target.value)} placeholder="e.g. Wholesale partner — 15% discount" style={{ ...inputStyle, resize: "vertical", minHeight: 60 }} />
+          </div>
+        </div>
+
+        <div style={{ padding: "16px 24px 20px", borderTop: "1px solid var(--border)", display: "flex", gap: 10, justifyContent: "flex-end", position: "sticky", bottom: 0, background: "var(--bg-card)" }}>
+          <button onClick={onClose} style={{ padding: "9px 20px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
+          <button onClick={handleSave} style={{ ...btnAccent, padding: "9px 20px" }}>{dealer ? "Save Changes" : "Add Dealer"}</button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// ─── Repair Dealers Manager ───────────────────────────────────────────────────
+
+function DealersManager() {
+  const { dealers, setDealers } = useRepair();
+  const [search, setSearch] = useState("");
+  const [modal, setModal] = useState<RepairDealer | null | "new">(null);
+  const [deleteTarget, setDeleteTarget] = useState<RepairDealer | null>(null);
+
+  const q = search.trim().toLowerCase();
+  const filtered = dealers.filter(d =>
+    !q || d.name.toLowerCase().includes(q) || d.address.toLowerCase().includes(q) || d.contact.toLowerCase().includes(q)
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 180, maxWidth: 380 }}>
+          <Search size={13} style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, address, contact…" style={{ ...inputStyle, paddingLeft: 34, fontSize: 12 }} />
+        </div>
+        <button onClick={() => setModal("new")} style={btnAccent}><Plus size={13} /> Add Dealer</button>
+      </div>
+
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", minWidth: 720, borderCollapse: "collapse", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            <thead><tr><th style={thStyle}>#</th><th style={thStyle}>Dealer Name</th><th style={thStyle}>Address</th><th style={thStyle}>Contact</th><th style={thStyle}>Joined</th><th style={{ ...thStyle, width: 80 }}></th></tr></thead>
+            <tbody>
+              {filtered.length === 0 ? <tr><td colSpan={6} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>{search ? "No dealers match" : "No repair dealers added yet"}</td></tr>
+                : filtered.map((d, i) => (
+                  <tr key={d.id}>
+                    <td style={{ ...tdStyle, color: "var(--text-muted)", fontSize: 12, width: 48 }}>{i + 1}</td>
+                    <td style={tdStyle}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                        <div style={{ width: 30, height: 30, borderRadius: 8, background: "var(--accent-dim)", border: "1px solid var(--accent-glow)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)", flexShrink: 0 }}><Store size={13} /></div>
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ fontWeight: 600 }}>{d.name}</span>
+                            {d.inHouse && <span style={{ background: "#dcfce7", color: "#16a34a", fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 20 }}>In-house</span>}
+                          </div>
+                          {d.remarks && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>{d.remarks}</div>}
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{ ...tdStyle, fontSize: 12.5, color: "var(--text-secondary)", maxWidth: 240 }}>
+                      {d.address ? <div style={{ display: "flex", alignItems: "flex-start", gap: 5 }}><MapPin size={12} style={{ marginTop: 2, flexShrink: 0 }} />{d.address}</div> : <span style={{ color: "var(--text-muted)" }}>—</span>}
+                    </td>
+                    <td style={tdStyle}>{d.contact ? <div style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--text-secondary)", fontSize: 12.5, whiteSpace: "nowrap" }}><Phone size={12} />{d.contact}</div> : <span style={{ color: "var(--text-muted)", fontSize: 12 }}>—</span>}</td>
+                    <td style={tdStyle}><div style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--text-secondary)", fontSize: 12.5, whiteSpace: "nowrap" }}><CalendarDays size={12} />{fmtJoined(d.joinedAt)}</div></td>
+                    <td style={tdStyle}>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button onClick={() => setModal(d)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><Edit2 size={14} /></button>
+                        {/* The in-house entry drives receipt formatting shop-wide — editable, not removable. */}
+                        {!d.inHouse && <button onClick={() => setDeleteTarget(d)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}><Trash2 size={14} /></button>}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{filtered.length} of {dealers.length} dealers</div>
+      </div>
+
+      {modal !== null && <DealerModal dealer={modal === "new" ? null : modal} onSave={d => { setDealers(prev => prev.find(x => x.id === d.id) ? prev.map(x => x.id === d.id ? d : x) : [...prev, d]); setModal(null); }} onClose={() => setModal(null)} />}
+      {deleteTarget && <DeleteConfirm name={deleteTarget.name} onConfirm={() => { setDealers(prev => prev.filter(d => d.id !== deleteTarget.id)); setDeleteTarget(null); }} onClose={() => setDeleteTarget(null)} />}
+    </div>
+  );
+}
+
 // ─── Barcode Manager ──────────────────────────────────────────────────────────
 
 const FORMAT_OPTIONS: { value: BarcodeSettings["format"]; label: string; desc: string }[] = [
@@ -552,12 +709,13 @@ function CredentialsManager() {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-type AdminTab = "Categories" | "Brands" | "Suppliers" | "Barcode" | "Settings";
+type AdminTab = "Categories" | "Brands" | "Suppliers" | "Dealers" | "Barcode" | "Settings";
 
 const tabs: { id: AdminTab; icon: React.ComponentType<{ size?: number; strokeWidth?: number }>; label: string }[] = [
   { id: "Categories", icon: Tag,         label: "Item Categories" },
   { id: "Brands",     icon: Layers,      label: "Brands"          },
   { id: "Suppliers",  icon: Truck,       label: "Suppliers"       },
+  { id: "Dealers",    icon: Store,       label: "Repair Dealers"  },
   { id: "Barcode",    icon: BarcodeIcon, label: "Barcode"         },
   { id: "Settings",   icon: KeyRound,    label: "Settings"        },
 ];
@@ -594,6 +752,7 @@ export default function AdminControl() {
         {tab === "Categories" && <CategoriesManager />}
         {tab === "Brands"     && <BrandsManager />}
         {tab === "Suppliers"  && <SuppliersManager />}
+        {tab === "Dealers"    && <DealersManager />}
         {tab === "Barcode"    && <BarcodeManager />}
         {tab === "Settings"   && <CredentialsManager />}
       </div>

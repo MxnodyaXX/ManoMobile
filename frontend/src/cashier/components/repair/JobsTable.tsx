@@ -5,7 +5,7 @@ import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import ExportButtons from "@/cashier/components/shared/ExportButtons";
 import { exportToPdf, exportToExcel, exportToPng } from "@/cashier/utils/exportUtils";
-import { useRepair, jobLabel, jobMatchesView, VIEW_META } from "@/cashier/contexts/RepairContext";
+import { useRepair, jobLabel, jobMatchesView, VIEW_META, findDealer, isInHouseDealer, dealerKey, IN_HOUSE_DEALER } from "@/cashier/contexts/RepairContext";
 import type { JobStatus, RepairJob, RepairView } from "@/cashier/contexts/RepairContext";
 export type { JobStatus, RepairJob } from "@/cashier/contexts/RepairContext";
 import { createPortal } from "react-dom";
@@ -104,10 +104,12 @@ function InfoBlock({ label, children }: { label: string; children: React.ReactNo
 
 function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void }) {
   const slipRef = useRef<HTMLDivElement>(null);
+  const { dealers } = useRepair();
   // Mano Mobile's own jobs print as the job-card slip (with signature); external-dealer
   // jobs print as a SALES INVOICE that bills the dealer.
-  const isManoMobile = (job.dealer ?? "").toUpperCase().includes("MANO MOBILE");
+  const isManoMobile = isInHouseDealer(dealers, job);
   const useInvoiceFormat = !isManoMobile;
+  const dealerRecord = findDealer(dealers, job);
 
   const handlePrint = () => {
     if (!slipRef.current) return;
@@ -188,7 +190,7 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
                     {[
                       ["Job ID", job.id],
                       ["Date", `${d.toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric" })}`],
-                      ["Dealer", job.dealer || "MANO MOBILE"],
+                      ["Dealer", dealerRecord?.name || job.dealer || IN_HOUSE_DEALER],
                       ["Priority", job.priority],
                     ].map(([k, v]) => (
                       <tr key={k}>
@@ -355,6 +357,8 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
 
 const SalesInvoiceSlip = forwardRef<HTMLDivElement, { job: RepairJob; fmtSlipDate: (s?: string) => string }>(
   function SalesInvoiceSlip({ job, fmtSlipDate }, ref) {
+    const { dealers } = useRepair();
+    const dealerRecord = findDealer(dealers, job);
     const balance   = Math.max(0, job.estimatedCost - job.advancePaid);
     const settled   = balance === 0;
     const lineTotal = job.estimatedCost;
@@ -384,7 +388,9 @@ const SalesInvoiceSlip = forwardRef<HTMLDivElement, { job: RepairJob; fmtSlipDat
         <div style={{ marginTop: 18, display: "flex", gap: 48 }}>
           <div>
             <p style={{ fontSize: 12, fontWeight: 700, color: "#555" }}>DEALER</p>
-            <p style={{ fontSize: 13, fontWeight: 700 }}>{job.dealer || "MANO MOBILE"}</p>
+            <p style={{ fontSize: 13, fontWeight: 700 }}>{dealerRecord?.name || job.dealer || IN_HOUSE_DEALER}</p>
+            {dealerRecord?.address && <p style={{ fontSize: 11, color: "#555", marginTop: 1 }}>{dealerRecord.address}</p>}
+            {dealerRecord?.contact && <p style={{ fontSize: 11, color: "#555", marginTop: 1 }}>Tel: {dealerRecord.contact}</p>}
           </div>
           <div>
             <p style={{ fontSize: 12, fontWeight: 700, color: "#555" }}>CUSTOMER</p>
@@ -661,6 +667,8 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
   onPrintSlip: () => void;
 }) {
   const isMobile = useIsMobile();
+  const { dealers } = useRepair();
+  const dealerRecord = findDealer(dealers, job);
 
   const sc      = statusConfig[job.status];
   const StatusIcon = sc.icon;
@@ -736,7 +744,12 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
               <div style={secHead}>Job details</div>
               <div style={{ marginBottom: 8 }}>
                 <label style={labelSt}>Dealer</label>
-                <div style={{ ...fieldBox, color: "var(--text-secondary)" }}>{job.dealer || "MANO MOBILE CENTRE"}</div>
+                <div style={{ ...fieldBox, color: "var(--text-secondary)" }}>{dealerRecord?.name || job.dealer || IN_HOUSE_DEALER}</div>
+                {dealerRecord && (dealerRecord.address || dealerRecord.contact) && (
+                  <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                    {[dealerRecord.address, dealerRecord.contact].filter(Boolean).join(" · ")}
+                  </p>
+                )}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10, marginBottom: 8 }}>
                 <div>
@@ -1269,12 +1282,13 @@ interface JobsTableProps {
 
 export default function JobsTable({ view = "All" }: JobsTableProps) {
   const { addEntry } = useCashRegister();
-  const { jobs: allJobs, updateJob } = useRepair();
+  const { jobs: allJobs, updateJob, dealers } = useRepair();
   const isMobile = useIsMobile();
   const [search,         setSearch]         = useState("");
   const [showFilters,    setShowFilters]    = useState(false);
   const [priorityFilter, setPriorityFilter] = useState("All");
   const [brandFilter,    setBrandFilter]    = useState("All");
+  const [dealerFilter,   setDealerFilter]   = useState("All");
   const [searchFocused,  setSearchFocused]  = useState(false);
   const [detailsJob,     setDetailsJob]     = useState<RepairJob | null>(null);
   const [finishJob,      setFinishJob]      = useState<RepairJob | null>(null);
@@ -1285,12 +1299,14 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
   const [intakeSlipJob,  setIntakeSlipJob]  = useState<RepairJob | null>(null);
 
   const jobs = useMemo(() => allJobs.filter(j => {
+    const q = search.toLowerCase();
     const matchView     = jobMatchesView(j, view);
-    const matchSearch   = !search || j.customerName.toLowerCase().includes(search.toLowerCase()) || j.id.toLowerCase().includes(search.toLowerCase()) || j.model.toLowerCase().includes(search.toLowerCase()) || j.brand.toLowerCase().includes(search.toLowerCase());
+    const matchSearch   = !search || j.customerName.toLowerCase().includes(q) || j.id.toLowerCase().includes(q) || j.model.toLowerCase().includes(q) || j.brand.toLowerCase().includes(q) || (findDealer(dealers, j)?.name ?? j.dealer ?? "").toLowerCase().includes(q);
     const matchPriority = priorityFilter === "All" || j.priority === priorityFilter;
     const matchBrand    = brandFilter === "All" || j.brand === brandFilter;
-    return matchView && matchSearch && matchPriority && matchBrand;
-  }), [allJobs, view, search, priorityFilter, brandFilter]);
+    const matchDealer   = dealerFilter === "All" || dealerKey(dealers, j) === dealerFilter;
+    return matchView && matchSearch && matchPriority && matchBrand && matchDealer;
+  }), [allJobs, view, search, priorityFilter, brandFilter, dealerFilter, dealers]);
 
   const handleFinish = (data: FinishJobData) => {
     const job = allJobs.find(j => j.id === finishJob!.id);
@@ -1355,8 +1371,8 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
   }, [allJobs]);
 
   const tableRef  = useRef<HTMLDivElement>(null);
-  const JOB_HEADERS = ["Job ID", "Customer", "Phone", "Brand", "Model", "Issue", "Technician", "Status", "Priority", "Est. Cost (Rs.)", "Advance (Rs.)"];
-  const jobRows     = () => jobs.map(j => [j.id, j.customerName, j.phone, j.brand, j.model, j.issue, j.technician, j.status, j.priority, j.estimatedCost, j.advancePaid]);
+  const JOB_HEADERS = ["Job ID", "Dealer", "Customer", "Phone", "Brand", "Model", "Issue", "Technician", "Status", "Priority", "Est. Cost (Rs.)", "Advance (Rs.)"];
+  const jobRows     = () => jobs.map(j => [j.id, findDealer(dealers, j)?.name ?? j.dealer ?? IN_HOUSE_DEALER, j.customerName, j.phone, j.brand, j.model, j.issue, j.technician, j.status, j.priority, j.estimatedCost, j.advancePaid]);
   const jobFilename = `repair-jobs-${new Date().toISOString().slice(0, 10)}`;
 
   return (
@@ -1428,7 +1444,18 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
               ))}
             </div>
           </div>
-          <button onClick={() => { setPriorityFilter("All"); setBrandFilter("All"); }} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 12, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Clear</button>
+          <div>
+            <label style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" as const, fontFamily: "'Plus Jakarta Sans', sans-serif", display: "block", marginBottom: 6 }}>Dealer</label>
+            <select
+              value={dealerFilter}
+              onChange={(e) => setDealerFilter(e.target.value)}
+              style={{ padding: "6px 12px", borderRadius: 8, fontSize: 12, border: `1px solid ${dealerFilter === "All" ? "var(--border)" : "var(--accent-glow)"}`, background: dealerFilter === "All" ? "transparent" : "var(--accent-dim)", color: dealerFilter === "All" ? "var(--text-secondary)" : "var(--accent)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", minWidth: 190 }}
+            >
+              <option value="All">All dealers</option>
+              {dealers.map(d => <option key={d.id} value={dealerKey(dealers, d.name)}>{d.name}</option>)}
+            </select>
+          </div>
+          <button onClick={() => { setPriorityFilter("All"); setBrandFilter("All"); setDealerFilter("All"); }} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 12, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Clear</button>
         </div>
       )}
 

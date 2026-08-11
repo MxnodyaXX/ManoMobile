@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
-import { useRepair, type ConditionGrade, type DeviceConditionMap, type RepairJob } from "@/cashier/contexts/RepairContext";
+import { useRepair, IN_HOUSE_DEALER, type ConditionGrade, type DeviceConditionMap, type RepairJob, type RepairDealer } from "@/cashier/contexts/RepairContext";
 import { useWarranty, effectiveStatus } from "@/cashier/contexts/WarrantyContext";
 import { usePersistentState } from "@/cashier/hooks/usePersistentState";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
@@ -11,14 +11,6 @@ import { lookupModelNumber } from "@/cashier/data/modelNumbers";
 import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Dealer {
-  id: number;
-  name: string;
-  address: string;
-  contact: string;
-  remarks: string;
-}
 
 interface FormData {
   // Step 1
@@ -75,13 +67,6 @@ const GRADES: { value: ConditionGrade; color: string }[] = [
 const TERMS_VERSION = "v1.0";
 
 // ─── Sample Data ──────────────────────────────────────────────────────────────
-
-const DEALERS: Dealer[] = [
-  { id: 1, name: "Tech Hub Colombo", address: "123 Galle Road, Colombo 03", contact: "+94 11 234 5678", remarks: "Primary dealer - 15% discount" },
-  { id: 2, name: "Mobile World Kandy", address: "45 Peradeniya Rd, Kandy", contact: "+94 81 223 4567", remarks: "Wholesale partner" },
-  { id: 3, name: "Digital Zone Negombo", address: "78 Sea Street, Negombo", contact: "+94 31 222 3344", remarks: "New dealer - verify identity" },
-  { id: 4, name: "Smart Phones Galle", address: "12 Hospital Rd, Galle", contact: "+94 91 224 5566", remarks: "Trusted dealer since 2019" },
-];
 
 const REPAIRMEN = [
   { id: 1, name: "Kasun Perera", speciality: "Screen & Battery", available: true, activeJobs: 2 },
@@ -206,8 +191,15 @@ const checkboxItemStyle = (checked: boolean): React.CSSProperties => ({
 
 // ─── Step 1: Dealer & Customer ────────────────────────────────────────────────
 
-function Step1({ data, onChange, isMobile }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean }) {
-  const dealer = DEALERS.find((d) => d.id.toString() === data.dealerId);
+/** "2021-07-05" → "05 Jul 2021". */
+function fmtJoined(iso: string) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function Step1({ data, onChange, isMobile, dealers }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; dealers: RepairDealer[] }) {
+  const dealer = dealers.find((d) => d.id.toString() === data.dealerId);
 
   return (
     <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
@@ -218,14 +210,19 @@ function Step1({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
           <label style={labelStyle}>Select Dealer</label>
           <Combobox
             value={dealer?.name ?? ""}
-            options={DEALERS.map((d) => d.name)}
+            options={dealers.map((d) => d.name)}
             allowAdd={false}
-            placeholder="— Choose a dealer —"
+            placeholder={dealers.length ? "— Choose a dealer —" : "No dealers — add them in Admin Control"}
             onChange={(name) => {
-              const match = DEALERS.find((d) => d.name === name);
+              const match = dealers.find((d) => d.name === name);
               onChange({ dealerId: match ? String(match.id) : "" });
             }}
           />
+          {dealers.length === 0 && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5 }}>
+              Add repair dealers under Admin Control → Repair Dealers.
+            </div>
+          )}
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12, opacity: dealer ? 1 : 0.4, transition: "opacity 0.2s" }}>
@@ -236,6 +233,10 @@ function Step1({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
           <div>
             <label style={labelStyle}>Contact Number</label>
             <input readOnly style={{ ...inputStyle, background: "var(--bg-primary)" }} value={dealer?.contact ?? ""} placeholder="—" />
+          </div>
+          <div>
+            <label style={labelStyle}>Joining Date</label>
+            <input readOnly style={{ ...inputStyle, background: "var(--bg-primary)" }} value={dealer ? fmtJoined(dealer.joinedAt) : ""} placeholder="—" />
           </div>
           <div>
             <label style={labelStyle}>Remarks</label>
@@ -839,7 +840,7 @@ function detectBrand(model: string): string {
 }
 
 export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
-  const { addJob } = useRepair();
+  const { addJob, dealers } = useRepair();
   const { warranties } = useWarranty();
   const [customModels, setCustomModels] = usePersistentState<string[]>("mano_custom_models", []);
   const [step, setStep] = useState(1);
@@ -882,6 +883,10 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
 
   const handleSubmit = () => {
     const repairman = REPAIRMEN.find(r => String(r.id) === form.assignedRepairman);
+    // The dealer picked in step 1 travels with the job — it drives the dealer
+    // panel in Repair Management and whether the slip prints as a job receipt
+    // (in-house) or a sales invoice billed to the dealer.
+    const dealer = dealers.find(d => String(d.id) === form.dealerId);
     const issueFaults = [
       ...form.faultCheckboxes,
       ...(form.faultDescription.trim() ? [form.faultDescription.trim()] : []),
@@ -903,7 +908,8 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
       createdAt: new Date().toISOString().slice(0, 10),
       estimatedCompletion: form.estimatedCompletion || new Date().toISOString().slice(0, 10),
       imei: form.deviceIMEI || undefined,
-      dealer: "MANO MOBILE",
+      dealer: dealer?.name ?? IN_HOUSE_DEALER,
+      dealerId: dealer?.id,
       receivedItems: form.receivedItems.length ? form.receivedItems : undefined,
       cosmeticCondition: form.condition,
       intakePhotos: form.intakePhotos.length ? form.intakePhotos : undefined,
@@ -947,7 +953,7 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
 
       {/* Step Content */}
       <div style={{ flex: isMobile ? "none" : 1, padding: isMobile ? "0 16px" : "0 28px", minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>
-        {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} />}
+        {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} dealers={dealers} />}
         {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} models={modelOptions} onAddModel={addModel} />}
         {step === 3 && <Step3 data={form} onChange={update} isMobile={isMobile} />}
         {step === 4 && <Step4 data={form} onChange={update} isMobile={isMobile} />}
