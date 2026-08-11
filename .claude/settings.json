@@ -20,7 +20,13 @@
       "PowerShell(git reset --quiet)",
       "PowerShell(\"...\")",
       "PowerShell(\"\\(unstaged again - nothing committed\\)\")",
-      "PowerShell(git commit -m \"Commit local build output and editor session state\" -m \"Snapshot of the working tree as-is: Visual Studio .vs/bin/obj artifacts, the Claude settings permission entry, and the editor session file.\" 2>&1)"
+      "PowerShell(git commit -m \"Commit local build output and editor session state\" -m \"Snapshot of the working tree as-is: Visual Studio .vs/bin/obj artifacts, the Claude settings permission entry, and the editor session file.\" 2>&1)",
+      "PowerShell(git rm -r --cached --quiet \"backend/ManoMobile.API/.vs\" \"backend/ManoMobile.API/bin\" \"backend/ManoMobile.API/obj\" \".emrac-session.json\")",
+      "PowerShell(git add .gitignore)",
+      "PowerShell(git commit -m \"Stop tracking .NET build output and IDE session state\" -m \"Adds bin/, obj/, .vs/ and .emrac-session.json to .gitignore and removes the already-tracked copies from the index. The files stay on disk.\" 2>&1)",
+      "PowerShell(git add .claude/settings.json)",
+      "PowerShell(git commit -q -m \"Update Claude Code permission allowlist\")",
+      "PowerShell(git push 2>&1)"
     ],
     "additionalDirectories": [
       "d:\\Mano Mobile\\ManoMobile"
