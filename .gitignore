@@ -39,3 +39,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# .NET build output (backend)
+bin/
+obj/
+
+# visual studio ide state
+.vs/
+
+# editor session state
+.emrac-session.json
