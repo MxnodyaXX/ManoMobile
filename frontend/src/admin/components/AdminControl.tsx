@@ -726,7 +726,11 @@ export default function AdminControl() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24, flex: 1, minHeight: 0 }}>
-      <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div className="fade-up" style={{
+        display: "flex", flexDirection: isMobile ? "column" : "row",
+        alignItems: isMobile ? "stretch" : "center",
+        justifyContent: "space-between", gap: isMobile ? 12 : 16,
+      }}>
         <div>
           <h1 className="heading-xl" style={{ fontSize: 24, color: "var(--text-primary)" }}>Admin Control</h1>
           <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 5 }}>Manage reference data used across the inventory system.</p>

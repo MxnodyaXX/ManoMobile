@@ -139,6 +139,12 @@ select option { background: var(--bg-card); color: var(--text-primary); }
   to   { opacity: 1; }
 }
 
+/* ── Route navigation loading overlay ─────────────────────────────── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spin-icon { animation: spin 0.8s linear infinite; }
+
 /* ── Responsive grid helpers ──────────────────────────────────────── */
 .resp-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; width: 100%; }
 .resp-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; width: 100%; }

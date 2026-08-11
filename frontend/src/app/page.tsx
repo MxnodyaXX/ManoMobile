@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Wrench, ShoppingCart, Shield, Landmark, ArrowRight, Smartphone, X, Zap } from "lucide-react";
+import { Wrench, ShoppingCart, Shield, Landmark, ArrowRight, Smartphone, X, Zap, Loader2 } from "lucide-react";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 const TECH_NAMES = ["Kamal", "Nimal", "Suresh"];
@@ -47,13 +47,25 @@ export default function LoginPage() {
   const [hoveredRole, setHoveredRole] = useState<string | null>(null);
   const [showTechPicker, setShowTechPicker] = useState(false);
   const [hoveredTech, setHoveredTech] = useState<string | null>(null);
+  // Set as soon as a destination is chosen; stays true until the target
+  // route finishes loading (in dev this includes on-demand compile time),
+  // since this page unmounts once navigation actually completes.
+  const [pendingRoleId, setPendingRoleId] = useState<string | null>(null);
 
   const handleRoleClick = (id: string) => {
     if (id === "technician") { setShowTechPicker(true); return; }
-    if (id === "accounts")   { router.push("/accounts"); return; }
-    if (id === "admin")      { router.push("/admin"); return; }
-    router.push("/cashier");
+    const path = id === "accounts" ? "/accounts" : id === "admin" ? "/admin" : "/cashier";
+    setPendingRoleId(id);
+    router.push(path);
   };
+
+  const handleTechClick = (name: string) => {
+    setPendingRoleId("technician");
+    router.push(`/technician?tech=${name}`);
+  };
+
+  const pendingRole = ROLES.find(r => r.id === pendingRoleId);
+  const isNavigating = pendingRoleId !== null;
 
   return (
     <div style={{
@@ -105,18 +117,20 @@ export default function LoginPage() {
               <button
                 key={role.id}
                 onClick={() => handleRoleClick(role.id)}
+                disabled={isNavigating}
                 onMouseEnter={() => setHoveredRole(role.id)}
                 onMouseLeave={() => setHoveredRole(null)}
                 style={{
                   background: hov ? "var(--bg-card-hover)" : "var(--bg-card)",
                   border: `1px solid ${hov ? role.color + "55" : "var(--border)"}`,
                   borderRadius: 16, padding: "28px 22px",
-                  cursor: "pointer", textAlign: "left",
+                  cursor: isNavigating ? "default" : "pointer", textAlign: "left",
                   transition: "all 0.18s",
                   display: "flex", flexDirection: "column", gap: 18,
                   boxShadow: hov ? `0 0 0 1px ${role.color}22, 0 8px 36px rgba(0,0,0,0.35)` : "0 1px 3px rgba(0,0,0,0.3)",
                   fontFamily: ff,
                   transform: hov ? "translateY(-2px)" : "none",
+                  opacity: isNavigating && pendingRoleId !== role.id ? 0.5 : 1,
                 }}
               >
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -209,7 +223,8 @@ export default function LoginPage() {
                 return (
                   <button
                     key={name}
-                    onClick={() => router.push(`/technician?tech=${name}`)}
+                    onClick={() => handleTechClick(name)}
+                    disabled={isNavigating}
                     onMouseEnter={() => setHoveredTech(name)}
                     onMouseLeave={() => setHoveredTech(null)}
                     style={{
@@ -240,6 +255,30 @@ export default function LoginPage() {
               })}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Route loading overlay — shown from click until the destination
+          route finishes loading (covers dev on-demand compile time). */}
+      {isNavigating && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: "fixed", inset: 0, zIndex: 200,
+            background: "var(--bg-primary)",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            gap: 16, animation: "fadeIn 0.15s ease",
+          }}
+        >
+          <Loader2
+            size={30}
+            className="spin-icon"
+            color={pendingRole?.color ?? "var(--text-secondary)"}
+          />
+          <p style={{ fontSize: 13, color: "var(--text-secondary)", fontFamily: ff }}>
+            Loading {pendingRole?.label ?? "dashboard"}&hellip;
+          </p>
         </div>
       )}
     </div>
