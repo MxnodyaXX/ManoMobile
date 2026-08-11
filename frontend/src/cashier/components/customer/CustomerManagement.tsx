@@ -29,7 +29,11 @@ export default function CustomerManagement() {
     <div style={{ display: "flex", flexDirection: "column", gap: 24, flex: 1, minHeight: 0 }}>
 
       {/* Page header + Sub-nav tabs */}
-      <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div className="fade-up" style={{
+        display: "flex", flexDirection: isMobile ? "column" : "row",
+        alignItems: isMobile ? "stretch" : "center",
+        justifyContent: "space-between", gap: isMobile ? 12 : 16,
+      }}>
         <div>
           <h1 className="heading-xl" style={{ fontSize: 24, color: "var(--text-primary)" }}>
             Customer Management
@@ -86,11 +90,14 @@ export default function CustomerManagement() {
         </div>
       </div>
 
-      {/* Section header */}
+      {/* Active section card */}
       <div className="fade-up fade-up-2" style={{
         display: "flex", alignItems: "center", gap: 10,
-        paddingBottom: 16,
-        borderBottom: "1px solid var(--border)",
+        padding: "14px 18px",
+        background: "var(--bg-card)",
+        border: "1px solid var(--border)",
+        borderRadius: 14,
+        width: "fit-content",
       }}>
         <div style={{
           width: 34, height: 34, borderRadius: 9,
