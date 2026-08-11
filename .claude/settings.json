@@ -26,7 +26,18 @@
       "PowerShell(git commit -m \"Stop tracking .NET build output and IDE session state\" -m \"Adds bin/, obj/, .vs/ and .emrac-session.json to .gitignore and removes the already-tracked copies from the index. The files stay on disk.\" 2>&1)",
       "PowerShell(git add .claude/settings.json)",
       "PowerShell(git commit -q -m \"Update Claude Code permission allowlist\")",
-      "PowerShell(git push 2>&1)"
+      "PowerShell(git push 2>&1)",
+      "PowerShell(git rev-list --left-right --count origin/repair-warranty-workflow...HEAD)",
+      "PowerShell(\"--- ahead/behind:\")",
+      "PowerShell(\"--- log:\")",
+      "PowerShell(git fetch origin --quiet)",
+      "PowerShell(git rev-list --left-right --count origin/main...repair-warranty-workflow)",
+      "PowerShell(\"--- branches:\")",
+      "PowerShell(\"--- main vs feature \\(left=main only, right=feature only\\):\")",
+      "PowerShell(\"--- can fast-forward?\")",
+      "PowerShell(if \\($?\\) { \"YES - main is an ancestor, fast-forward possible\" } else { \"NO - main has commits not in the branch\" })",
+      "PowerShell(git checkout main 2>&1)",
+      "PowerShell(git merge --ff-only repair-warranty-workflow 2>&1)"
     ],
     "additionalDirectories": [
       "d:\\Mano Mobile\\ManoMobile"
