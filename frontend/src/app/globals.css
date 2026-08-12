@@ -97,6 +97,21 @@ body {
 .fade-up-7 { animation-delay: 0.35s; }
 .fade-up-8 { animation-delay: 0.41s; }
 
+@keyframes fieldShake {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-5px); }
+  40%      { transform: translateX(5px); }
+  60%      { transform: translateX(-3px); }
+  80%      { transform: translateX(3px); }
+}
+.field-shake { animation: fieldShake 0.36s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
+
+@keyframes comboPop {
+  from { opacity: 0; transform: translateY(-6px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.combo-pop { animation: comboPop 0.14s cubic-bezier(0.22, 1, 0.36, 1) both; transform-origin: top center; }
+
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; transform: scale(1); }
   50%       { opacity: 0.45; transform: scale(0.75); }

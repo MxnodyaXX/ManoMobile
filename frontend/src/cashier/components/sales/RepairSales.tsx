@@ -224,7 +224,7 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
     const styleEl = document.createElement("style");
     styleEl.id = "__rp_inv_style__";
     styleEl.textContent = `
-      @page { size: ${isManoMobile ? "A5 portrait" : "A4 landscape"}; margin: ${isManoMobile ? "10mm" : "12mm"}; }
+      @page { size: ${isManoMobile ? "A5 landscape" : "A4 landscape"}; margin: ${isManoMobile ? "10mm" : "12mm"}; }
       #__rp_inv__ { display: none; }
       @media print {
         body { visibility: hidden; }

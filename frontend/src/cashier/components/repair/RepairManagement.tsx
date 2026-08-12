@@ -2,13 +2,16 @@
 
 import { useState, useEffect } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
-import { Plus, Briefcase, AlertCircle, Clock, Hourglass, LayoutGrid, XCircle, PackageCheck, CheckCheck } from "lucide-react";
+import { Plus, Briefcase, AlertCircle, Clock, Hourglass, LayoutGrid, XCircle, PackageCheck, CheckCheck, FileClock } from "lucide-react";
 import NewRepairForm from "./NewRepairForm";
 import JobsTable from "./JobsTable";
+import DraftsList from "./DraftsList";
 import type { RepairView } from "@/cashier/contexts/RepairContext";
+import type { RepairDraft } from "@/cashier/hooks/useRepairDrafts";
 
 export type RepairSection =
   | "New Repair"
+  | "Drafts"
   | "New"
   | "Not Started"
   | "Started"
@@ -20,6 +23,7 @@ export type RepairSection =
 
 const sections: { id: RepairSection; icon: any; label: string; view?: RepairView }[] = [
   { id: "New Repair",   icon: Plus,         label: "New Repair" },
+  { id: "Drafts",       icon: FileClock,    label: "Drafts" },
   { id: "New",          icon: Clock,        label: "New",          view: "New" },
   { id: "Not Started",  icon: AlertCircle,  label: "Not Started",  view: "Not Started" },
   { id: "Started",      icon: Briefcase,    label: "Started",      view: "Started" },
@@ -32,6 +36,7 @@ const sections: { id: RepairSection; icon: any; label: string; view?: RepairView
 
 const sectionDescriptions: Record<RepairSection, string> = {
   "New Repair":   "Register a new device repair job",
+  "Drafts":       "Unfinished intakes, saved as you type — resume one where you left off",
   "New":          "Jobs received today, not yet started",
   "Not Started":  "Received earlier but still not started — needs attention",
   "Started":      "Repairs currently in progress",
@@ -44,6 +49,9 @@ const sectionDescriptions: Record<RepairSection, string> = {
 
 export default function RepairManagement({ initialSection }: { initialSection?: RepairSection }) {
   const [active, setActive] = useState<RepairSection>(initialSection ?? "New Repair");
+  // The draft the wizard should open with. Cleared whenever a tab is picked by
+  // hand, so "New Repair" is a blank intake unless a draft was explicitly resumed.
+  const [resuming, setResuming] = useState<RepairDraft | null>(null);
   const isMobile = useIsMobile();
 
   // Allow the dashboard (or other callers) to deep-link a tab.
@@ -83,7 +91,7 @@ export default function RepairManagement({ initialSection }: { initialSection?: 
             return (
               <button
                 key={id}
-                onClick={() => setActive(id)}
+                onClick={() => { setActive(id); setResuming(null); }}
                 style={{
                   display: "flex", alignItems: "center", gap: 6,
                   padding: "8px 14px", borderRadius: 8, fontSize: 12.5,
@@ -148,7 +156,9 @@ export default function RepairManagement({ initialSection }: { initialSection?: 
       {/* Content */}
       <div className="fade-up fade-up-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {active === "New Repair" ? (
-          <NewRepairForm />
+          <NewRepairForm initialDraft={resuming} />
+        ) : active === "Drafts" ? (
+          <DraftsList onResume={(d) => { setResuming(d); setActive("New Repair"); }} />
         ) : (
           <JobsTable
             title={active}

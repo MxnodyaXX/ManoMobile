@@ -1,0 +1,129 @@
+"use client";
+
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import type { Session, User } from "@supabase/supabase-js";
+import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+
+export type StaffRole = "Admin" | "Cashier" | "Technician" | "Accounts";
+
+export interface StaffProfile {
+  id: string;
+  staffId: string | null;
+  fullName: string;
+  email: string | null;
+  phone: string | null;
+  role: StaffRole;
+  status: "Active" | "Inactive" | "Suspended";
+}
+
+interface AuthValue {
+  user: User | null;
+  profile: StaffProfile | null;
+  /** True until the first session check resolves — render a splash, not a redirect. */
+  loading: boolean;
+  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signOut: () => Promise<void>;
+  /** Convenience for UI gating. RLS is still the real enforcement. */
+  can: (...roles: StaffRole[]) => boolean;
+}
+
+const AuthContext = createContext<AuthValue>({
+  user: null,
+  profile: null,
+  loading: true,
+  signIn: async () => ({ error: "Auth not configured" }),
+  signOut: async () => {},
+  can: () => false,
+});
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<StaffProfile | null>(null);
+  // Only "loading" when there is actually a session to check. Both env vars are
+  // inlined at build time, so this evaluates identically on server and client.
+  const [loading, setLoading] = useState(isSupabaseConfigured());
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    const supabase = getSupabaseBrowserClient();
+    let active = true;
+
+    const loadProfile = async (u: User | null) => {
+      if (!u) {
+        setProfile(null);
+        return;
+      }
+      const { data } = await supabase
+        .from("profiles")
+        .select("id, staff_id, full_name, email, phone, role, status")
+        .eq("id", u.id)
+        .maybeSingle();
+      if (!active) return;
+      setProfile(
+        data
+          ? {
+              id: data.id,
+              staffId: data.staff_id,
+              fullName: data.full_name,
+              email: data.email,
+              phone: data.phone,
+              role: data.role,
+              status: data.status,
+            }
+          : null,
+      );
+    };
+
+    supabase.auth.getUser().then(async ({ data }: { data: { user: User | null } }) => {
+      if (!active) return;
+      setUser(data.user ?? null);
+      await loadProfile(data.user ?? null);
+      if (active) setLoading(false);
+    });
+
+    // Keeps every tab in step: signing out in one signs out the rest.
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event: string, session: Session | null) => {
+      if (!active) return;
+      setUser(session?.user ?? null);
+      await loadProfile(session?.user ?? null);
+    });
+
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
+
+  const signIn: AuthValue["signIn"] = async (email, password) => {
+    if (!isSupabaseConfigured()) return { error: "Supabase is not configured — see docs/BACKEND-SETUP.md" };
+    const supabase = getSupabaseBrowserClient();
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return { error: error.message };
+
+    // Stamp the sign-in so Admin Control's "Last Login" column means something.
+    const { data } = await supabase.auth.getUser();
+    if (data.user) {
+      await supabase.from("profiles").update({ last_login: new Date().toISOString() }).eq("id", data.user.id);
+    }
+    return { error: null };
+  };
+
+  const signOut = async () => {
+    if (!isSupabaseConfigured()) return;
+    await getSupabaseBrowserClient().auth.signOut();
+    setUser(null);
+    setProfile(null);
+  };
+
+  const can = (...roles: StaffRole[]) => (profile ? roles.includes(profile.role) : false);
+
+  return (
+    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut, can }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  return useContext(AuthContext);
+}

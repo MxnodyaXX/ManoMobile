@@ -1,14 +1,8 @@
 "use client";
 
-import { createContext, useContext, useEffect, ReactNode, type Dispatch, type SetStateAction } from "react";
-import { usePersistentState } from "@/cashier/hooks/usePersistentState";
-
-// Bump this whenever the seed gains new fields so already-stored jobs get
-// backfilled (instead of users having to clear localStorage).
-const SEED_VERSION = "3";
-
-// Same idea for the dealer registry — bump when the seed gains a new dealer.
-const DEALER_SEED_VERSION = "1";
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef, ReactNode, type Dispatch, type SetStateAction } from "react";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchJobs, fetchDealers, insertJob, patchJob, upsertDealer, deleteDealer } from "@/lib/repair/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -249,96 +243,159 @@ export const VIEW_META: Record<Exclude<RepairView, "All">, { color: string; bg: 
 
 interface RepairContextValue {
   jobs: RepairJob[];
-  addJob: (partial: Omit<RepairJob, "id">) => RepairJob;
+  /** Resolves with the saved job — the job number is assigned by the database. */
+  addJob: (partial: Omit<RepairJob, "id">) => Promise<RepairJob>;
   updateJob: (id: string, changes: Partial<RepairJob>) => void;
   dealers: RepairDealer[];
   setDealers: Dispatch<SetStateAction<RepairDealer[]>>;
+  /** True while the first load is in flight. */
+  loading: boolean;
+  /** Last backend error, for surfacing in the UI. */
+  error: string | null;
+  /** Re-read jobs and dealers from the backend. */
+  refresh: () => Promise<void>;
+  /** "supabase" once configured; "local" means seeded demo data, nothing is saved. */
+  backend: "supabase" | "local";
 }
 
 const RepairContext = createContext<RepairContextValue>({
   jobs: INITIAL_JOBS,
-  addJob: () => ({} as RepairJob),
+  addJob: async () => ({} as RepairJob),
   updateJob: () => {},
   dealers: INITIAL_DEALERS,
   setDealers: () => {},
+  loading: false,
+  error: null,
+  refresh: async () => {},
+  backend: "local",
 });
 
+/** Local-only fallback numbering, used when Supabase isn't configured. */
 function nextJobId(jobs: RepairJob[]): string {
   const nums = jobs
-    .map(j => parseInt(j.id.replace("RM-", ""), 10))
+    .map(j => parseInt(j.id.replace(/\D/g, ""), 10))
     .filter(n => !isNaN(n));
   const max = nums.length ? Math.max(...nums) : 0;
   return `RM-${String(max + 1).padStart(3, "0")}`;
 }
 
+/**
+ * Repair jobs and dealers, backed by Supabase.
+ *
+ * The public shape is deliberately the same as the old localStorage version so
+ * the repair UI did not have to change — except `addJob`, which is now async
+ * because the database assigns the job number (two cashiers can no longer be
+ * handed the same RM-0xx).
+ *
+ * With Supabase unconfigured the provider serves the seed data in memory and
+ * reports `backend: "local"`, so the app still demos rather than showing empty
+ * tables. Nothing is persisted in that mode.
+ */
 export function RepairProvider({ children }: { children: ReactNode }) {
-  const [jobs, setJobs] = usePersistentState<RepairJob[]>("mano_repair_jobs", INITIAL_JOBS);
-  const [dealers, setDealers] = usePersistentState<RepairDealer[]>("mano_repair_dealers", INITIAL_DEALERS);
+  const configured = isSupabaseConfigured();
 
-  // One-time migration: merge any new seed fields (e.g. the date timeline) into
-  // jobs already stored from an older seed, without losing user-created jobs.
-  useEffect(() => {
+  const [jobs, setJobs] = useState<RepairJob[]>(configured ? [] : INITIAL_JOBS);
+  const [dealers, setDealersState] = useState<RepairDealer[]>(configured ? [] : INITIAL_DEALERS);
+  const [loading, setLoading] = useState(configured);
+  const [error, setError] = useState<string | null>(null);
+
+  // setDealers keeps its Dispatch signature (Admin Control calls it with an
+  // updater), so the persist step needs the current list without adding a
+  // render dependency — hence a ref rather than reading state in the callback.
+  const dealersRef = useRef(dealers);
+  useEffect(() => { dealersRef.current = dealers; }, [dealers]);
+
+  const load = useCallback(async () => {
+    if (!configured) return;
     try {
-      if (window.localStorage.getItem("mano_seed_version") === SEED_VERSION) return;
-      const raw = window.localStorage.getItem("mano_repair_jobs");
-      const stored: RepairJob[] = raw ? JSON.parse(raw) : INITIAL_JOBS;
-      const seedById = new Map(INITIAL_JOBS.map(j => [j.id, j]));
-      // For matching seed jobs, fill in fields the stored copy is missing; keep stored values otherwise.
-      const merged = stored.map(j => {
-        const seed = seedById.get(j.id);
-        return seed ? { ...seed, ...j } : j;
-      });
-      window.localStorage.setItem("mano_repair_jobs", JSON.stringify(merged));
-      window.localStorage.setItem("mano_seed_version", SEED_VERSION);
-      setJobs(merged);
-    } catch {
-      /* ignore */
+      const [nextJobs, nextDealers] = await Promise.all([fetchJobs(), fetchDealers()]);
+      setJobs(nextJobs);
+      setDealersState(nextDealers);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [configured]);
 
-  // One-time top-up: add seed dealers a stored list predates (e.g. the in-house
-  // entry) without resurrecting dealers the admin has deliberately deleted.
   useEffect(() => {
-    try {
-      if (window.localStorage.getItem("mano_dealer_seed_version") === DEALER_SEED_VERSION) return;
-      const raw = window.localStorage.getItem("mano_repair_dealers");
-      if (raw) {
-        const stored: RepairDealer[] = JSON.parse(raw);
-        const missing = INITIAL_DEALERS.filter(seed => !stored.some(d => d.id === seed.id));
-        if (missing.length) {
-          const merged = [...missing, ...stored];
-          window.localStorage.setItem("mano_repair_dealers", JSON.stringify(merged));
-          setDealers(merged);
-        }
-      }
-      window.localStorage.setItem("mano_dealer_seed_version", DEALER_SEED_VERSION);
-    } catch {
-      /* ignore */
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!configured) return;
+    let active = true;
+    (async () => {
+      await load();
+      if (active) setLoading(false);
+    })();
+    return () => { active = false; };
+  }, [configured, load]);
 
-  const addJob = (partial: Omit<RepairJob, "id">): RepairJob => {
-    const created: RepairJob = { id: nextJobId(jobs), ...partial };
-    setJobs(prev => {
-      // Recompute id against the freshest list to avoid collisions.
-      const id = nextJobId(prev);
-      created.id = id;
-      return [created, ...prev];
-    });
+  const addJob = useCallback(async (partial: Omit<RepairJob, "id">): Promise<RepairJob> => {
+    if (!configured) {
+      const created: RepairJob = { id: nextJobId(jobs), ...partial };
+      setJobs(prev => [{ ...created, id: nextJobId(prev) }, ...prev]);
+      return created;
+    }
+    const created = await insertJob(partial);
+    setJobs(prev => [created, ...prev]);
     return created;
-  };
+  }, [configured, jobs]);
 
-  const updateJob = (id: string, changes: Partial<RepairJob>) => {
+  /**
+   * Optimistic: the row updates on screen immediately, then reconciles with what
+   * the database actually stored. A failure reverts by reloading, so the UI can
+   * never quietly show a change that was rejected by RLS.
+   */
+  const updateJob = useCallback((id: string, changes: Partial<RepairJob>) => {
     setJobs(prev => prev.map(j => (j.id === id ? { ...j, ...changes } : j)));
-  };
+    if (!configured) return;
 
-  return (
-    <RepairContext.Provider value={{ jobs, addJob, updateJob, dealers, setDealers }}>
-      {children}
-    </RepairContext.Provider>
-  );
+    patchJob(id, changes)
+      .then(fresh => setJobs(prev => prev.map(j => (j.id === id ? fresh : j))))
+      .catch(e => {
+        setError(e instanceof Error ? e.message : String(e));
+        void load();
+      });
+  }, [configured, load]);
+
+  /**
+   * Accepts a value or an updater, like useState, and works out what changed so
+   * Admin Control's add / edit / delete keep working untouched.
+   */
+  const setDealers = useCallback<Dispatch<SetStateAction<RepairDealer[]>>>((action) => {
+    const previous = dealersRef.current;
+    const next = typeof action === "function"
+      ? (action as (p: RepairDealer[]) => RepairDealer[])(previous)
+      : action;
+
+    dealersRef.current = next;
+    setDealersState(next);
+    if (!configured) return;
+
+    const removed = previous.filter(p => !next.some(n => n.id === p.id));
+    const changed = next.filter(n => {
+      const before = previous.find(p => p.id === n.id);
+      return !before || JSON.stringify(before) !== JSON.stringify(n);
+    });
+
+    (async () => {
+      try {
+        for (const dealer of changed) await upsertDealer(dealer);
+        for (const dealer of removed) await deleteDealer(dealer.id);
+        // Re-read so server-assigned ids and defaults replace local guesses.
+        setDealersState(await fetchDealers());
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        setDealersState(previous);
+        dealersRef.current = previous;
+      }
+    })();
+  }, [configured]);
+
+  const value = useMemo<RepairContextValue>(() => ({
+    jobs, addJob, updateJob, dealers, setDealers,
+    loading, error, refresh: load,
+    backend: configured ? "supabase" : "local",
+  }), [jobs, addJob, updateJob, dealers, setDealers, loading, error, load, configured]);
+
+  return <RepairContext.Provider value={value}>{children}</RepairContext.Provider>;
 }
 
 export function useRepair() {

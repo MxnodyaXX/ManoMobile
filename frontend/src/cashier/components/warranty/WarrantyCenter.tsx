@@ -149,14 +149,16 @@ export default function WarrantyCenter() {
       const orig = jobs.find(j => j.id === claim.jobId);
       const newId = `RM-C${String(Date.now()).slice(-4)}`;
       if (orig) {
-        addJob({
+        // Fire-and-forget: the claim resolution below is what the user is
+        // waiting on. A failed re-repair job is reported, not silently dropped.
+        void addJob({
           customerName: orig.customerName, phone: orig.phone, brand: orig.brand, model: orig.model,
           issue: `[Warranty Claim ${claim.id}] ${claim.reportedIssue}`, technician: "Unassigned",
           status: "Non-Issued", priority: "High", estimatedCost: 0, originalEstimate: 0, advancePaid: 0,
           createdAt: new Date().toISOString().slice(0, 10), estimatedCompletion: new Date().toISOString().slice(0, 10),
           // The re-repair stays with whichever dealer brought the device in.
           imei: orig.imei, dealer: orig.dealer, dealerId: orig.dealerId,
-        });
+        }).catch(err => console.error(`Warranty re-repair job for ${claim.id} failed to save:`, err));
       }
       updateClaim(claim.id, { status: "Resolved", withinCoverage: true, inspectionNotes: notes, resolution: "Re-repair (free)" as ClaimResolution, newJobId: newId, resolvedAt: new Date().toISOString() });
     } else {
