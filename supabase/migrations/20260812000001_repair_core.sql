@@ -1,0 +1,427 @@
+-- ============================================================================
+-- Mano Mobile — repair backend, core schema
+--
+-- Covers the repair side only: staff profiles (for role-based access), the
+-- dealer registry, repair jobs, and an append-only status history.
+--
+-- Runs either way:
+--   supabase db push          (as a migration)
+--   or paste into Dashboard → SQL Editor
+-- It is written to be re-runnable: every object uses IF NOT EXISTS / OR REPLACE.
+-- ============================================================================
+
+-- ── Enums ───────────────────────────────────────────────────────────────────
+-- Mirrors the TypeScript unions in cashier/contexts/RepairContext.tsx. Keep the
+-- two in step: adding a value here without updating the union (or vice versa)
+-- is the most likely way this schema and the UI drift apart.
+
+do $$ begin
+  create type staff_role as enum ('Admin', 'Cashier', 'Technician', 'Accounts');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type staff_status as enum ('Active', 'Inactive', 'Suspended');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type job_status as enum ('Non-Issued', 'Issued', 'Pending', 'Completed', 'Delivered', 'Cancelled');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type job_priority as enum ('Low', 'Normal', 'High', 'Urgent');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type passcode_type as enum ('PIN', 'Pattern', 'Password', 'None', 'Provided Separately');
+exception when duplicate_object then null; end $$;
+
+-- ── Staff profiles ──────────────────────────────────────────────────────────
+-- One row per auth user. `role` drives every RLS policy below, so it lives here
+-- rather than in JWT claims: an admin can change someone's role without the
+-- user having to sign out and back in for a new token.
+
+create table if not exists public.profiles (
+  id          uuid primary key references auth.users (id) on delete cascade,
+  staff_id    text unique,                       -- ST-001 … matches Admin Control
+  full_name   text not null default '',
+  email       text,
+  phone       text,
+  role        staff_role not null default 'Cashier',
+  status      staff_status not null default 'Active',
+  join_date   date not null default current_date,
+  last_login  timestamptz,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+comment on table public.profiles is
+  'Staff directory. Created automatically when an auth user is added; an Admin then sets the role.';
+
+-- New auth users get a profile automatically, so a freshly invited staff member
+-- can sign in without an admin having to hand-create the row first. Role and
+-- name come from the invite metadata when present.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, email, full_name, role)
+  values (
+    new.id,
+    new.email,
+    coalesce(new.raw_user_meta_data ->> 'full_name', split_part(coalesce(new.email, ''), '@', 1)),
+    coalesce((new.raw_user_meta_data ->> 'role')::staff_role, 'Cashier')
+  )
+  on conflict (id) do nothing;
+  return new;
+end $$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- ── Role helpers ────────────────────────────────────────────────────────────
+-- SECURITY DEFINER so policies on other tables can read the caller's role
+-- without needing a SELECT policy on profiles (which would recurse).
+
+create or replace function public.current_staff_role()
+returns staff_role
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select role from public.profiles
+  where id = auth.uid() and status = 'Active'
+$$;
+
+create or replace function public.has_role(variadic roles staff_role[])
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.current_staff_role() = any(roles)
+$$;
+
+-- Any signed-in, active staff member.
+create or replace function public.is_staff()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.current_staff_role() is not null
+$$;
+
+-- ── Shared trigger: keep updated_at honest ───────────────────────────────────
+
+create or replace function public.touch_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end $$;
+
+-- ── Dealers ─────────────────────────────────────────────────────────────────
+
+create table if not exists public.repair_dealers (
+  -- BY DEFAULT, not ALWAYS: Admin Control mints ids client-side (Date.now())
+  -- when adding a dealer, so explicit inserts have to be accepted.
+  id          bigint generated by default as identity primary key,
+  name        text not null,
+  address     text not null default '',
+  contact     text not null default '',
+  joined_at   date not null default current_date,
+  remarks     text,
+  in_house    boolean not null default false,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  created_by  uuid references auth.users (id) on delete set null
+);
+
+comment on column public.repair_dealers.in_house is
+  'The shop itself (walk-in customers). Its jobs print a job receipt, not a dealer sales invoice.';
+
+-- At most one in-house dealer, so slip rendering never has to pick between two.
+create unique index if not exists repair_dealers_one_in_house
+  on public.repair_dealers ((in_house)) where in_house;
+
+create unique index if not exists repair_dealers_name_key
+  on public.repair_dealers (lower(name));
+
+drop trigger if exists trg_repair_dealers_touch on public.repair_dealers;
+create trigger trg_repair_dealers_touch
+  before update on public.repair_dealers
+  for each row execute function public.touch_updated_at();
+
+-- ── Job numbers ─────────────────────────────────────────────────────────────
+-- RM-001, RM-002 … The old client-side max()+1 could hand two cashiers the same
+-- number; a sequence cannot.
+
+create sequence if not exists public.repair_job_no_seq start 1;
+
+create or replace function public.next_job_no()
+returns text
+language sql
+volatile
+as $$
+  select 'RM-' || lpad(nextval('public.repair_job_no_seq')::text, 3, '0')
+$$;
+
+-- ── Repair jobs ─────────────────────────────────────────────────────────────
+-- `id` stays the human job number because it is printed on receipts, quoted to
+-- customers over the phone, and used by the public /track page.
+--
+-- cosmetic_condition / approval / handover are jsonb: each is a fixed-shape
+-- record the UI reads and writes whole, never queries field-by-field. Promote
+-- one to its own table the day you need to report across it.
+
+create table if not exists public.repair_jobs (
+  id                    text primary key default public.next_job_no(),
+
+  -- Customer & device
+  customer_name         text not null,
+  phone                 text not null default '',
+  brand                 text not null default '',
+  model                 text not null default '',
+  model_number          text,
+  imei                  text,
+  issue                 text not null default '',
+
+  -- Assignment & state
+  technician            text not null default 'Unassigned',
+  status                job_status not null default 'Non-Issued',
+  priority              job_priority not null default 'Normal',
+
+  -- Money (LKR; integers would lose cents on part-payments)
+  estimated_cost        numeric(12,2) not null default 0,
+  advance_paid          numeric(12,2) not null default 0,
+  original_estimate     numeric(12,2),
+  revised_estimate      numeric(12,2),
+
+  -- Dealer as recorded at intake. The name is denormalised on purpose: a
+  -- receipt printed today must still show the dealer as it was named then,
+  -- even if the registry is renamed or the dealer is deleted.
+  dealer                text,
+  dealer_id             bigint references public.repair_dealers (id) on delete set null,
+
+  -- Dates the receipt timeline reads
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now(),
+  estimated_completion  date,
+  started_at            timestamptz,
+  paused_at             timestamptz,
+  completed_at          timestamptz,
+  cancelled_at          timestamptz,
+
+  -- Work notes
+  pause_reason          text,
+  cancel_reason         text,
+  cancelled_by          text,
+  parts_used            text[] not null default '{}',
+  tech_remarks          text,
+  future_faults         text,
+  received_items        text[] not null default '{}',
+
+  -- Intake evidence. Photos live in the `repair-intake` storage bucket; this
+  -- column holds their object paths, never the image bytes.
+  intake_photos         text[] not null default '{}',
+  cosmetic_condition    jsonb,
+  passcode_type         passcode_type not null default 'None',
+  device_passcode       text,
+  customer_consent_signature text,        -- small base64 PNG from the signature pad
+  terms_version_accepted text,
+
+  -- Fixed-shape records the UI reads/writes whole
+  approval              jsonb,
+  handover              jsonb,
+
+  warranty_id           text,
+
+  created_by            uuid references auth.users (id) on delete set null,
+
+  constraint repair_jobs_amounts_non_negative
+    check (estimated_cost >= 0 and advance_paid >= 0)
+);
+
+comment on column public.repair_jobs.intake_photos is
+  'Storage object paths in the repair-intake bucket — not image data.';
+comment on column public.repair_jobs.dealer is
+  'Dealer name as recorded at intake, kept so historic receipts reprint unchanged.';
+
+create index if not exists repair_jobs_status_idx    on public.repair_jobs (status);
+create index if not exists repair_jobs_created_idx   on public.repair_jobs (created_at desc);
+create index if not exists repair_jobs_dealer_idx    on public.repair_jobs (dealer_id);
+create index if not exists repair_jobs_phone_idx     on public.repair_jobs (phone);
+create index if not exists repair_jobs_imei_idx      on public.repair_jobs (imei);
+
+drop trigger if exists trg_repair_jobs_touch on public.repair_jobs;
+create trigger trg_repair_jobs_touch
+  before update on public.repair_jobs
+  for each row execute function public.touch_updated_at();
+
+-- ── Status history ──────────────────────────────────────────────────────────
+-- Append-only. The receipt timeline currently reconstructs history from the
+-- scattered *_at columns; this records it properly, including who moved it.
+
+create table if not exists public.repair_job_events (
+  id          bigint generated always as identity primary key,
+  job_id      text not null references public.repair_jobs (id) on delete cascade,
+  from_status job_status,
+  to_status   job_status not null,
+  note        text,
+  changed_by  uuid references auth.users (id) on delete set null,
+  changed_at  timestamptz not null default now()
+);
+
+create index if not exists repair_job_events_job_idx
+  on public.repair_job_events (job_id, changed_at desc);
+
+-- Written by trigger rather than by the client, so history cannot be skipped by
+-- forgetting to log, and cannot be back-dated by a caller.
+create or replace function public.log_job_status_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'INSERT' then
+    insert into public.repair_job_events (job_id, from_status, to_status, note, changed_by)
+    values (new.id, null, new.status, 'Job created', auth.uid());
+  elsif new.status is distinct from old.status then
+    insert into public.repair_job_events (job_id, from_status, to_status, note, changed_by)
+    values (
+      new.id, old.status, new.status,
+      case new.status
+        when 'Pending'   then new.pause_reason
+        when 'Cancelled' then new.cancel_reason
+        else null
+      end,
+      auth.uid()
+    );
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_repair_jobs_log_status on public.repair_jobs;
+create trigger trg_repair_jobs_log_status
+  after insert or update of status on public.repair_jobs
+  for each row execute function public.log_job_status_change();
+
+-- ============================================================================
+-- Row Level Security
+--
+-- Every table denies by default; the policies below are the whole access model.
+--   Admin      — full control, including deletes and the dealer registry
+--   Cashier    — takes jobs in, edits them, hands devices over
+--   Technician — works jobs (may update, may not create or delete)
+--   Accounts   — read-only
+-- ============================================================================
+
+alter table public.profiles          enable row level security;
+alter table public.repair_dealers    enable row level security;
+alter table public.repair_jobs       enable row level security;
+alter table public.repair_job_events enable row level security;
+
+-- Profiles: everyone sees the staff directory (the UI shows names on jobs);
+-- you may edit yourself; only Admin may change roles or other people.
+drop policy if exists profiles_select on public.profiles;
+create policy profiles_select on public.profiles
+  for select to authenticated using (true);
+
+-- The role check goes through current_staff_role() rather than an inline
+-- `select ... from profiles`: a subquery on profiles inside a policy ON profiles
+-- re-triggers the policy and Postgres aborts with "infinite recursion detected
+-- in policy for relation profiles". The SECURITY DEFINER helper reads the table
+-- as its owner, so it does not recurse — and it still blocks self-promotion,
+-- because the new role must equal the caller's existing one.
+drop policy if exists profiles_update_self on public.profiles;
+create policy profiles_update_self on public.profiles
+  for update to authenticated
+  using (id = auth.uid())
+  with check (id = auth.uid() and role = public.current_staff_role());
+
+drop policy if exists profiles_admin_all on public.profiles;
+create policy profiles_admin_all on public.profiles
+  for all to authenticated
+  using (public.has_role('Admin'::staff_role)) with check (public.has_role('Admin'::staff_role));
+
+-- Dealers: all staff read (intake needs the list), Admin maintains.
+drop policy if exists dealers_select on public.repair_dealers;
+create policy dealers_select on public.repair_dealers
+  for select to authenticated using (public.is_staff());
+
+drop policy if exists dealers_admin_write on public.repair_dealers;
+create policy dealers_admin_write on public.repair_dealers
+  for all to authenticated
+  using (public.has_role('Admin'::staff_role)) with check (public.has_role('Admin'::staff_role));
+
+-- Jobs
+drop policy if exists jobs_select on public.repair_jobs;
+create policy jobs_select on public.repair_jobs
+  for select to authenticated using (public.is_staff());
+
+drop policy if exists jobs_insert on public.repair_jobs;
+create policy jobs_insert on public.repair_jobs
+  for insert to authenticated
+  with check (public.has_role('Admin'::staff_role, 'Cashier'::staff_role));
+
+drop policy if exists jobs_update on public.repair_jobs;
+create policy jobs_update on public.repair_jobs
+  for update to authenticated
+  using (public.has_role('Admin'::staff_role, 'Cashier'::staff_role, 'Technician'::staff_role))
+  with check (public.has_role('Admin'::staff_role, 'Cashier'::staff_role, 'Technician'::staff_role));
+
+drop policy if exists jobs_delete on public.repair_jobs;
+create policy jobs_delete on public.repair_jobs
+  for delete to authenticated using (public.has_role('Admin'::staff_role));
+
+-- History is readable by staff and written only by the trigger (which runs as
+-- definer); no INSERT policy exists, so clients cannot forge entries.
+drop policy if exists job_events_select on public.repair_job_events;
+create policy job_events_select on public.repair_job_events
+  for select to authenticated using (public.is_staff());
+
+-- ============================================================================
+-- Storage — intake photos
+-- Private bucket; the app reads images through signed URLs.
+-- Objects are keyed <job_id>/<filename>, e.g. RM-012/front-1.jpg
+-- ============================================================================
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'repair-intake', 'repair-intake', false, 10485760,
+  array['image/jpeg', 'image/png', 'image/webp', 'image/heic']
+)
+on conflict (id) do update
+  set file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists repair_intake_read on storage.objects;
+create policy repair_intake_read on storage.objects
+  for select to authenticated
+  using (bucket_id = 'repair-intake' and public.is_staff());
+
+drop policy if exists repair_intake_write on storage.objects;
+create policy repair_intake_write on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'repair-intake' and public.has_role('Admin'::staff_role, 'Cashier'::staff_role, 'Technician'::staff_role));
+
+drop policy if exists repair_intake_update on storage.objects;
+create policy repair_intake_update on storage.objects
+  for update to authenticated
+  using (bucket_id = 'repair-intake' and public.has_role('Admin'::staff_role, 'Cashier'::staff_role, 'Technician'::staff_role));
+
+drop policy if exists repair_intake_delete on storage.objects;
+create policy repair_intake_delete on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'repair-intake' and public.has_role('Admin'::staff_role, 'Cashier'::staff_role));

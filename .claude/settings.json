@@ -37,7 +37,9 @@
       "PowerShell(\"--- can fast-forward?\")",
       "PowerShell(if \\($?\\) { \"YES - main is an ancestor, fast-forward possible\" } else { \"NO - main has commits not in the branch\" })",
       "PowerShell(git checkout main 2>&1)",
-      "PowerShell(git merge --ff-only repair-warranty-workflow 2>&1)"
+      "PowerShell(git merge --ff-only repair-warranty-workflow 2>&1)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Select-Object ProcessId, CreationDate, @{n='Cmd';e={$_.CommandLine.Substring\\(0, [Math]::Min\\(120, $_.CommandLine.Length\\)\\)}} | Format-List)",
+      "PowerShell(cd c:\\\\ManoMobile\\\\frontend; Test-Path node_modules\\\\playwright; Test-Path node_modules\\\\puppeteer; npx --no-install playwright --version 2>$null; Write-Output \"---\"; try { \\(Invoke-WebRequest -Uri \"http://localhost:3000/cashier\" -UseBasicParsing -TimeoutSec 10\\).StatusCode } catch { $_.Exception.Message })"
     ],
     "additionalDirectories": [
       "d:\\Mano Mobile\\ManoMobile"

@@ -32,6 +32,12 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# …but the template carries no secrets and every new checkout needs it
+!.env.local.example
+
+# supabase cli scratch (keep migrations/ and seed.sql tracked)
+supabase/.temp/
+supabase/.branches/
 
 # vercel
 .vercel

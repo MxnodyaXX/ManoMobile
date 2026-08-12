@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 /**
  * localStorage-backed state. SSR-safe: it initialises with `initial` on the
@@ -13,7 +13,13 @@ import { useEffect, useRef, useState } from "react";
  */
 export function usePersistentState<T>(key: string, initial: T) {
   const [state, setState] = useState<T>(initial);
-  const loaded = useRef(false);
+  // Deliberately state, not a ref. A ref flips to true inside the hydrate
+  // effect, which still leaves the *write* effect running in that same commit
+  // with the pre-hydration `state` — it would persist `initial` over the stored
+  // value. Under StrictMode the hydrate effect then re-reads that overwritten
+  // value and adopts it, permanently wiping the data on every mount. Gating on
+  // state means no write can happen until the loaded value is really in state.
+  const [hydrated, setHydrated] = useState(false);
 
   // Hydrate once, after mount.
   useEffect(() => {
@@ -23,18 +29,18 @@ export function usePersistentState<T>(key: string, initial: T) {
     } catch {
       /* ignore corrupt / unavailable storage */
     }
-    loaded.current = true;
+    setHydrated(true);
   }, [key]);
 
-  // Persist on change (but not before the initial hydrate has run).
+  // Persist on change (but never before the initial hydrate has landed).
   useEffect(() => {
-    if (!loaded.current) return;
+    if (!hydrated) return;
     try {
       window.localStorage.setItem(key, JSON.stringify(state));
     } catch {
       /* storage full / unavailable — fail silently */
     }
-  }, [key, state]);
+  }, [key, state, hydrated]);
 
   return [state, setState] as const;
 }

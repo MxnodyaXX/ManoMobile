@@ -1,52 +1,20 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useRepair, IN_HOUSE_DEALER, type ConditionGrade, type DeviceConditionMap, type RepairJob, type RepairDealer } from "@/cashier/contexts/RepairContext";
 import { useWarranty, effectiveStatus } from "@/cashier/contexts/WarrantyContext";
 import { usePersistentState } from "@/cashier/hooks/usePersistentState";
+import { useRepairDrafts, newDraftId, fmtSaved, type RepairDraft, type RepairFormData as FormData } from "@/cashier/hooks/useRepairDrafts";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
+import JobReceiptSlip from "@/cashier/components/repair/JobReceiptSlip";
+import { uploadIntakePhotos } from "@/lib/repair/api";
 import Combobox from "@/cashier/components/shared/Combobox";
 import { lookupModelNumber } from "@/cashier/data/modelNumbers";
-import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2 } from "lucide-react";
+import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2, AlertCircle, FileClock } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface FormData {
-  // Step 1
-  dealerId: string;
-  customerName: string;
-  customerNIC: string;
-  customerContact: string;
-  customerEmail: string;
-
-  // Step 2
-  deviceModel: string;
-  deviceModelNumber: string;
-  deviceIMEI: string;
-  receivedItems: string[];
-  faultCheckboxes: string[];
-  faultDescription: string;
-
-  // Step 3
-  estimatedCost: string;
-  advancePaid: string;
-  paymentMethod: string;
-  jobPriority: string;
-  jobNotes: string;
-
-  // Step 4
-  assignedRepairman: string;
-  estimatedCompletion: string;
-
-  // Step 5 — Evidence & Sign
-  condition: DeviceConditionMap;
-  intakePhotos: string[];
-  passcodeType: "PIN" | "Pattern" | "Password" | "None" | "Provided Separately";
-  passcode: string;
-  signature: string;
-  termsAccepted: boolean;
-}
 
 const CONDITION_ZONES: { key: keyof Omit<DeviceConditionMap, "notes">; label: string }[] = [
   { key: "front",   label: "Front / Screen" },
@@ -189,6 +157,56 @@ const checkboxItemStyle = (checked: boolean): React.CSSProperties => ({
   cursor: "pointer", transition: "all 0.15s", userSelect: "none",
 });
 
+// ─── Validation ───────────────────────────────────────────────────────────────
+
+/** The fields the wizard refuses to move past, per step. */
+type RequiredField =
+  | "customerName" | "customerContact"   // step 1
+  | "deviceModel"                        // step 2
+  | "estimatedCost"                      // step 3
+  | "termsAccepted";                     // step 5
+
+// Intake photos and the customer signature are deliberately absent: they are
+// strongly recommended evidence, but a job can be booked in without them.
+// Terms acceptance is the one thing step 5 blocks on.
+const REQUIRED_BY_STEP: Record<number, RequiredField[]> = {
+  1: ["customerName", "customerContact"],
+  2: ["deviceModel"],
+  3: ["estimatedCost"],
+  5: ["termsAccepted"],
+};
+
+const FIELD_LABELS: Record<RequiredField, string> = {
+  customerName: "Full Name",
+  customerContact: "Contact Number",
+  deviceModel: "Device Model",
+  estimatedCost: "Estimated Repair Cost",
+  termsAccepted: "Terms Acceptance",
+};
+
+/**
+ * Red border + glow, merged over the normal input style when a field is flagged.
+ * Uses the `border` shorthand — not `borderColor` — because the styles it merges
+ * over set the shorthand, and mixing the two makes React warn on un-flagging.
+ */
+const invalidStyle: React.CSSProperties = {
+  border: "1px solid var(--danger)",
+  boxShadow: "0 0 0 3px rgba(248, 113, 113, 0.16)",
+};
+
+function FieldError({ show, children }: { show: boolean; children: React.ReactNode }) {
+  if (!show) return null;
+  return (
+    <p style={{
+      display: "flex", alignItems: "center", gap: 5, marginTop: 5,
+      fontSize: 11, fontWeight: 600, color: "var(--danger)",
+      fontFamily: "'Plus Jakarta Sans', sans-serif",
+    }}>
+      <AlertCircle size={11} style={{ flexShrink: 0 }} /> {children}
+    </p>
+  );
+}
+
 // ─── Step 1: Dealer & Customer ────────────────────────────────────────────────
 
 /** "2021-07-05" → "05 Jul 2021". */
@@ -198,8 +216,9 @@ function fmtJoined(iso: string) {
   return isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function Step1({ data, onChange, isMobile, dealers }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; dealers: RepairDealer[] }) {
+function Step1({ data, onChange, isMobile, dealers, errors }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; dealers: RepairDealer[]; errors: RequiredField[] }) {
   const dealer = dealers.find((d) => d.id.toString() === data.dealerId);
+  const bad = (f: RequiredField) => errors.includes(f);
 
   return (
     <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
@@ -253,14 +272,15 @@ function Step1({ data, onChange, isMobile, dealers }: { data: FormData; onChange
       <div style={panelStyle}>
         <div style={sectionHeaderStyle}>👤 Customer Information</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div>
+          <div data-field="customerName" className={bad("customerName") ? "field-shake" : undefined}>
             <label style={labelStyle}>Full Name *</label>
             <input
-              style={inputStyle}
+              style={{ ...inputStyle, ...(bad("customerName") ? invalidStyle : {}) }}
               placeholder="e.g. Kasun Perera"
               value={data.customerName}
               onChange={(e) => onChange({ customerName: e.target.value })}
             />
+            <FieldError show={bad("customerName")}>Enter the customer&apos;s full name</FieldError>
           </div>
           <div>
             <label style={labelStyle}>NIC Number</label>
@@ -271,14 +291,15 @@ function Step1({ data, onChange, isMobile, dealers }: { data: FormData; onChange
               onChange={(e) => onChange({ customerNIC: e.target.value })}
             />
           </div>
-          <div>
+          <div data-field="customerContact" className={bad("customerContact") ? "field-shake" : undefined}>
             <label style={labelStyle}>Contact Number *</label>
             <input
-              style={inputStyle}
+              style={{ ...inputStyle, ...(bad("customerContact") ? invalidStyle : {}) }}
               placeholder="e.g. 077 123 4567"
               value={data.customerContact}
               onChange={(e) => onChange({ customerContact: e.target.value })}
             />
+            <FieldError show={bad("customerContact")}>Enter a contact number</FieldError>
           </div>
           <div>
             <label style={labelStyle}>Email Address</label>
@@ -298,7 +319,8 @@ function Step1({ data, onChange, isMobile, dealers }: { data: FormData; onChange
 
 // ─── Step 2: Device & Faults ──────────────────────────────────────────────────
 
-function Step2({ data, onChange, isMobile, models, onAddModel }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; models: string[]; onAddModel: (m: string) => void }) {
+function Step2({ data, onChange, isMobile, models, onAddModel, errors }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; models: string[]; onAddModel: (m: string) => void; errors: RequiredField[] }) {
+  const bad = (f: RequiredField) => errors.includes(f);
   const toggleItem = (list: string[], item: string) =>
     list.includes(item) ? list.filter((i) => i !== item) : [...list, item];
 
@@ -342,15 +364,17 @@ function Step2({ data, onChange, isMobile, models, onAddModel }: { data: FormDat
               </p>
             )}
           </div>
-          <div>
+          <div data-field="deviceModel" className={bad("deviceModel") ? "field-shake" : undefined}>
             <label style={labelStyle}>Device Model *</label>
             <Combobox
               value={data.deviceModel}
               options={models}
               onAddOption={onAddModel}
               placeholder="Type or select a model…"
+              inputStyle={bad("deviceModel") ? invalidStyle : undefined}
               onChange={(m) => onChange({ deviceModel: m })}
             />
+            <FieldError show={bad("deviceModel")}>Select or type the device model</FieldError>
           </div>
           <div>
             <label style={labelStyle}>IMEI Number</label>
@@ -431,7 +455,8 @@ function Step2({ data, onChange, isMobile, models, onAddModel }: { data: FormDat
 
 // ─── Step 3: Costs & Job Info ─────────────────────────────────────────────────
 
-function Step3({ data, onChange, isMobile }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean }) {
+function Step3({ data, onChange, isMobile, errors }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; errors: RequiredField[] }) {
+  const bad = (f: RequiredField) => errors.includes(f);
   const estimated = parseFloat(data.estimatedCost) || 0;
   const advance = parseFloat(data.advancePaid) || 0;
   const balance = estimated - advance;
@@ -442,16 +467,17 @@ function Step3({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
       <div style={panelStyle}>
         <div style={sectionHeaderStyle}>💰 Cost & Payment</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div>
-            <label style={labelStyle}>Estimated Repair Cost (LKR)</label>
+          <div data-field="estimatedCost" className={bad("estimatedCost") ? "field-shake" : undefined}>
+            <label style={labelStyle}>Estimated Repair Cost (LKR) *</label>
             <input
-              style={inputStyle}
+              style={{ ...inputStyle, ...(bad("estimatedCost") ? invalidStyle : {}) }}
               type="number"
               min={0}
               placeholder="0.00"
               value={data.estimatedCost}
               onChange={(e) => onChange({ estimatedCost: e.target.value })}
             />
+            <FieldError show={bad("estimatedCost")}>Enter an estimated cost (0 if not yet quoted)</FieldError>
           </div>
           <div>
             <label style={labelStyle}>Advance Received (LKR)</label>
@@ -570,7 +596,10 @@ function Step4({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
             return (
               <div
                 key={r.id}
-                onClick={() => canSelect && onChange({ assignedRepairman: r.id.toString() })}
+                // Clicking the assigned repairman again unassigns them, so a
+                // misclick can be undone and the step left as "Skip".
+                onClick={() => canSelect && onChange({ assignedRepairman: isSelected ? "" : r.id.toString() })}
+                title={!canSelect ? `${r.name} is busy` : isSelected ? "Click to unassign" : `Assign to ${r.name}`}
                 style={{
                   display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
                   borderRadius: 10, border: `1px solid ${isSelected ? "var(--accent)" : "var(--border)"}`,
@@ -641,8 +670,24 @@ function Step4({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
                 const r = REPAIRMEN.find((rm) => rm.id.toString() === data.assignedRepairman);
                 return r ? (
                   <>
-                    <div style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 6 }}>
-                      Assigned to
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
+                      <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                        Assigned to
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onChange({ assignedRepairman: "" })}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 6,
+                          border: "1px solid var(--border)", background: "transparent", cursor: "pointer",
+                          fontSize: 10.5, fontWeight: 600, color: "var(--text-secondary)",
+                          fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s",
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.border = "1px solid var(--danger)"; e.currentTarget.style.color = "var(--danger)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.border = "1px solid var(--border)"; e.currentTarget.style.color = "var(--text-secondary)"; }}
+                      >
+                        <XIcon size={10} /> Unassign
+                      </button>
                     </div>
                     <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)", marginBottom: 4 }}>
                       {r.name}
@@ -681,8 +726,9 @@ function Step4({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
 
 // ─── Step 5: Evidence & Sign ──────────────────────────────────────────────────
 
-function Step5({ data, onChange, isMobile }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean }) {
+function Step5({ data, onChange, isMobile, errors }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; errors: RequiredField[] }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const bad = (f: RequiredField) => errors.includes(f);
 
   const setCond = (key: keyof Omit<DeviceConditionMap, "notes">, grade: ConditionGrade) =>
     onChange({ condition: { ...data.condition, [key]: grade } });
@@ -770,29 +816,32 @@ function Step5({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
 
       {/* Right: Photos + Terms + Signature */}
       <div style={panelStyle}>
-        <div style={sectionHeaderStyle}><Camera size={12} style={{ verticalAlign: "-1px" }} /> Intake Photos *</div>
-        <input ref={fileRef} type="file" accept="image/*" multiple capture="environment" style={{ display: "none" }} onChange={e => onFiles(e.target.files)} />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", gap: 8, marginBottom: 8 }}>
-          {data.intakePhotos.map((src, i) => (
-            <div key={i} style={{ position: "relative", aspectRatio: "1", borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={src} alt={`intake ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              <button type="button" onClick={() => removePhoto(i)} style={{ position: "absolute", top: 3, right: 3, width: 18, height: 18, borderRadius: "50%", background: "rgba(0,0,0,0.6)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <XIcon size={11} />
-              </button>
-            </div>
-          ))}
-          <button type="button" onClick={() => fileRef.current?.click()}
-            style={{ aspectRatio: "1", borderRadius: 8, border: "1px dashed var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, fontSize: 10.5, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-            <Camera size={18} /> Add
-          </button>
+        <div style={{ marginBottom: 16 }}>
+          <div style={sectionHeaderStyle}><Camera size={12} style={{ verticalAlign: "-1px" }} /> Intake Photos</div>
+          <input ref={fileRef} type="file" accept="image/*" multiple capture="environment" style={{ display: "none" }} onChange={e => onFiles(e.target.files)} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", gap: 8, marginBottom: 8 }}>
+            {data.intakePhotos.map((src, i) => (
+              <div key={i} style={{ position: "relative", aspectRatio: "1", borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={src} alt={`intake ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <button type="button" onClick={() => removePhoto(i)} style={{ position: "absolute", top: 3, right: 3, width: 18, height: 18, borderRadius: "50%", background: "rgba(0,0,0,0.6)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <XIcon size={11} />
+                </button>
+              </div>
+            ))}
+            <button type="button" onClick={() => fileRef.current?.click()}
+              style={{ aspectRatio: "1", borderRadius: 8, border: "1px dashed var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, fontSize: 10.5, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              <Camera size={18} /> Add
+            </button>
+          </div>
+          <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            Optional, but strongly recommended: front, back, and both sides — photos are your
+            evidence of the device&apos;s state at drop-off.
+          </p>
         </div>
-        <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 16 }}>
-          Recommended: front, back, and both sides. At least one is required.
-        </p>
 
         {/* Terms */}
-        <div style={{ padding: "12px 14px", borderRadius: 10, background: "var(--bg-primary)", border: "1px solid var(--border)", marginBottom: 14 }}>
+        <div data-field="termsAccepted" className={bad("termsAccepted") ? "field-shake" : undefined} style={{ padding: "12px 14px", borderRadius: 10, background: "var(--bg-primary)", border: `1px solid ${bad("termsAccepted") ? "var(--danger)" : "var(--border)"}`, marginBottom: 14 }}>
           <p style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.06em", textTransform: "uppercase", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 8 }}>Terms &amp; Conditions ({TERMS_VERSION})</p>
           <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.6 }}>
             <li>Repair warranty covers only the parts/labour listed on completion.</li>
@@ -806,9 +855,10 @@ function Step5({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
             </div>
             <span style={{ fontSize: 12, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Customer has read and accepts the terms above</span>
           </label>
+          <FieldError show={bad("termsAccepted")}>The customer must accept the terms</FieldError>
         </div>
 
-        <SignaturePad value={data.signature} onChange={s => onChange({ signature: s })} label="Customer Signature *" />
+        <SignaturePad value={data.signature} onChange={s => onChange({ signature: s })} label="Customer Signature" />
       </div>
     </div>
   );
@@ -825,6 +875,9 @@ const INITIAL: FormData = {
   intakePhotos: [], passcodeType: "None", passcode: "", signature: "", termsAccepted: false,
 };
 
+/** A blank wizard is never worth saving as a draft. */
+const isPristine = (f: FormData) => JSON.stringify(f) === JSON.stringify(INITIAL);
+
 function detectBrand(model: string): string {
   const m = model.toLowerCase();
   if (m.includes("iphone") || m.includes("ipad") || m.includes("macbook")) return "Apple";
@@ -839,14 +892,33 @@ function detectBrand(model: string): string {
   return "Other";
 }
 
-export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
-  const { addJob, dealers } = useRepair();
+/**
+ * `initialDraft` resumes a saved intake — the Drafts section passes one in and
+ * switches to this tab, and the wizard opens on the step it was left at. Photos
+ * are never part of a draft, so they always start empty.
+ */
+export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () => void; initialDraft?: RepairDraft | null }) {
+  const { addJob, updateJob, dealers } = useRepair();
   const { warranties } = useWarranty();
   const [customModels, setCustomModels] = usePersistentState<string[]>("mano_custom_models", []);
-  const [step, setStep] = useState(1);
-  const [form, setForm] = useState<FormData>(INITIAL);
+  const [step, setStep] = useState(initialDraft?.step ?? 1);
+  const [form, setForm] = useState<FormData>(
+    initialDraft ? { ...INITIAL, ...initialDraft.form, intakePhotos: [] } : INITIAL,
+  );
   const [createdJob, setCreatedJob] = useState<RepairJob | null>(null);
+  const [errors, setErrors] = useState<RequiredField[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // Bumped on every blocked click so the summary re-shakes even when the same
+  // fields are still missing (a CSS animation only replays on a fresh element).
+  const [attempt, setAttempt] = useState(0);
+  const contentRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
+
+  // ── Draft autosave ──
+  const { drafts, saveDraft, removeDraft } = useRepairDrafts();
+  // Resuming keeps the draft's own id, so edits update it instead of piling up copies.
+  const [draftId, setDraftId] = useState(() => initialDraft?.id ?? newDraftId());
 
   // Base catalogue + any models the user has typed/saved before.
   const modelOptions = [...new Set([...DEVICE_MODELS, ...customModels])].sort();
@@ -857,7 +929,30 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
     }
   };
 
-  const update = (partial: Partial<FormData>) => setForm((f) => ({ ...f, ...partial }));
+  // Save the in-progress intake shortly after each edit. Debounced so a burst of
+  // typing writes once, and skipped entirely for a blank or already-submitted form.
+  useEffect(() => {
+    if (createdJob || isPristine(form)) return;
+    const t = setTimeout(() => {
+      saveDraft({
+        id: draftId,
+        step,
+        updatedAt: new Date().toISOString(),
+        photoCount: form.intakePhotos.length,
+        form: { ...form, intakePhotos: [] },
+      });
+    }, 700);
+    return () => clearTimeout(t);
+  }, [form, step, createdJob, draftId, saveDraft]);
+
+  const savedDraft = drafts.find((d) => d.id === draftId);
+
+  // Editing a flagged field clears its highlight straight away, so the warnings
+  // fade as the cashier fills things in rather than lingering until the next click.
+  const update = (partial: Partial<FormData>) => {
+    setForm((f) => ({ ...f, ...partial }));
+    setErrors((prev) => prev.filter((k) => !(k in partial)));
+  };
 
   // Warranty lookup — does this device already have an active warranty?
   const existingWarranty = (() => {
@@ -871,17 +966,49 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
     );
   })();
 
-  const canProceed = () => {
-    if (step === 1) return form.customerName.trim() && form.customerContact.trim();
-    if (step === 2) return form.deviceModel.trim();
-    if (step === 3) return form.estimatedCost.trim();
-    return true;
+  const isBlank = (f: RequiredField) => {
+    const v = form[f];
+    if (Array.isArray(v)) return v.length === 0;
+    if (typeof v === "boolean") return !v;
+    return String(v ?? "").trim() === "";
   };
 
-  const canSubmit =
-    form.intakePhotos.length > 0 && form.signature.trim() !== "" && form.termsAccepted;
+  /** Which required fields of a step are still empty. */
+  const missingIn = (s: number) => (REQUIRED_BY_STEP[s] ?? []).filter(isBlank);
 
-  const handleSubmit = () => {
+  /**
+   * Flag the empty fields and take the cashier to the first one. The nav buttons
+   * stay clickable — clicking is how you find out what's missing.
+   */
+  const flagMissing = (missing: RequiredField[]) => {
+    setErrors(missing);
+    setAttempt((a) => a + 1);
+    requestAnimationFrame(() => {
+      const el = contentRef.current?.querySelector<HTMLElement>(`[data-field="${missing[0]}"]`);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.querySelector<HTMLElement>("input, textarea, select, button")?.focus({ preventScroll: true });
+    });
+  };
+
+  // Step 4 (assigning a repairman) is optional — the job can be booked in and
+  // handed to a technician later, so the button says so when nobody is picked.
+  const nextLabel = step === 4 && !form.assignedRepairman.trim() ? "Skip This Step →" : "Next Step →";
+
+  const handleNext = () => {
+    const missing = missingIn(step);
+    if (missing.length) { flagMissing(missing); return; }
+    setErrors([]);
+    setStep((s) => s + 1);
+  };
+
+  const handleSubmit = async () => {
+    const missing = missingIn(5);
+    if (missing.length) { flagMissing(missing); return; }
+    setErrors([]);
+    setSaving(true);
+    setSaveError(null);
+
     const repairman = REPAIRMEN.find(r => String(r.id) === form.assignedRepairman);
     // The dealer picked in step 1 travels with the job — it drives the dealer
     // panel in Repair Management and whether the slip prints as a job receipt
@@ -892,7 +1019,8 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
       ...(form.faultDescription.trim() ? [form.faultDescription.trim()] : []),
     ].join(", ") || "General Repair";
 
-    const job = addJob({
+    try {
+      const job = await addJob({
       customerName: form.customerName || "Walk-in",
       phone: form.customerContact,
       brand: detectBrand(form.deviceModel),
@@ -912,16 +1040,42 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
       dealerId: dealer?.id,
       receivedItems: form.receivedItems.length ? form.receivedItems : undefined,
       cosmeticCondition: form.condition,
-      intakePhotos: form.intakePhotos.length ? form.intakePhotos : undefined,
+      // Photos are uploaded after the insert — the storage path needs the job
+      // number, which the database assigns.
+      intakePhotos: undefined,
       passcodeType: form.passcodeType,
       devicePasscode: form.passcode || undefined,
       customerConsentSignature: form.signature || undefined,
       termsVersionAccepted: form.termsAccepted ? TERMS_VERSION : undefined,
-    });
-    setCreatedJob(job);
+      });
+
+      if (form.intakePhotos.length) {
+        const paths = await uploadIntakePhotos(job.id, form.intakePhotos);
+        if (paths.length) {
+          updateJob(job.id, { intakePhotos: paths });
+          job.intakePhotos = paths;
+        }
+      }
+
+      setCreatedJob(job);
+      // The intake is now a real job — its draft has served its purpose.
+      removeDraft(draftId);
+    } catch (e) {
+      // The wizard stays filled in and the draft survives, so nothing is lost
+      // and the cashier can simply press Create again.
+      setSaveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const startNewRepair = () => { setForm(INITIAL); setStep(1); setCreatedJob(null); };
+  const startNewRepair = () => {
+    setForm(INITIAL);
+    setStep(1);
+    setCreatedJob(null);
+    setErrors([]);
+    setDraftId(newDraftId());
+  };
 
   return (
     <div
@@ -952,13 +1106,49 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
       )}
 
       {/* Step Content */}
-      <div style={{ flex: isMobile ? "none" : 1, padding: isMobile ? "0 16px" : "0 28px", minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>
-        {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} dealers={dealers} />}
-        {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} models={modelOptions} onAddModel={addModel} />}
-        {step === 3 && <Step3 data={form} onChange={update} isMobile={isMobile} />}
+      <div ref={contentRef} style={{ flex: isMobile ? "none" : 1, padding: isMobile ? "0 16px" : "0 28px", minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>
+        {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} dealers={dealers} errors={errors} />}
+        {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} models={modelOptions} onAddModel={addModel} errors={errors} />}
+        {step === 3 && <Step3 data={form} onChange={update} isMobile={isMobile} errors={errors} />}
         {step === 4 && <Step4 data={form} onChange={update} isMobile={isMobile} />}
-        {step === 5 && <Step5 data={form} onChange={update} isMobile={isMobile} />}
+        {step === 5 && <Step5 data={form} onChange={update} isMobile={isMobile} errors={errors} />}
       </div>
+
+      {/* Backend failure — the form keeps its contents so Create can be retried */}
+      {saveError && (
+        <div style={{
+          margin: isMobile ? "10px 16px 0" : "10px 28px 0", padding: "10px 14px",
+          display: "flex", alignItems: "flex-start", gap: 9, borderRadius: 10,
+          background: "rgba(248, 113, 113, 0.08)", border: "1px solid rgba(248, 113, 113, 0.35)",
+          flexShrink: 0,
+        }}>
+          <AlertCircle size={15} color="var(--danger)" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
+            <strong style={{ color: "var(--danger)" }}>Could not save this job:</strong> {saveError}
+            <br />Nothing was lost — the intake is still here (and saved as a draft). Press Create again to retry.
+          </p>
+        </div>
+      )}
+
+      {/* Missing-field summary — appears only after a blocked Next / Create click */}
+      {errors.length > 0 && (
+        <div
+          key={attempt}
+          className="field-shake"
+          style={{
+            margin: isMobile ? "10px 16px 0" : "10px 28px 0", padding: "10px 14px",
+            display: "flex", alignItems: "center", gap: 9, borderRadius: 10,
+            background: "rgba(248, 113, 113, 0.08)", border: "1px solid rgba(248, 113, 113, 0.35)",
+            flexShrink: 0,
+          }}
+        >
+          <AlertCircle size={15} color="var(--danger)" style={{ flexShrink: 0 }} />
+          <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
+            <strong style={{ color: "var(--danger)" }}>Still needed:</strong>{" "}
+            {errors.map((f) => FIELD_LABELS[f]).join(", ")}
+          </p>
+        </div>
+      )}
 
       {/* Footer Navigation */}
       <div style={{
@@ -981,46 +1171,53 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
           ← Back
         </button>
 
-        <div style={{ display: "flex", gap: 6 }}>
-          {[1, 2, 3, 4, 5].map((s) => (
-            <div key={s} style={{
-              width: s === step ? 20 : 6, height: 6, borderRadius: 3,
-              background: s <= step ? "var(--accent)" : "var(--border)",
-              transition: "all 0.2s",
-            }} />
-          ))}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[1, 2, 3, 4, 5].map((s) => (
+              <div key={s} style={{
+                width: s === step ? 20 : 6, height: 6, borderRadius: 3,
+                background: s <= step ? "var(--accent)" : "var(--border)",
+                transition: "all 0.2s",
+              }} />
+            ))}
+          </div>
+          {savedDraft && !createdJob && (
+            <span style={{
+              display: "flex", alignItems: "center", gap: 4, fontSize: 10,
+              color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif",
+              whiteSpace: "nowrap",
+            }}>
+              <FileClock size={10} /> Draft saved {fmtSaved(savedDraft.updatedAt)}
+            </span>
+          )}
         </div>
 
         {step < 5 ? (
           <button
-            onClick={() => setStep((s) => s + 1)}
-            disabled={!canProceed()}
+            onClick={handleNext}
             style={{
               padding: "9px 22px", borderRadius: 8, border: "none",
-              background: canProceed() ? "var(--accent)" : "var(--border)",
-              color: canProceed() ? "var(--accent-fg)" : "var(--text-secondary)",
-              cursor: canProceed() ? "pointer" : "not-allowed",
+              background: "var(--accent)", color: "var(--accent-fg)",
+              cursor: "pointer",
               fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 700,
               transition: "all 0.15s",
             }}
           >
-            Next Step →
+            {nextLabel}
           </button>
         ) : (
           <button
-            onClick={() => canSubmit && handleSubmit()}
-            disabled={!canSubmit}
-            title={canSubmit ? "" : "Add at least one photo, capture the signature, and accept the terms"}
+            onClick={handleSubmit}
+            disabled={saving}
             style={{
               padding: "9px 24px", borderRadius: 8, border: "none",
-              background: canSubmit ? "var(--accent)" : "var(--border)",
-              color: canSubmit ? "var(--accent-fg)" : "var(--text-secondary)",
-              cursor: canSubmit ? "pointer" : "not-allowed",
+              background: "var(--accent)", color: "var(--accent-fg)",
+              cursor: saving ? "wait" : "pointer", opacity: saving ? 0.75 : 1,
               fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif",
-              fontWeight: 700,
+              fontWeight: 700, transition: "all 0.15s",
             }}
           >
-            ✓ Create Repair Job
+            {saving ? "Saving…" : "✓ Create Repair Job"}
           </button>
         )}
       </div>
@@ -1032,86 +1229,89 @@ export default function NewRepairForm({ onClose }: { onClose?: () => void }) {
 
 // ─── Job-created popup with printable receipt ─────────────────────────────────
 
+/** The dialog gives up and closes itself after this much dead time. */
+const RECEIPT_IDLE_MS = 10 * 60 * 1000;
+
 function JobReceiptPopup({ job, onNew, onClose }: { job: RepairJob; onNew: () => void; onClose?: () => void }) {
   const slipRef = useRef<HTMLDivElement>(null);
-  const balance = job.estimatedCost - job.advancePaid;
+  const isMobile = useIsMobile();
+
+  // Dismissing hands the counter back a blank intake for the next customer; the
+  // job itself is already saved, so nothing is lost by closing.
+  const dismiss = onClose ?? onNew;
+  const dismissRef = useRef(dismiss);
+  useEffect(() => { dismissRef.current = dismiss; });
+
+  // Close on 10 minutes of no interaction, so a receipt left on screen at the
+  // counter doesn't sit there all day. Any input anywhere restarts the clock.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    let last = 0;
+    const restart = () => {
+      const now = Date.now();
+      if (now - last < 5000) return; // throttle: mousemove fires constantly
+      last = now;
+      clearTimeout(timer);
+      timer = setTimeout(() => dismissRef.current(), RECEIPT_IDLE_MS);
+    };
+    restart();
+    const events = ["pointerdown", "keydown", "wheel", "touchstart", "mousemove"] as const;
+    events.forEach((e) => window.addEventListener(e, restart, { passive: true }));
+    return () => {
+      clearTimeout(timer);
+      events.forEach((e) => window.removeEventListener(e, restart));
+    };
+  }, []);
 
   const handlePrint = () => {
     if (!slipRef.current) return;
     const el = document.createElement("div"); el.id = "__jobslip__"; el.innerHTML = slipRef.current.outerHTML;
     document.body.appendChild(el);
     const st = document.createElement("style"); st.id = "__jobslip_style__";
-    st.textContent = `@page{size:A5 portrait;margin:10mm}#__jobslip__{display:none}@media print{body{visibility:hidden}#__jobslip__{display:block!important;visibility:visible;position:fixed;top:0;left:0;width:100%}#__jobslip__ *{visibility:visible}}`;
+    st.textContent = `@page{size:A5 landscape;margin:10mm}#__jobslip__{display:none}@media print{body{visibility:hidden}#__jobslip__{display:block!important;visibility:visible;position:fixed;top:0;left:0;width:100%}#__jobslip__ *{visibility:visible}}`;
     document.head.appendChild(st); window.print();
     setTimeout(() => { document.getElementById("__jobslip__")?.remove(); document.getElementById("__jobslip_style__")?.remove(); }, 500);
   };
 
-  return (
+  // Portalled to <body> like every other modal in the app: the section wrapper
+  // this form sits in carries a `.fade-up` transform, and a transformed ancestor
+  // becomes the containing block for `position: fixed`, which would otherwise pin
+  // the overlay to the panel instead of the viewport.
+  return createPortal(
     <div style={{
       position: "fixed", inset: 0, zIndex: 1200, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)",
       display: "flex", alignItems: "center", justifyContent: "center", padding: 18,
     }}>
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 18, width: "min(440px, calc(100vw - 24px))", maxHeight: "92vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.55)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-        <div style={{ padding: "26px 24px 18px", textAlign: "center" }}>
-          <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(74,222,128,0.12)", border: "2px solid #4ade80", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
-            <CheckCircle2 size={28} color="#4ade80" />
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 18, width: "min(820px, calc(100vw - 24px))", maxHeight: "92vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.55)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+        <div style={{ padding: "22px 24px 14px", textAlign: "center", flexShrink: 0 }}>
+          <div style={{ width: 48, height: 48, borderRadius: "50%", background: "rgba(74,222,128,0.12)", border: "2px solid #4ade80", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+            <CheckCircle2 size={24} color="#4ade80" />
           </div>
           <p style={{ fontSize: 19, fontWeight: 800, color: "var(--text-primary)" }}>Repair Job Created</p>
           <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>
             Job <strong style={{ color: "var(--accent)" }}>{job.id}</strong> · {job.brand} {job.model}
           </p>
-          <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 10, lineHeight: 1.5 }}>
-            Print the job receipt for the customer, or hand-write the job number on a chit if you prefer.
-          </p>
         </div>
 
-        {/* Hidden printable slip */}
-        <div style={{ position: "absolute", left: -99999, top: 0 }}>
-          <div ref={slipRef} style={{ background: "#fff", color: "#000", padding: "26px 30px", fontFamily: "Arial, sans-serif", width: 480 }}>
-            <div style={{ textAlign: "center", borderBottom: "2px solid #000", paddingBottom: 10, marginBottom: 14 }}>
-              <h2 style={{ margin: 0, fontWeight: 900, fontSize: 18, letterSpacing: "0.05em" }}>MANO MOBILE CENTRE</h2>
-              <p style={{ margin: "3px 0 0", fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>New Job Receipt</p>
-            </div>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
-              <tbody>
-                {[
-                  ["Job No.", job.id],
-                  ["Date Received", job.createdAt],
-                  ["Customer", `${job.customerName} · ${job.phone}`],
-                  ["Device", `${job.brand} ${job.model}${job.modelNumber ? ` (${job.modelNumber})` : ""}`],
-                  ["IMEI", job.imei || "—"],
-                  ["Reported fault", job.issue],
-                  ["Items received", (job.receivedItems || []).join(", ") || "—"],
-                  ["Technician", job.technician],
-                  ["Est. completion", job.estimatedCompletion],
-                ].map(([k, v]) => (
-                  <tr key={k}><td style={{ padding: "3px 8px 3px 0", fontWeight: 700, width: 110, verticalAlign: "top" }}>{k}:</td><td style={{ padding: "3px 0" }}>{v}</td></tr>
-                ))}
-              </tbody>
-            </table>
-            <table style={{ width: "100%", borderCollapse: "collapse", border: "1px solid #999", marginTop: 12, fontSize: 11 }}>
-              <tbody>
-                <tr style={{ background: "#f0f0f0" }}>
-                  <th style={{ padding: "4px 8px", textAlign: "left" }}>Estimated</th>
-                  <th style={{ padding: "4px 8px", textAlign: "left", borderLeft: "1px solid #999" }}>Advance</th>
-                  <th style={{ padding: "4px 8px", textAlign: "left", borderLeft: "1px solid #999" }}>Balance</th>
-                </tr>
-                <tr>
-                  <td style={{ padding: "4px 8px" }}>Rs. {job.estimatedCost.toLocaleString()}</td>
-                  <td style={{ padding: "4px 8px", borderLeft: "1px solid #999" }}>Rs. {job.advancePaid.toLocaleString()}</td>
-                  <td style={{ padding: "4px 8px", borderLeft: "1px solid #999", fontWeight: 700 }}>Rs. {balance.toLocaleString()}</td>
-                </tr>
-              </tbody>
-            </table>
-            <p style={{ fontSize: 8.5, color: "#666", marginTop: 12, lineHeight: 1.4 }}>
-              Please keep this receipt and present it when collecting your device. Mano Mobile is not
-              responsible for pre-existing damage not noted at intake. Warranty applies only to the work performed.
-            </p>
+        {/* The receipt exactly as it will print — this element is what gets printed */}
+        <div style={{
+          flex: 1, minHeight: 0, overflow: "auto", margin: "0 20px",
+          border: "1px solid var(--border)", borderRadius: 10, background: "#e9e9e9",
+          padding: 12, display: "flex", justifyContent: "center",
+        }}>
+          <div style={{
+            // The slip is a fixed 718px (A5 landscape); shrink it to fit narrow screens.
+            transform: isMobile ? "scale(0.46)" : "scale(0.98)",
+            transformOrigin: "top center",
+            width: 718, flexShrink: 0,
+            boxShadow: "0 4px 18px rgba(0,0,0,0.25)",
+          }}>
+            <JobReceiptSlip ref={slipRef} job={job} />
           </div>
         </div>
 
         {/* Actions */}
-        <div style={{ padding: "0 20px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ padding: "14px 20px 18px", display: "flex", flexDirection: "column", gap: 10, flexShrink: 0 }}>
           <button onClick={handlePrint} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "11px", borderRadius: 10, border: "none", background: "var(--accent)", color: "var(--accent-fg)", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
             <Printer size={16} /> Print Job Receipt
           </button>
@@ -1119,14 +1319,16 @@ function JobReceiptPopup({ job, onNew, onClose }: { job: RepairJob; onNew: () =>
             <button onClick={onNew} style={{ flex: 1, padding: "10px", borderRadius: 10, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
               + New Repair
             </button>
-            {onClose && (
-              <button onClick={onClose} style={{ flex: 1, padding: "10px", borderRadius: 10, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                Done
-              </button>
-            )}
+            <button onClick={dismiss} style={{ flex: 1, padding: "10px", borderRadius: 10, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              Cancel
+            </button>
           </div>
+          <p style={{ fontSize: 10.5, color: "var(--text-muted)", textAlign: "center" }}>
+            Job <strong>{job.id}</strong> is saved either way — this dialog closes on its own after 10 minutes of inactivity.
+          </p>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
