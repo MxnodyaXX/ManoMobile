@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
+import AgentsManager from "@/admin/components/repair/AgentsManager";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import Barcode from "react-barcode";
 import {
   Tag, Layers, Truck, Barcode as BarcodeIcon, Settings,
   Plus, Edit2, Trash2, X, Search, Phone, Mail, Eye, KeyRound, Check,
-  Store, MapPin, CalendarDays,
+  Store, MapPin, CalendarDays, Building2,
 } from "lucide-react";
 import {
   useInventory,
@@ -709,13 +710,14 @@ function CredentialsManager() {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-type AdminTab = "Categories" | "Brands" | "Suppliers" | "Dealers" | "Barcode" | "Settings";
+type AdminTab = "Categories" | "Brands" | "Suppliers" | "Dealers" | "Agents" | "Barcode" | "Settings";
 
 const tabs: { id: AdminTab; icon: React.ComponentType<{ size?: number; strokeWidth?: number }>; label: string }[] = [
   { id: "Categories", icon: Tag,         label: "Item Categories" },
   { id: "Brands",     icon: Layers,      label: "Brands"          },
   { id: "Suppliers",  icon: Truck,       label: "Suppliers"       },
   { id: "Dealers",    icon: Store,       label: "Repair Dealers"  },
+  { id: "Agents",     icon: Building2,   label: "Repair Agents"   },
   { id: "Barcode",    icon: BarcodeIcon, label: "Barcode"         },
   { id: "Settings",   icon: KeyRound,    label: "Settings"        },
 ];
@@ -757,6 +759,7 @@ export default function AdminControl() {
         {tab === "Brands"     && <BrandsManager />}
         {tab === "Suppliers"  && <SuppliersManager />}
         {tab === "Dealers"    && <DealersManager />}
+        {tab === "Agents"     && <AgentsManager />}
         {tab === "Barcode"    && <BarcodeManager />}
         {tab === "Settings"   && <CredentialsManager />}
       </div>

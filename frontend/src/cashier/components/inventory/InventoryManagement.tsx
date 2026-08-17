@@ -57,25 +57,9 @@ type InventoryTab = "Overview" | "Mobile Devices" | "Accessories" | "Stock Recei
 
 // ─── Initial Data ─────────────────────────────────────────────────────────────
 
-const INITIAL_DEVICES: DeviceItem[] = [
-  { id: 1, imei: "358900123456789", name: "iPhone 15 Pro",      brand: "Apple",   storage: "256GB", color: "Natural Titanium", buyingPrice: 185000, minSellingPrice: 195000, suggestedPrice: 205000, supplier: "TechImports PVT", addedDate: "2025-11-10", status: "available", notes: "" },
-  { id: 2, imei: "490100234567890", name: "Samsung Galaxy S25", brand: "Samsung", storage: "128GB", color: "Phantom Black",    buyingPrice: 145000, minSellingPrice: 155000, suggestedPrice: 165000, supplier: "MobileWorld",     addedDate: "2025-11-12", status: "available", notes: "" },
-  { id: 3, imei: "867100345678901", name: "Xiaomi 14",          brand: "Xiaomi",  storage: "256GB", color: "White",           buyingPrice:  98000, minSellingPrice: 108000, suggestedPrice: 118000, supplier: "XiaomiSL",        addedDate: "2025-11-15", status: "sold",      notes: "" },
-  { id: 4, imei: "352800456789012", name: "OnePlus 12",         brand: "OnePlus", storage: "256GB", color: "Flowy Emerald",   buyingPrice: 130000, minSellingPrice: 140000, suggestedPrice: 150000, supplier: "TechImports PVT", addedDate: "2025-11-18", status: "available", notes: "" },
-  { id: 5, imei: "451200567890123", name: "iPhone 16",          brand: "Apple",   storage: "128GB", color: "Pink",            buyingPrice: 195000, minSellingPrice: 210000, suggestedPrice: 220000, supplier: "TechImports PVT", addedDate: "2025-12-01", status: "reserved",  notes: "Reserved for customer Kamal" },
-  { id: 6, imei: "356700678901234", name: "Samsung Galaxy A55", brand: "Samsung", storage: "128GB", color: "Awesome Lilac",   buyingPrice:  75000, minSellingPrice:  83000, suggestedPrice:  88000, supplier: "MobileWorld",     addedDate: "2025-12-05", status: "available", notes: "" },
-];
+const INITIAL_DEVICES: DeviceItem[] = [];
 
-const INITIAL_ACCESSORIES: AccessoryProduct[] = [
-  { id: 1, code: "TG-001", name: "Tempered Glass",       brand: "Baseus",  category: "Screen Protector", model: "iPhone 15 Pro", buyingPrice:  250, sellingPrice:  600, stock: 24, minStock: 10, supplier: "AccessoryHub",    addedDate: "2025-11-01" },
-  { id: 2, code: "PC-002", name: "Phone Case",           brand: "Spigen",  category: "Case",             model: "Samsung S25",   buyingPrice:  800, sellingPrice: 1800, stock: 15, minStock:  8, supplier: "AccessoryHub",    addedDate: "2025-11-01" },
-  { id: 3, code: "CB-003", name: "USB-C Cable",          brand: "Anker",   category: "Cable",            model: "Universal",     buyingPrice:  350, sellingPrice:  750, stock:  4, minStock: 15, supplier: "CableWorld",      addedDate: "2025-11-05" },
-  { id: 4, code: "PB-004", name: "Power Bank 20000mAh",  brand: "Romoss",  category: "Power Bank",       model: "Universal",     buyingPrice: 2800, sellingPrice: 5500, stock:  7, minStock:  5, supplier: "TechImports PVT", addedDate: "2025-11-08" },
-  { id: 5, code: "EW-005", name: "TWS Earbuds",          brand: "JBL",     category: "Audio",            model: "Universal",     buyingPrice: 2500, sellingPrice: 5000, stock:  3, minStock:  5, supplier: "AudioZone",       addedDate: "2025-11-10" },
-  { id: 6, code: "WC-006", name: "Wireless Charger 15W", brand: "Baseus",  category: "Charger",          model: "Universal",     buyingPrice: 1200, sellingPrice: 2800, stock:  0, minStock:  5, supplier: "AccessoryHub",    addedDate: "2025-11-12" },
-  { id: 7, code: "TG-007", name: "Tempered Glass",       brand: "Nillkin", category: "Screen Protector", model: "iPhone 16",     buyingPrice:  300, sellingPrice:  700, stock: 18, minStock: 10, supplier: "AccessoryHub",    addedDate: "2025-12-01" },
-  { id: 8, code: "CH-008", name: "Fast Charger 65W",     brand: "Anker",   category: "Charger",          model: "Universal",     buyingPrice: 1800, sellingPrice: 3800, stock:  9, minStock:  6, supplier: "TechImports PVT", addedDate: "2025-12-03" },
-];
+const INITIAL_ACCESSORIES: AccessoryProduct[] = [];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -27,28 +27,7 @@ const ShiftContext = createContext<ShiftContextValue>({
   closeShift: () => {},
 });
 
-const SEED_HISTORY: Shift[] = [
-  {
-    id: "shift-001",
-    cashier: "Kamal Perera",
-    openedAt: new Date("2026-05-18T08:00"),
-    closedAt: new Date("2026-05-18T18:30"),
-    openingFloat: 5000,
-    closingBalance: 62300,
-    variance: 0,
-    status: "closed",
-  },
-  {
-    id: "shift-002",
-    cashier: "Nimal Silva",
-    openedAt: new Date("2026-05-19T08:00"),
-    closedAt: new Date("2026-05-19T17:45"),
-    openingFloat: 5000,
-    closingBalance: 48200,
-    variance: -200,
-    status: "closed",
-  },
-];
+const SEED_HISTORY: Shift[] = [];
 
 export function ShiftProvider({ children }: { children: ReactNode }) {
   const [currentShift, setCurrentShift] = useState<Shift | null>(null);

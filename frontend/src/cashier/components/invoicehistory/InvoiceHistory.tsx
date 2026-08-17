@@ -26,18 +26,7 @@ interface Invoice {
   status: InvoiceStatus;
 }
 
-const INVOICES: Invoice[] = [
-  { id: "1",  invoiceNo: "INV-2401", date: "2026-05-19", customer: "Amal Perera",       type: "Sales",  description: "Screen Protector × 2, Phone Case",       subtotal: 2000, discount: 150,  total: 1850,  paid: 1850,  status: "Paid" },
-  { id: "2",  invoiceNo: "INV-2400", date: "2026-05-19", customer: "Nalini Silva",       type: "Sales",  description: "Samsung A15 (Black)",                     subtotal: 42500, discount: 0,  total: 42500, paid: 42500, status: "Paid" },
-  { id: "3",  invoiceNo: "REP-1041", date: "2026-05-19", customer: "Kasun Fernando",     type: "Repair", description: "Screen Replacement — iPhone 13",          subtotal: 9500, discount: 0,   total: 9500,  paid: 5000,  status: "Partial" },
-  { id: "4",  invoiceNo: "INV-2399", date: "2026-05-18", customer: "Walk-in",            type: "Sales",  description: "Photocopy × 5, Lamination",               subtotal: 320,  discount: 0,   total: 320,   paid: 320,   status: "Voided" },
-  { id: "5",  invoiceNo: "RET-0021", date: "2026-05-18", customer: "Dinesh Ratnam",      type: "Return", description: "Return: Charger (Type-C) — Defective",    subtotal: 650,  discount: 0,   total: -650,  paid: -650,  status: "Paid" },
-  { id: "6",  invoiceNo: "REP-1040", date: "2026-05-17", customer: "Priya Nair",         type: "Repair", description: "Battery Replacement — Oppo A57",          subtotal: 4200, discount: 0,   total: 4200,  paid: 4200,  status: "Paid" },
-  { id: "7",  invoiceNo: "INV-2398", date: "2026-05-17", customer: "Ruwan Jayasinghe",   type: "Sales",  description: "Redmi Note 13",                           subtotal: 38000, discount: 500, total: 37500, paid: 0,     status: "Unpaid" },
-  { id: "8",  invoiceNo: "REP-1039", date: "2026-05-16", customer: "Madhu Weerasinghe",  type: "Repair", description: "Charging Port — Samsung A32",              subtotal: 2800, discount: 0,   total: 2800,  paid: 2800,  status: "Paid" },
-  { id: "9",  invoiceNo: "INV-2397", date: "2026-05-15", customer: "Walk-in",            type: "Sales",  description: "Tempered Glass × 3",                     subtotal: 1350, discount: 0,   total: 1350,  paid: 1350,  status: "Paid" },
-  { id: "10", invoiceNo: "REP-1037", date: "2026-05-15", customer: "Saman Wickrama",     type: "Repair", description: "Water Damage — iPhone SE",                subtotal: 12000, discount: 0,  total: 12000, paid: 12000, status: "Paid" },
-];
+const INVOICES: Invoice[] = [];
 
 const TYPE_CFG: Record<InvoiceType, { color: string; icon: any }> = {
   Sales:  { color: "#60a5fa", icon: ShoppingCart },

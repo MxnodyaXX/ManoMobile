@@ -21,12 +21,7 @@ const CashRegisterContext = createContext<CashRegisterCtx>({
   addEntry: () => {},
 });
 
-const SEED_LOG: CashEntry[] = [
-  { id: "seed-1", type: "in",  reason: "Opening Float",              amount: 5000,  time: new Date("2026-05-19T08:00"), by: "Admin" },
-  { id: "seed-2", type: "in",  reason: "Cash Sale (INV-2400)",       amount: 42500, time: new Date("2026-05-19T13:18"), by: "Cashier" },
-  { id: "seed-3", type: "out", reason: "Petty Cash — Lunch",         amount: 800,   time: new Date("2026-05-19T13:00"), by: "Admin" },
-  { id: "seed-4", type: "in",  reason: "Repair Payment (JOB-1037)",  amount: 12000, time: new Date("2026-05-19T14:05"), by: "Cashier" },
-];
+const SEED_LOG: CashEntry[] = [];
 
 export function CashRegisterProvider({ children }: { children: ReactNode }) {
   const [log, setLog] = useState<CashEntry[]>(SEED_LOG);

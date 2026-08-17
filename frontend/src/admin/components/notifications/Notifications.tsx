@@ -2,8 +2,11 @@
 
 import { useState } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
-import { Bell, MessageSquare, Mail, Smartphone, ToggleLeft, ToggleRight, Eye, CheckCircle, XCircle, Clock, AlertTriangle } from "lucide-react";
+import { Bell, MessageSquare, Mail, Smartphone, Eye, CheckCircle, XCircle, Clock, AlertTriangle, Pencil, AlertCircle } from "lucide-react";
 import { useAdmin, type NotificationChannel } from "@/admin/contexts/AdminContext";
+import { useSmsTemplates, type SmsTemplate } from "@/lib/sms/templatesApi";
+import { JOB_SMS_LABEL, JOB_SMS_PURPOSE, JOB_SMS_VARIABLES, SAMPLE_JOB, renderTemplate } from "@/lib/sms/templates";
+import SmsTemplateEditor from "@/admin/components/notifications/SmsTemplateEditor";
 
 const AA = "#a78bfa";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -21,8 +24,82 @@ const LOG_STATUS_CFG = {
   Pending:   { color: "#fbbf24", icon: AlertTriangle },
 };
 
+
+/**
+ * Allow / deny switch for one automatic message.
+ *
+ * Deliberately a labelled switch rather than a bare icon: "is this message
+ * going out or not?" is the question this screen exists to answer, and an
+ * unlabelled toggle leaves it ambiguous.
+ */
+function SendSwitch({ on, busy, onChange }: { on: boolean; busy: boolean; onChange: () => void }) {
+  return (
+    <button
+      onClick={onChange}
+      disabled={busy}
+      title={on ? "Sending automatically - click to stop" : "Not sending - click to allow"}
+      style={{
+        display: "flex", alignItems: "center", gap: 9, padding: "6px 12px 6px 8px",
+        borderRadius: 22, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.6 : 1,
+        background: on ? "rgba(52,211,153,0.1)" : "var(--bg-secondary)",
+        border: `1px solid ${on ? "rgba(52,211,153,0.4)" : "var(--border)"}`,
+        fontFamily: ff, transition: "all 0.18s", whiteSpace: "nowrap",
+      }}
+    >
+      <span style={{
+        width: 34, height: 19, borderRadius: 12, position: "relative", flexShrink: 0,
+        background: on ? "#34d399" : "var(--border)", transition: "background 0.18s",
+      }}>
+        <span style={{
+          position: "absolute", top: 2.5, left: on ? 17 : 2.5,
+          width: 14, height: 14, borderRadius: "50%", background: "#fff",
+          transition: "left 0.18s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+        }} />
+      </span>
+      <span style={{ fontSize: 11.5, fontWeight: 700, color: on ? "#34d399" : "var(--text-muted)" }}>
+        {busy ? "Saving..." : on ? "Sending" : "Off"}
+      </span>
+    </button>
+  );
+}
+
 export default function Notifications() {
-  const { templates, notificationLog, toggleTemplate } = useAdmin();
+  const { notificationLog } = useAdmin();
+  // SMS wording lives in the database so an Admin can change it without a
+  // deploy, and so the cashier and technician apps read the same text.
+  const { templates: smsTemplates, loading: tplLoading, error: tplError, save: saveTemplate, configured } = useSmsTemplates();
+  const [editing, setEditing] = useState<SmsTemplate | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
+  const [toggleError, setToggleError] = useState<string | null>(null);
+
+  /**
+   * Allow or deny one automatic message. Saved immediately — an admin flipping
+   * this expects it to take effect on the next job, not after a Save button.
+   */
+  const toggleSending = async (event: string) => {
+    const tpl = smsTemplates.find(x => x.event === event);
+    if (!tpl) return;
+    setToggling(event);
+    setToggleError(null);
+    try {
+      await saveTemplate({ ...tpl, isActive: !tpl.isActive });
+    } catch (e) {
+      setToggleError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setToggling(null);
+    }
+  };
+
+  const templates = smsTemplates.map(t => ({
+    id: t.event,
+    name: t.name || JOB_SMS_LABEL[t.event],
+    channel: "SMS" as NotificationChannel,
+    event: JOB_SMS_PURPOSE[t.event],
+    body: renderTemplate(t.body, SAMPLE_JOB),
+    variables: JOB_SMS_VARIABLES[t.event],
+    isActive: t.isActive,
+    subject: undefined as string | undefined,
+  }));
   const [tab, setTab]             = useState<"templates" | "log">("templates");
   const [chanFilter, setChan]     = useState<NotificationChannel | "All">("All");
   const isMobile = useIsMobile();
@@ -53,7 +130,7 @@ export default function Notifications() {
       <div className="fade-up" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", marginBottom: 4, fontFamily: ff }}>Notifications</h1>
-          <p style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: ff }}>{activeCount} active templates · {notificationLog.length} sent · {failedCount > 0 ? `${failedCount} failed` : "all delivered"}</p>
+          <p style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: ff }}>{activeCount} of {templates.length} messages sending automatically · {notificationLog.length} sent · {failedCount > 0 ? `${failedCount} failed` : "all delivered"}</p>
         </div>
         {failedCount > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 9, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.25)" }}>
@@ -82,8 +159,41 @@ export default function Notifications() {
       </div>
 
       {/* ── Templates tab ── */}
+      {editing && (
+        <SmsTemplateEditor
+          template={editing}
+          onSave={saveTemplate}
+          onClose={() => setEditing(null)}
+        />
+      )}
+
       {tab === "templates" && (
         <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {tplLoading && (
+            <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff, padding: "8px 2px" }}>Loading templates…</p>
+          )}
+
+          {/* Editing needs the database: without it these are the built-in
+              defaults and a save has nowhere to go. */}
+          {(!configured || tplError) && !tplLoading && (
+            <div style={{ display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)" }}>
+              <AlertCircle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+              <p style={{ fontSize: 12.5, color: "var(--text-secondary)", fontFamily: ff, lineHeight: 1.55 }}>
+                {!configured
+                  ? "Showing the built-in wording. Connect Supabase to edit these messages."
+                  : `${tplError} — showing the built-in wording. Run the sms_templates migration, and note only an Admin may edit.`}
+              </p>
+            </div>
+          )}
+          {toggleError && (
+            <div style={{ display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.4)" }}>
+              <AlertCircle size={15} color="var(--danger)" style={{ flexShrink: 0, marginTop: 1 }} />
+              <p style={{ fontSize: 12.5, color: "var(--text-secondary)", fontFamily: ff, lineHeight: 1.55 }}>
+                <strong style={{ color: "var(--danger)" }}>Not saved:</strong> {toggleError}
+              </p>
+            </div>
+          )}
+
           {filteredTemplates.map(t => {
             const cfg = CHANNEL_CFG[t.channel];
             const Icon = cfg.icon;
@@ -116,9 +226,20 @@ export default function Notifications() {
                     >
                       <Eye size={14} />
                     </button>
-                    <button onClick={() => toggleTemplate(t.id)} title={t.isActive ? "Disable template" : "Enable template"} style={{ background: "none", border: "none", cursor: "pointer", color: t.isActive ? cfg.color : "var(--text-muted)", padding: 4 }}>
-                      {t.isActive ? <ToggleRight size={22} /> : <ToggleLeft size={22} />}
+                    <button
+                      onClick={() => { const tpl = smsTemplates.find(x => x.event === t.id); if (tpl) setEditing(tpl); }}
+                      title="Edit wording"
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 6, borderRadius: 7 }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-secondary)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-primary)"; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "none"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-muted)"; }}
+                    >
+                      <Pencil size={14} />
                     </button>
+                    <SendSwitch
+                      on={t.isActive}
+                      busy={toggling === t.id}
+                      onChange={() => toggleSending(t.id)}
+                    />
                   </div>
                 </div>
               </div>

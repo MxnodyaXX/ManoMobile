@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Wrench, ArrowRight, History, CheckCircle, XCircle, User } from "lucide-react";
 import { RepairProvider, useRepair } from "@/cashier/contexts/RepairContext";
+import { useTechnicians } from "@/lib/repair/technicians";
 import { WarrantyProvider } from "@/cashier/contexts/WarrantyContext";
 import { TechProvider }   from "@/technician/contexts/TechContext";
 import TechSidebar, { type TechPage } from "@/technician/components/layout/TechSidebar";
@@ -17,7 +18,7 @@ import ShiftTracker  from "@/technician/components/shift/ShiftTracker";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
-const TECH_NAMES = ["Kamal", "Nimal", "Suresh"];
+
 
 // ─── Job History (delivered + cancelled) ─────────────────────────────────────
 
@@ -74,6 +75,9 @@ function JobHistory({ techName }: { techName: string }) {
 
 function TechSelect({ onSelect }: { onSelect: (name: string) => void }) {
   const [hov, setHov] = useState<string | null>(null);
+  // The roster is the staff directory (profiles with role = Technician), so this
+  // list and the cashier's assignment list can never drift apart.
+  const { technicians, loading, error } = useTechnicians();
 
   return (
     <div style={{
@@ -101,7 +105,29 @@ function TechSelect({ onSelect }: { onSelect: (name: string) => void }) {
 
         {/* Name cards */}
         <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
-          {TECH_NAMES.map(name => {
+          {loading && (
+            <p style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: ff, textAlign: "center", padding: "20px 0" }}>
+              Loading technicians…
+            </p>
+          )}
+
+          {/* No roster means nobody can sign in — name the cause rather than
+              showing an empty screen. */}
+          {!loading && technicians.length === 0 && (
+            <div style={{ padding: "16px 18px", borderRadius: 12, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)" }}>
+              <p style={{ fontSize: 13, fontWeight: 700, color: "#fbbf24", fontFamily: ff, marginBottom: 5 }}>
+                No technicians found
+              </p>
+              <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: ff, lineHeight: 1.55 }}>
+                {error
+                  ? error
+                  : "The staff directory has nobody with the Technician role yet. Add them in Supabase (profiles.role = 'Technician') and they will appear here."}
+              </p>
+            </div>
+          )}
+
+          {technicians.map(tech => {
+            const name = tech.name;
             const isHov = hov === name;
             return (
               <button
@@ -130,7 +156,7 @@ function TechSelect({ onSelect }: { onSelect: (name: string) => void }) {
                 </div>
                 <div style={{ flex: 1, textAlign: "left" }}>
                   <p style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff, marginBottom: 2 }}>{name}</p>
-                  <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff }}>Repair Technician · Mano Mobile</p>
+                  <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff }}>{tech.speciality} · Mano Mobile</p>
                 </div>
                 <ArrowRight size={15} style={{ color: isHov ? TA : "var(--text-muted)", transition: "color 0.15s", flexShrink: 0 }} />
               </button>
@@ -152,12 +178,13 @@ function TechPageInner() {
   const [activePage, setActivePage] = useState<TechPage>("Dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // If tech name passed via URL (from login page), auto-select it
+  // If a name was passed in the URL, accept it once the roster has loaded.
+  const { technicians } = useTechnicians();
   useEffect(() => {
-    if (urlTech && TECH_NAMES.includes(urlTech)) {
+    if (urlTech && technicians.some(t => t.name === urlTech)) {
       setTechName(urlTech);
     }
-  }, [urlTech]);
+  }, [urlTech, technicians]);
 
   if (!techName) {
     return <TechSelect onSelect={setTechName} />;

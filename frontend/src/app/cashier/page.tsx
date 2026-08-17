@@ -122,13 +122,7 @@ function PendingAlert({ onView }: { onView: () => void }) {
 }
 
 /* ── Recent-activity feed ── */
-const RECENT_ACTIVITY = [
-  { icon: CheckCircle, color: "#4ade80", text: "Repair JOB-1041 marked Completed",     time: "2 min ago" },
-  { icon: DollarSign,  color: "#60a5fa", text: "Sale INV-2401 — Rs. 1,850 collected",  time: "14 min ago" },
-  { icon: Clock,       color: "#fbbf24", text: "JOB-1039 moved to Pending — awaiting parts", time: "1 hr ago" },
-  { icon: CheckCircle, color: "#4ade80", text: "Customer Nalini Silva added",           time: "1 hr ago" },
-  { icon: DollarSign,  color: "#a78bfa", text: "Cash payment logged — Rs. 12,000",     time: "2 hr ago" },
-];
+const RECENT_ACTIVITY: { icon: React.ComponentType<{ size?: number; color?: string }>; color: string; text: string; time: string }[] = [];
 
 function ActivityFeed() {
   return (

@@ -10,15 +10,17 @@ import GeneralLedger     from "@/accounts/components/ledger/GeneralLedger";
 import AccountsReceivable from "@/accounts/components/receivables/AccountsReceivable";
 import AccountsPayable   from "@/accounts/components/payables/AccountsPayable";
 import FinancialReports  from "@/accounts/components/reports/FinancialReports";
+import { useStaffByRole } from "@/lib/staff/roster";
 
 const AA = "#f59e0b";
 const ff = "'Plus Jakarta Sans', sans-serif";
-const ACCOUNTS_STAFF = ["Ruwan", "Fathima", "Priya"];
 
 // ─── Staff selector ───────────────────────────────────────────────────────────
 
 function AccountsSelect({ onSelect }: { onSelect: (name: string) => void }) {
   const [hov, setHov] = useState<string | null>(null);
+  // Roster comes from the staff directory, never a hard-coded list.
+  const { staff, loading } = useStaffByRole("Accounts");
 
   return (
     <div style={{
@@ -47,7 +49,18 @@ function AccountsSelect({ onSelect }: { onSelect: (name: string) => void }) {
 
         {/* Staff cards */}
         <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
-          {ACCOUNTS_STAFF.map(name => {
+          {loading && (
+            <p style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: ff, textAlign: "center", padding: "20px 0" }}>Loading staff…</p>
+          )}
+          {!loading && staff.length === 0 && (
+            <div style={{ padding: "16px 18px", borderRadius: 12, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)" }}>
+              <p style={{ fontSize: 13, fontWeight: 700, color: "#fbbf24", fontFamily: ff, marginBottom: 5 }}>No Accounts staff found</p>
+              <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: ff, lineHeight: 1.55 }}>
+                Add them in Supabase with the <strong>Accounts</strong> role and they will appear here.
+              </p>
+            </div>
+          )}
+          {staff.map(({ name }) => {
             const isHov = hov === name;
             return (
               <button

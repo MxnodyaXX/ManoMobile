@@ -39,36 +39,7 @@ interface PurchaseOrder {
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 
-const SEED_POS: PurchaseOrder[] = [
-  {
-    id: "po-1", poNumber: "PO-2026-001", supplier: "AccessoryHub",
-    status: "Received", createdAt: "2026-05-10", expectedDate: "2026-05-14", receivedAt: "2026-05-14",
-    createdBy: "Admin", notes: "Monthly restock",
-    totalCost: 18500,
-    items: [
-      { id: "l1", productCode: "TG-001", productName: "Tempered Glass", category: "Screen Protector", brand: "Baseus",  orderedQty: 30, receivedQty: 30, unitCost: 250 },
-      { id: "l2", productCode: "PC-002", productName: "Phone Case",     category: "Case",             brand: "Spigen",  orderedQty: 20, receivedQty: 20, unitCost: 800 },
-    ],
-  },
-  {
-    id: "po-2", poNumber: "PO-2026-002", supplier: "CableWorld",
-    status: "Ordered", createdAt: "2026-05-17", expectedDate: "2026-05-22",
-    createdBy: "Admin", notes: "Urgent — USB-C cables low",
-    totalCost: 10500,
-    items: [
-      { id: "l3", productCode: "CB-003", productName: "USB-C Cable",     category: "Cable",   brand: "Anker",   orderedQty: 30, receivedQty: 0, unitCost: 350 },
-    ],
-  },
-  {
-    id: "po-3", poNumber: "PO-2026-003", supplier: "AudioZone",
-    status: "Partially Received", createdAt: "2026-05-18", expectedDate: "2026-05-20",
-    createdBy: "Admin", notes: "",
-    totalCost: 25000,
-    items: [
-      { id: "l4", productCode: "EW-005", productName: "TWS Earbuds",          category: "Audio",   brand: "JBL",    orderedQty: 10, receivedQty: 5, unitCost: 2500 },
-    ],
-  },
-];
+const SEED_POS: PurchaseOrder[] = [];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

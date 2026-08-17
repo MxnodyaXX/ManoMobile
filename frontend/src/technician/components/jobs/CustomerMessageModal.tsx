@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { X, MessageCircle, Copy, CheckCircle } from "lucide-react";
+import { X, MessageCircle, Copy, CheckCircle, Send, AlertCircle } from "lucide-react";
 import { useTech } from "@/technician/contexts/TechContext";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
+import { sendSms, smsPartCount } from "@/lib/sms/client";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -45,9 +46,40 @@ export default function CustomerMessageModal({ job, onClose }: Props) {
   const { addActivity } = useTech();
   const [selected, setSelected] = useState(TEMPLATES[0].id);
   const [copied, setCopied]     = useState(false);
+  const [sending, setSending]   = useState(false);
+  const [smsNotice, setSmsNotice] = useState<{ ok: boolean; text: string } | null>(null);
 
   const tpl = TEMPLATES.find(t => t.id === selected)!;
   const [msg, setMsg] = useState(tpl.body(job));
+  const parts = smsPartCount(msg);
+
+  /** Send through the Text.lk gateway. The token never leaves the server. */
+  const sendBySms = async () => {
+    if (!job.phone?.trim()) {
+      setSmsNotice({ ok: false, text: "This job has no customer phone number recorded." });
+      return;
+    }
+    setSending(true);
+    setSmsNotice(null);
+
+    const result = await sendSms({
+      to: job.phone,
+      message: msg,
+      jobId: job.id,
+      purpose: tpl.id,
+    });
+    setSending(false);
+
+    if (result.ok) {
+      setSmsNotice({
+        ok: true,
+        text: `Sent to ${result.recipient ?? job.phone}${result.smsCount ? ` · ${result.smsCount} SMS` : ""}${result.cost != null ? ` · Rs. ${result.cost}` : ""}.`,
+      });
+      addActivity({ jobId: job.id, type: "message_sent", description: `SMS sent to customer: "${tpl.label}"` });
+    } else {
+      setSmsNotice({ ok: false, text: result.error ?? "The message could not be sent." });
+    }
+  };
 
   const handleSelect = (id: string) => {
     setSelected(id);
@@ -111,8 +143,35 @@ export default function CustomerMessageModal({ job, onClose }: Props) {
               style={{ width: "100%", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "var(--text-primary)", fontFamily: ff, outline: "none", resize: "vertical", boxSizing: "border-box", lineHeight: 1.6 }} />
           </div>
 
+          {/* Send result */}
+          {smsNotice && (
+            <div style={{
+              display: "flex", alignItems: "flex-start", gap: 8, padding: "9px 12px", borderRadius: 9,
+              background: smsNotice.ok ? `${TA}12` : "rgba(248,113,113,0.08)",
+              border: `1px solid ${smsNotice.ok ? `${TA}40` : "rgba(248,113,113,0.35)"}`,
+            }}>
+              {smsNotice.ok
+                ? <CheckCircle size={14} color={TA} style={{ flexShrink: 0, marginTop: 1 }} />
+                : <AlertCircle size={14} color="#f87171" style={{ flexShrink: 0, marginTop: 1 }} />}
+              <p style={{ fontSize: 11.5, color: "var(--text-secondary)", fontFamily: ff, lineHeight: 1.5 }}>{smsNotice.text}</p>
+            </div>
+          )}
+
           {/* Actions */}
           <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={sendBySms}
+              disabled={sending}
+              title={`Sends from "Mano Mobile" to ${job.phone || "the customer"}`}
+              style={{
+                flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+                padding: "10px", borderRadius: 10, border: "none", fontSize: 13, fontWeight: 700,
+                background: TA, color: "#04231a", cursor: sending ? "wait" : "pointer",
+                opacity: sending ? 0.7 : 1, fontFamily: ff,
+              }}
+            >
+              <Send size={14} /> {sending ? "Sending…" : `Send SMS${parts > 1 ? ` (${parts} parts)` : ""}`}
+            </button>
             <button onClick={copy} style={{
               flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
               padding: "10px", borderRadius: 10, border: "none", fontSize: 13, fontWeight: 600,

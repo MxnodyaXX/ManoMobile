@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
-import { Plus, Briefcase, AlertCircle, Clock, Hourglass, LayoutGrid, XCircle, PackageCheck, CheckCheck, FileClock } from "lucide-react";
+import { Plus, Briefcase, AlertCircle, Clock, Hourglass, LayoutGrid, XCircle, PackageCheck, CheckCheck, FileClock, DatabaseZap } from "lucide-react";
+import { useRepair } from "@/cashier/contexts/RepairContext";
 import NewRepairForm from "./NewRepairForm";
 import JobsTable from "./JobsTable";
 import DraftsList from "./DraftsList";
@@ -52,6 +53,7 @@ export default function RepairManagement({ initialSection }: { initialSection?: 
   // The draft the wizard should open with. Cleared whenever a tab is picked by
   // hand, so "New Repair" is a blank intake unless a draft was explicitly resumed.
   const [resuming, setResuming] = useState<RepairDraft | null>(null);
+  const { backend, error: backendError } = useRepair();
   const isMobile = useIsMobile();
 
   // Allow the dashboard (or other callers) to deep-link a tab.
@@ -124,6 +126,38 @@ export default function RepairManagement({ initialSection }: { initialSection?: 
         </div>
         </div>
       </div>
+
+      {/* Demo mode — nothing here reaches the database. Loud on purpose: without
+          it, a job "saves", prints a receipt, and vanishes on reload. */}
+      {backend === "local" && (
+        <div className="fade-up" style={{
+          display: "flex", alignItems: "flex-start", gap: 10, padding: "12px 16px",
+          borderRadius: 12, background: "rgba(251,191,36,0.08)",
+          border: "1px solid rgba(251,191,36,0.4)",
+        }}>
+          <DatabaseZap size={16} color="var(--warning)" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+            <strong style={{ color: "var(--warning)" }}>Demo mode — nothing is being saved.</strong>{" "}
+            Supabase isn&apos;t configured, so jobs live in this browser tab only and disappear on reload.
+            Create <code>frontend/.env.local</code> from <code>.env.local.example</code>, then restart the
+            dev server. Setup steps are in <code>docs/BACKEND-SETUP.md</code>.
+          </p>
+        </div>
+      )}
+
+      {/* A backend that IS configured but failing must not look like success either. */}
+      {backend === "supabase" && backendError && (
+        <div className="fade-up" style={{
+          display: "flex", alignItems: "flex-start", gap: 10, padding: "12px 16px",
+          borderRadius: 12, background: "rgba(248,113,113,0.08)",
+          border: "1px solid rgba(248,113,113,0.4)",
+        }}>
+          <AlertCircle size={16} color="var(--danger)" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+            <strong style={{ color: "var(--danger)" }}>Database error:</strong> {backendError}
+          </p>
+        </div>
+      )}
 
       {/* Active section card */}
       <div className="fade-up fade-up-2" style={{

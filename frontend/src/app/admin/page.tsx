@@ -13,14 +13,16 @@ import PurchaseOrders from "@/admin/components/purchaseorders/PurchaseOrders";
 import DeviceRegistry from "@/admin/components/devices/DeviceRegistry";
 import Notifications  from "@/admin/components/notifications/Notifications";
 import SystemSettings from "@/admin/components/settings/SystemSettings";
+import { useStaffByRole } from "@/lib/staff/roster";
 
 const AA = "#a78bfa";
 const ff = "'Plus Jakarta Sans', sans-serif";
 
-const ADMIN_NAMES = ["Pradeep Silva", "Chamara Jayawardena"];
 
 function AdminSelect({ onSelect }: { onSelect: (name: string) => void }) {
   const [hov, setHov] = useState<string | null>(null);
+  // Roster comes from the staff directory, never a hard-coded list.
+  const { staff, loading } = useStaffByRole("Admin");
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-primary)", fontFamily: ff, padding: "40px 20px" }}>
@@ -34,7 +36,18 @@ function AdminSelect({ onSelect }: { onSelect: (name: string) => void }) {
         </div>
 
         <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
-          {ADMIN_NAMES.map(name => {
+          {loading && (
+            <p style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: ff, textAlign: "center", padding: "20px 0" }}>Loading staff…</p>
+          )}
+          {!loading && staff.length === 0 && (
+            <div style={{ padding: "16px 18px", borderRadius: 12, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)" }}>
+              <p style={{ fontSize: 13, fontWeight: 700, color: "#fbbf24", fontFamily: ff, marginBottom: 5 }}>No Admin staff found</p>
+              <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: ff, lineHeight: 1.55 }}>
+                Add them in Supabase with the <strong>Admin</strong> role and they will appear here.
+              </p>
+            </div>
+          )}
+          {staff.map(({ name }) => {
             const isHov = hov === name;
             return (
               <button key={name} onClick={() => onSelect(name)} onMouseEnter={() => setHov(name)} onMouseLeave={() => setHov(null)}

@@ -1,14 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import {
   Search, Play, Pause, CheckCircle, Clock,
   AlertTriangle, Filter, Wrench, User, Phone,
   ChevronDown, MoreVertical, Calendar, DollarSign,
-  Package, FileText, Activity, MessageCircle, AlertOctagon, ClipboardCheck,
+  Package, FileText, Activity, MessageCircle, AlertOctagon, ClipboardCheck, Building2,
 } from "lucide-react";
-import { useRepair, type RepairJob, type JobStatus } from "@/cashier/contexts/RepairContext";
+import { useRepair, isClaimable, type RepairJob, type JobStatus } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
 import { SPARE_PARTS } from "@/technician/data/partsData";
 import StatusUpdateModal from "@/technician/components/jobs/StatusUpdateModal";
@@ -18,6 +18,9 @@ import ActivityLogPanel from "@/technician/components/jobs/ActivityLogPanel";
 import InternalNotesModal from "@/technician/components/jobs/InternalNotesModal";
 import EscalationModal from "@/technician/components/jobs/EscalationModal";
 import CustomerMessageModal from "@/technician/components/jobs/CustomerMessageModal";
+import TransferAgentModal from "@/technician/components/jobs/TransferAgentModal";
+import { fetchOpenTransfers, markTransferReturned, type AgentTransfer } from "@/lib/repair/agents";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -63,10 +66,13 @@ const SLA_CFG = {
   ok:         { color: TA,        bg: `${TA}10`,              border: `${TA}28`,                label: "On Track"  },
 };
 
-type FilterTab = "All" | "Active" | "Paused" | "Not Started" | "Completed";
-const FILTER_TABS: FilterTab[] = ["All", "Active", "Paused", "Not Started", "Completed"];
+// "Available" is not one of my jobs — it lists unclaimed work offered to every
+// technician, so it is handled separately from the status filters below.
+type FilterTab = "Available" | "All" | "Active" | "Paused" | "Not Started" | "Completed";
+const FILTER_TABS: FilterTab[] = ["Available", "All", "Active", "Paused", "Not Started", "Completed"];
 
 const STATUS_FOR_FILTER: Record<FilterTab, JobStatus[]> = {
+  "Available":   ["Non-Issued"],
   "All":         ["Non-Issued", "Issued", "Pending", "Completed"],
   "Active":      ["Issued"],
   "Paused":      ["Pending"],
@@ -220,7 +226,7 @@ function JobDetailPanel({ job, onClose, onStatusUpdate, onRequestParts }: { job:
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function MyJobs() {
-  const { jobs } = useRepair();
+  const { jobs, claimJob, updateJob } = useRepair();
   const { technicianName, partRequests, diagnostics, notes, activityLog, escalations } = useTech();
   const isMobile = useIsMobile();
 
@@ -236,11 +242,40 @@ export default function MyJobs() {
   const [notesJob, setNotesJob]           = useState<RepairJob | null>(null);
   const [escalationJob, setEscalationJob] = useState<RepairJob | null>(null);
   const [messageJob, setMessageJob]       = useState<RepairJob | null>(null);
+  const [claimingId, setClaimingId]       = useState<string | null>(null);
+  const [claimNotice, setClaimNotice]     = useState<{ kind: "ok" | "warn"; text: string } | null>(null);
+  const [transferJob, setTransferJob]     = useState<RepairJob | null>(null);
+  // Which of my jobs are physically out at an agent right now.
+  const [openTransfers, setOpenTransfers] = useState<AgentTransfer[]>([]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    let active = true;
+    fetchOpenTransfers()
+      .then(rows => { if (active) setOpenTransfers(rows); })
+      .catch(() => { /* the badge is a nicety; failing to load it must not break the queue */ });
+    return () => { active = false; };
+  }, []);
 
   const { jobMeta } = useTech();
 
   const myJobs = jobs.filter(j => j.technician === technicianName);
   const activeJob = myJobs.find(j => j.status === "Issued");
+
+  // Jobs taken in without a technician: every technician sees these until one
+  // of them starts it, at which point it becomes theirs alone.
+  const availableJobs = jobs.filter(isClaimable);
+
+  const matchesSearchAndPriority = (j: RepairJob) => {
+    if (priorityFilter !== "All" && j.priority !== priorityFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (!j.id.toLowerCase().includes(q) && !j.model.toLowerCase().includes(q) &&
+          !j.brand.toLowerCase().includes(q) && !j.customerName.toLowerCase().includes(q) &&
+          !j.issue.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  };
 
   const filtered = myJobs.filter(j => {
     if (!STATUS_FOR_FILTER[filterTab].includes(j.status)) return false;
@@ -260,7 +295,16 @@ export default function MyJobs() {
     return pOrder[a.priority] - pOrder[b.priority];
   });
 
+  // The list on screen: unclaimed work under "Available", my own work elsewhere.
+  const availableFiltered = availableJobs.filter(matchesSearchAndPriority).sort((a, b) => {
+    const pOrder = { Urgent: 0, High: 1, Normal: 2, Low: 3 };
+    if (pOrder[a.priority] !== pOrder[b.priority]) return pOrder[a.priority] - pOrder[b.priority];
+    return a.createdAt.localeCompare(b.createdAt); // oldest first — longest waiting
+  });
+  const listed = filterTab === "Available" ? availableFiltered : filtered;
+
   const tabCounts: Record<FilterTab, number> = {
+    "Available":   availableJobs.length,
     "All":         myJobs.filter(j => STATUS_FOR_FILTER["All"].includes(j.status)).length,
     "Active":      myJobs.filter(j => j.status === "Issued").length,
     "Paused":      myJobs.filter(j => j.status === "Pending").length,
@@ -275,6 +319,42 @@ export default function MyJobs() {
     background: "var(--bg-secondary)", border: "1px solid var(--border)",
     borderRadius: 8, padding: "8px 12px", fontSize: 12.5,
     color: "var(--text-primary)", fontFamily: ff, outline: "none",
+  };
+
+  /** The open transfer for a job, if the device is currently out at an agent. */
+  const atAgent = (jobId: string) => openTransfers.find(t => t.jobId === jobId);
+
+  /**
+   * Bring a device back from an external agent: close the open transfer and put
+   * the job back into progress.
+   */
+  const handleReturnFromAgent = async (job: RepairJob) => {
+    const transfer = openTransfers.find(t => t.jobId === job.id);
+    try {
+      if (transfer) await markTransferReturned(transfer.id);
+      updateJob(job.id, { status: "Issued", pauseReason: undefined, pausedAt: undefined });
+      setOpenTransfers(prev => prev.filter(t => t.jobId !== job.id));
+      setClaimNotice({ kind: "ok", text: `${job.id} is back from ${transfer?.agentName ?? "the agent"} and in progress again.` });
+    } catch (e) {
+      setClaimNotice({ kind: "warn", text: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  /** Take an unclaimed job. The database settles ties, so this just reports the outcome. */
+  const handleClaim = async (job: RepairJob) => {
+    setClaimingId(job.id);
+    setClaimNotice(null);
+    const result = await claimJob(job.id, technicianName);
+    setClaimingId(null);
+
+    if (result === "claimed") {
+      setClaimNotice({ kind: "ok", text: `${job.id} is yours — it's now in your active jobs.` });
+      setFilterTab("Active");
+    } else if (result === "taken") {
+      setClaimNotice({ kind: "warn", text: `${job.id} was just started by another technician.` });
+    } else {
+      setClaimNotice({ kind: "warn", text: `Could not start ${job.id}. Check your connection and try again.` });
+    }
   };
 
   const getQuickAction = (job: RepairJob) => {
@@ -292,8 +372,40 @@ export default function MyJobs() {
         <h1 style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", marginBottom: 4, fontFamily: ff }}>My Jobs</h1>
         <p style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: ff }}>
           {myJobs.length} repair job{myJobs.length !== 1 ? "s" : ""} assigned to you
+          {availableJobs.length > 0 && (
+            <>
+              {" · "}
+              <button
+                onClick={() => setFilterTab("Available")}
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: ff, fontSize: 13, fontWeight: 700, color: TA }}
+              >
+                {availableJobs.length} unassigned waiting
+              </button>
+            </>
+          )}
         </p>
       </div>
+
+      {/* Outcome of the last claim — including losing the race for one. */}
+      {claimNotice && (
+        <div className="fade-up" style={{
+          display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10,
+          background: claimNotice.kind === "ok" ? `${TA}0d` : "rgba(251,191,36,0.08)",
+          border: `1px solid ${claimNotice.kind === "ok" ? `${TA}35` : "rgba(251,191,36,0.4)"}`,
+        }}>
+          {claimNotice.kind === "ok"
+            ? <CheckCircle size={15} color={TA} style={{ flexShrink: 0 }} />
+            : <AlertOctagon size={15} color="#fbbf24" style={{ flexShrink: 0 }} />}
+          <p style={{ fontSize: 12.5, color: "var(--text-primary)", fontFamily: ff, flex: 1 }}>{claimNotice.text}</p>
+          <button
+            onClick={() => setClaimNotice(null)}
+            style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: 0 }}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Active job quick bar */}
       {activeJob && (
@@ -397,13 +509,15 @@ export default function MyJobs() {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {listed.length === 0 ? (
               <tr>
                 <td colSpan={8} style={{ padding: "48px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 13, fontFamily: ff }}>
-                  No jobs match your filters.
+                  {filterTab === "Available"
+                    ? "No unassigned jobs waiting — everything has a technician."
+                    : "No jobs match your filters."}
                 </td>
               </tr>
-            ) : filtered.map((job, i) => {
+            ) : listed.map((job, i) => {
               const sCfg = STATUS_CFG[job.status];
               const pCfg = PRIORITY_CFG[job.priority];
               const qa   = getQuickAction(job);
@@ -492,11 +606,30 @@ export default function MyJobs() {
                     {/* Actions */}
                     <td style={{ padding: "11px 14px" }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                        {qa && (
+                        {/* Unclaimed work: one button, and it is a race — whoever
+                            lands it first gets the job. */}
+                        {isClaimable(job) ? (
+                          <button
+                            onClick={() => handleClaim(job)}
+                            disabled={claimingId === job.id}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", borderRadius: 7,
+                              fontSize: 11.5, fontWeight: 700, background: `${TA}18`, border: `1px solid ${TA}45`,
+                              color: TA, cursor: claimingId === job.id ? "wait" : "pointer",
+                              opacity: claimingId === job.id ? 0.6 : 1,
+                              fontFamily: ff, whiteSpace: "nowrap", transition: "all 0.15s",
+                            }}
+                          >
+                            <Play size={11} />{claimingId === job.id ? "Starting…" : "Start This Job"}
+                          </button>
+                        ) : qa && (
                           <button onClick={() => setStatusModalId(job.id)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, background: `${qa.color}12`, border: `1px solid ${qa.color}30`, color: qa.color, cursor: "pointer", fontFamily: ff, whiteSpace: "nowrap", transition: "all 0.15s" }}>
                             <qa.icon size={11} />{qa.label}
                           </button>
                         )}
+                        {/* Notes, diagnostics and escalations belong to whoever
+                            owns the job — an unclaimed row offers Start only. */}
+                        {!isClaimable(job) && <>
                         {/* Diagnostic button for not-started */}
                         {job.status === "Non-Issued" && (
                           <button onClick={() => setDiagnosticJob(job)} title="Pre-repair diagnostic" style={{ padding: "5px 7px", borderRadius: 7, background: diagnostics[job.id] ? `${TA}12` : "none", border: `1px solid ${diagnostics[job.id] ? TA + "30" : "var(--border)"}`, color: diagnostics[job.id] ? TA : "var(--text-muted)", cursor: "pointer" }}>
@@ -516,12 +649,27 @@ export default function MyJobs() {
                         <button onClick={() => setMessageJob(job)} title="Message customer" style={{ padding: "5px 7px", borderRadius: 7, background: "none", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" }}>
                           <MessageCircle size={13} />
                         </button>
+                        {/* Out at an agent → offer the way back; otherwise offer to send it out */}
+                        {atAgent(job.id) ? (
+                          <button
+                            onClick={() => handleReturnFromAgent(job)}
+                            title={`At ${atAgent(job.id)?.agentName ?? "an agent"} — click when it comes back`}
+                            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, background: "rgba(167,139,250,0.12)", border: "1px solid rgba(167,139,250,0.35)", color: "#a78bfa", cursor: "pointer", fontFamily: ff, whiteSpace: "nowrap" }}
+                          >
+                            <Building2 size={11} /> Back from agent
+                          </button>
+                        ) : ["Non-Issued", "Issued", "Pending"].includes(job.status) && (
+                          <button onClick={() => setTransferJob(job)} title="Transfer to external repair agent" style={{ padding: "5px 7px", borderRadius: 7, background: "none", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" }}>
+                            <Building2 size={13} />
+                          </button>
+                        )}
                         {/* Escalation */}
                         {!["Completed", "Delivered", "Cancelled"].includes(job.status) && (
                           <button onClick={() => setEscalationJob(job)} title={escalations.some(e => e.jobId === job.id && !e.resolved) ? "Active escalation" : "Raise escalation"} style={{ padding: "5px 7px", borderRadius: 7, background: escalations.some(e => e.jobId === job.id && !e.resolved) ? "rgba(248,113,113,0.1)" : "none", border: `1px solid ${escalations.some(e => e.jobId === job.id && !e.resolved) ? "rgba(248,113,113,0.3)" : "var(--border)"}`, color: escalations.some(e => e.jobId === job.id && !e.resolved) ? "#f87171" : "var(--text-muted)", cursor: "pointer" }}>
                             <AlertOctagon size={13} />
                           </button>
                         )}
+                        </>}
                         <button onClick={() => setDetailJobId(job.id)} title="View details" style={{ padding: "5px 7px", borderRadius: 7, background: "none", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" }}>
                           <MoreVertical size={13} />
                         </button>
@@ -673,6 +821,28 @@ export default function MyJobs() {
         <CustomerMessageModal
           job={messageJob}
           onClose={() => setMessageJob(null)}
+        />
+      )}
+
+      {/* Send the device out to an external repair agent */}
+      {transferJob && (
+        <TransferAgentModal
+          job={transferJob}
+          technicianName={technicianName}
+          onClose={() => setTransferJob(null)}
+          onTransferred={(agentName, reason) => {
+            // The job stays with this technician but parks as Paused while the
+            // device is out of the shop, so the counter can see where it is.
+            updateJob(transferJob.id, {
+              status: "Pending",
+              pauseReason: `At external agent: ${agentName} — ${reason}`,
+              pausedAt: new Date().toISOString().slice(0, 10),
+            });
+            setClaimNotice({
+              kind: "ok",
+              text: `${transferJob.id} sent to ${agentName}. It stays in your queue as Paused until it comes back.`,
+            });
+          }}
         />
       )}
 

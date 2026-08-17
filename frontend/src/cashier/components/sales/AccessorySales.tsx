@@ -40,18 +40,7 @@ interface CustomerInfo {
 
 // ─── Sample Data ──────────────────────────────────────────────────────────────
 
-const INITIAL_PRODUCTS: Product[] = [
-  { id: 1,  name: "Tempered Glass",    model: "Universal 6.5\"",    brand: "OG Shield",  supplier: "Tech Supplies PVT",     category: "Screen Protector", insight: "Best seller this week",    sellingPrice: 350,  buyingPrice: 180,  stock: 45 },
-  { id: 2,  name: "Phone Case",        model: "iPhone 15 Pro Max",  brand: "Spigen",     supplier: "Mobile Accessories LK", category: "Case",             insight: "Low stock — reorder soon", sellingPrice: 1200, buyingPrice: 650,  stock: 12 },
-  { id: 3,  name: "USB-C Charger",     model: "65W GaN",            brand: "Anker",      supplier: "Tech Supplies PVT",     category: "Charger",          insight: "High margin item",         sellingPrice: 2800, buyingPrice: 1800, stock: 8  },
-  { id: 4,  name: "Wireless Earbuds",  model: "TWS Pro",            brand: "Xiaomi",     supplier: "Digital Zone",          category: "Audio",            insight: "Popular among students",   sellingPrice: 3500, buyingPrice: 2100, stock: 20 },
-  { id: 5,  name: "USB-C Cable",       model: "1m Braided",         brand: "Baseus",     supplier: "Mobile Accessories LK", category: "Cable",            insight: "Frequently bought with chargers", sellingPrice: 450, buyingPrice: 220, stock: 60 },
-  { id: 6,  name: "Power Bank",        model: "20000mAh",           brand: "Romoss",     supplier: "Tech Supplies PVT",     category: "Power",            insight: "Top revenue contributor",  sellingPrice: 4200, buyingPrice: 2800, stock: 5  },
-  { id: 7,  name: "Selfie Stick",      model: "Bluetooth",          brand: "No Brand",   supplier: "Local Import",          category: "Accessory",        insight: "Slow mover — discount?",   sellingPrice: 650,  buyingPrice: 300,  stock: 18 },
-  { id: 8,  name: "Back Cover",        model: "Samsung A55",        brand: "OEM",        supplier: "Local Import",          category: "Case",             insight: "Good fit with Galaxy range", sellingPrice: 250, buyingPrice: 120,  stock: 30 },
-  { id: 9,  name: "Ring Light",        model: "10\" LED",           brand: "Ulanzi",     supplier: "Digital Zone",          category: "Accessory",        insight: "Growing demand",           sellingPrice: 2200, buyingPrice: 1300, stock: 7  },
-  { id: 10, name: "Screen Protector",  model: "Privacy Film",       brand: "ZAGG",       supplier: "Tech Supplies PVT",     category: "Screen Protector", insight: "Premium segment buyer",    sellingPrice: 800,  buyingPrice: 420,  stock: 22 },
-];
+const INITIAL_PRODUCTS: Product[] = [];
 
 // ─── Shared Styles ────────────────────────────────────────────────────────────
 

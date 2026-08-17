@@ -2,7 +2,8 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef, ReactNode, type Dispatch, type SetStateAction } from "react";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
-import { fetchJobs, fetchDealers, insertJob, patchJob, upsertDealer, deleteDealer } from "@/lib/repair/api";
+import { notifyJobEvent } from "@/lib/sms/notify";
+import { fetchJobs, fetchDealers, insertJob, patchJob, upsertDealer, deleteDealer, claimJob as claimJobRow, UNASSIGNED_TECHNICIAN } from "@/lib/repair/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,8 @@ export interface RepairJob {
   modelNumber?: string;          // device model number (e.g. M2006C3LMG) — maps to model
   jobWarranty?: string;          // @deprecated — superseded by WarrantyContext (warrantyId)
   warrantyId?: string;           // FK into WarrantyContext
+  /** How the current technician got the job — drives repair_assignments.assignment_type. */
+  assignmentSource?: "Assigned" | "Self-Taken";
   dealer?: string;               // dealer name as recorded at intake (printed on slips)
   dealerId?: number;             // FK into the managed dealer registry
   cancelReason?: string;
@@ -113,27 +116,10 @@ export interface RepairDealer {
   inHouse?: boolean;
 }
 
-// ─── Seed Data ────────────────────────────────────────────────────────────────
-
-export const INITIAL_JOBS: RepairJob[] = [
-  { id: "RM-001", customerName: "Kasun Perera",       phone: "+94 77 123 4567", brand: "Apple",   model: "iPhone 14 Pro",  issue: "Screen Damage",  technician: "Kamal",  status: "Non-Issued", priority: "High",   estimatedCost: 25000, advancePaid: 5000,  createdAt: "2025-04-20", estimatedCompletion: "2025-04-22", imei: "351988100241349", dealer: "MANO MOBILE CENTRE", dealerId: 5, receivedItems: ["SIM Card", "Charger"] },
-  { id: "RM-002", customerName: "Nimali Silva",        phone: "+94 71 234 5678", brand: "Samsung", model: "Galaxy S23",      issue: "Battery",        technician: "Nimal",  status: "Issued",     priority: "Normal", estimatedCost: 8000,  advancePaid: 2000,  createdAt: "2025-04-21", estimatedCompletion: "2025-04-23", startedAt: "2025-04-21", imei: "354668771114184", dealer: "MANO MOBILE CENTRE", dealerId: 5, receivedItems: ["Back Cover"] },
-  { id: "RM-003", customerName: "Roshan Fernando",     phone: "+94 76 345 6789", brand: "Xiaomi",  model: "Redmi Note 12",  issue: "Charging Port",  technician: "Suresh", status: "Pending",    priority: "Urgent", estimatedCost: 4500,  advancePaid: 1000,  createdAt: "2025-04-19", estimatedCompletion: "2025-04-21", startedAt: "2025-04-19", imei: "354682282577565", dealer: "MANO MOBILE CENTRE", dealerId: 5, pauseReason: "Waiting for charging-port module to arrive", pausedAt: "2025-04-20" },
-  { id: "RM-004", customerName: "Dilini Rajapaksa",    phone: "+94 70 456 7890", brand: "Apple",   model: "iPhone 13",      issue: "Camera",         technician: "Kamal",  status: "Completed",  priority: "Normal", estimatedCost: 15000, advancePaid: 15000, createdAt: "2025-04-18", estimatedCompletion: "2025-04-20", startedAt: "2025-04-19", completedAt: "2025-04-20", imei: "356822002345678", jobWarranty: "3 MONTHS WARRANTY [NORMAL]", dealer: "MANO MOBILE CENTRE", dealerId: 5, partsUsed: ["iPhone 13 Rear Camera Module"], techRemarks: "Replaced rear camera module, recalibrated, tested all lenses OK.", futureFaults: "Battery health at 82% — may need replacement within 6 months." },
-  { id: "RM-005", customerName: "Pradeep Jayawardena", phone: "+94 75 567 8901", brand: "Oppo",    model: "Reno 8",         issue: "Speaker / Mic",  technician: "Nimal",  status: "Non-Issued", priority: "Low",    estimatedCost: 3000,  advancePaid: 0,     createdAt: "2025-04-22", estimatedCompletion: "2025-04-25", dealer: "MANO MOBILE CENTRE", dealerId: 5 },
-  { id: "RM-006", customerName: "Samantha Bandara",    phone: "+94 78 678 9012", brand: "Samsung", model: "Galaxy A54",     issue: "Water Damage",   technician: "Suresh", status: "Issued",     priority: "High",   estimatedCost: 12000, advancePaid: 3000,  createdAt: "2025-04-21", estimatedCompletion: "2025-04-24", startedAt: "2025-04-22", imei: "864562049583598", dealer: "MANO MOBILE CENTRE", dealerId: 5 },
-  { id: "RM-007", customerName: "Chamara Wijesinghe",  phone: "+94 72 789 0123", brand: "Huawei",  model: "P30 Pro",        issue: "Software",       technician: "Kamal",  status: "Pending",    priority: "Normal", estimatedCost: 5000,  advancePaid: 2000,  createdAt: "2025-04-20", estimatedCompletion: "2025-04-22", startedAt: "2025-04-20", pauseReason: "Awaiting customer approval for extra cost", pausedAt: "2025-04-21", dealer: "MANO MOBILE CENTRE", dealerId: 5 },
-  { id: "RM-008", customerName: "Isuru Madushanka",    phone: "+94 74 890 1234", brand: "OnePlus", model: "Nord 3",         issue: "Back Glass",     technician: "Nimal",  status: "Delivered",  priority: "Low",    estimatedCost: 6000,  advancePaid: 6000,  createdAt: "2025-04-17", estimatedCompletion: "2025-04-19", startedAt: "2025-04-17", completedAt: "2025-04-19", imei: "860123456789012", jobWarranty: "1 MONTH WARRANTY [NORMAL]", dealer: "MANO MOBILE CENTRE", dealerId: 5, partsUsed: ["Back Glass Panel"], techRemarks: "Replaced back glass, cleaned frame, pressure-tested.", handover: { collectedBy: "Isuru Madushanka", relationship: "Owner", idVerified: true, balanceSettled: 0, paymentMethod: "Cash", handoverSignature: "", warrantyCardIssued: true, handedOverBy: "Cashier", handedOverAt: "2025-04-20" } },
-  { id: "RM-009", customerName: "Malini Dissanayake",  phone: "+94 76 901 2345", brand: "Apple",   model: "iPhone 12",      issue: "Battery Drain",  technician: "Suresh", status: "Cancelled",  priority: "Normal", estimatedCost: 9500,  advancePaid: 0,     createdAt: "2025-04-16", estimatedCompletion: "2025-04-18", dealer: "MANO MOBILE CENTRE", dealerId: 5, cancelReason: "Customer cancelled — no budget", cancelledAt: "2025-04-17", cancelledBy: "Customer (Malini Dissanayake)" },
-];
-
-export const INITIAL_DEALERS: RepairDealer[] = [
-  { id: 5, name: "MANO MOBILE CENTRE", address: "", contact: "", joinedAt: "2018-01-01", remarks: "In-house — walk-in customers", inHouse: true },
-  { id: 1, name: "Tech Hub Colombo",    address: "123 Galle Road, Colombo 03", contact: "+94 11 234 5678", joinedAt: "2019-03-12", remarks: "Primary dealer — 15% discount" },
-  { id: 2, name: "Mobile World Kandy",  address: "45 Peradeniya Rd, Kandy",    contact: "+94 81 223 4567", joinedAt: "2021-07-05", remarks: "Wholesale partner" },
-  { id: 3, name: "Digital Zone Negombo", address: "78 Sea Street, Negombo",    contact: "+94 31 222 3344", joinedAt: "2024-11-18", remarks: "New dealer — verify identity" },
-  { id: 4, name: "Smart Phones Galle",  address: "12 Hospital Rd, Galle",      contact: "+94 91 224 5566", joinedAt: "2019-08-30", remarks: "Trusted dealer since 2019" },
-];
+// ─── No seed data ─────────────────────────────────────────────────────────────
+// Jobs and dealers come from Supabase only. The demo records that used to live
+// here were removed so nothing fictional can ever appear in the system; with no
+// backend configured the lists are simply empty and the UI says so.
 
 /** The shop's own name — used when a job carries no dealer at all. */
 export const IN_HOUSE_DEALER = "MANO MOBILE CENTRE";
@@ -241,11 +227,31 @@ export const VIEW_META: Record<Exclude<RepairView, "All">, { color: string; bg: 
   "Cancelled":   { color: "#f87171", bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.2)" },
 };
 
+export { UNASSIGNED_TECHNICIAN };
+
+/**
+ * A job nobody has taken on yet. These are offered to every technician until
+ * one of them starts it — see claimJob.
+ */
+export function isUnassigned(job: RepairJob): boolean {
+  const t = (job.technician ?? "").trim();
+  return t === "" || t.toLowerCase() === UNASSIGNED_TECHNICIAN.toLowerCase();
+}
+
+/** A job any technician is allowed to pick up right now. */
+export function isClaimable(job: RepairJob): boolean {
+  return isUnassigned(job) && job.status === "Non-Issued";
+}
+
+export type ClaimResult = "claimed" | "taken" | "error";
+
 interface RepairContextValue {
   jobs: RepairJob[];
   /** Resolves with the saved job — the job number is assigned by the database. */
   addJob: (partial: Omit<RepairJob, "id">) => Promise<RepairJob>;
   updateJob: (id: string, changes: Partial<RepairJob>) => void;
+  /** Take an unassigned job. "taken" means another technician got it first. */
+  claimJob: (id: string, technician: string) => Promise<ClaimResult>;
   dealers: RepairDealer[];
   setDealers: Dispatch<SetStateAction<RepairDealer[]>>;
   /** True while the first load is in flight. */
@@ -259,10 +265,11 @@ interface RepairContextValue {
 }
 
 const RepairContext = createContext<RepairContextValue>({
-  jobs: INITIAL_JOBS,
+  jobs: [],
   addJob: async () => ({} as RepairJob),
   updateJob: () => {},
-  dealers: INITIAL_DEALERS,
+  claimJob: async () => "error",
+  dealers: [],
   setDealers: () => {},
   loading: false,
   error: null,
@@ -294,8 +301,8 @@ function nextJobId(jobs: RepairJob[]): string {
 export function RepairProvider({ children }: { children: ReactNode }) {
   const configured = isSupabaseConfigured();
 
-  const [jobs, setJobs] = useState<RepairJob[]>(configured ? [] : INITIAL_JOBS);
-  const [dealers, setDealersState] = useState<RepairDealer[]>(configured ? [] : INITIAL_DEALERS);
+  const [jobs, setJobs] = useState<RepairJob[]>([]);
+  const [dealers, setDealersState] = useState<RepairDealer[]>([]);
   const [loading, setLoading] = useState(configured);
   const [error, setError] = useState<string | null>(null);
 
@@ -335,6 +342,8 @@ export function RepairProvider({ children }: { children: ReactNode }) {
     }
     const created = await insertJob(partial);
     setJobs(prev => [created, ...prev]);
+    // "We have your device, here is the job number."
+    notifyJobEvent("created", created);
     return created;
   }, [configured, jobs]);
 
@@ -344,6 +353,18 @@ export function RepairProvider({ children }: { children: ReactNode }) {
    * never quietly show a change that was rejected by RLS.
    */
   const updateJob = useCallback((id: string, changes: Partial<RepairJob>) => {
+    // Notify from the transition, not from the caller: every screen that moves a
+    // job goes through here, so the customer hears about it however it happened.
+    // Comparing against the previous status also stops a repeated save from
+    // texting twice.
+    const before = jobs.find(j => j.id === id);
+    if (before && changes.status && changes.status !== before.status) {
+      const after: RepairJob = { ...before, ...changes };
+      if (changes.status === "Issued" && before.status === "Non-Issued") notifyJobEvent("started", after);
+      else if (changes.status === "Pending") notifyJobEvent("paused", after);
+      else if (changes.status === "Completed") notifyJobEvent("finished", after);
+    }
+
     setJobs(prev => prev.map(j => (j.id === id ? { ...j, ...changes } : j)));
     if (!configured) return;
 
@@ -353,7 +374,44 @@ export function RepairProvider({ children }: { children: ReactNode }) {
         setError(e instanceof Error ? e.message : String(e));
         void load();
       });
-  }, [configured, load]);
+  }, [configured, load, jobs]);
+
+  /**
+   * Take an unassigned job. The database decides the winner (the update is
+   * conditional on the job still being unassigned), so a race between two
+   * technicians has exactly one winner rather than the later click silently
+   * overwriting the earlier one.
+   */
+  const claimJob = useCallback(async (id: string, technician: string): Promise<ClaimResult> => {
+    if (!configured) {
+      // Same rule locally: only claim if it is still free.
+      const current = jobs.find(j => j.id === id);
+      if (!current || !isClaimable(current)) return "taken";
+      setJobs(prev => prev.map(j => (
+        j.id === id && isClaimable(j)
+          ? { ...j, technician, status: "Issued" as JobStatus, startedAt: new Date().toISOString().slice(0, 10) }
+          : j
+      )));
+      return "claimed";
+    }
+
+    try {
+      const claimed = await claimJobRow(id, technician);
+      if (!claimed) {
+        // Somebody beat us to it — refresh so the row shows its real owner.
+        await load();
+        return "taken";
+      }
+      setJobs(prev => prev.map(j => (j.id === id ? claimed : j)));
+      // Claiming *is* starting the repair, and it bypasses updateJob — so the
+      // customer would otherwise never hear that work began.
+      notifyJobEvent("started", claimed);
+      return "claimed";
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return "error";
+    }
+  }, [configured, jobs, load]);
 
   /**
    * Accepts a value or an updater, like useState, and works out what changed so
@@ -390,10 +448,10 @@ export function RepairProvider({ children }: { children: ReactNode }) {
   }, [configured]);
 
   const value = useMemo<RepairContextValue>(() => ({
-    jobs, addJob, updateJob, dealers, setDealers,
+    jobs, addJob, updateJob, claimJob, dealers, setDealers,
     loading, error, refresh: load,
     backend: configured ? "supabase" : "local",
-  }), [jobs, addJob, updateJob, dealers, setDealers, loading, error, load, configured]);
+  }), [jobs, addJob, updateJob, claimJob, dealers, setDealers, loading, error, load, configured]);
 
   return <RepairContext.Provider value={value}>{children}</RepairContext.Provider>;
 }

@@ -18,13 +18,7 @@ export interface POSCreditCustomer {
   status: "Active" | "Overdue" | "Settled";
 }
 
-export const INITIAL_POS_CREDIT_CUSTOMERS: POSCreditCustomer[] = [
-  { id: "CC-001", name: "Kasun Perera",       phone: "+94 77 123 4567", nic: "942341567V",  email: "kasun@email.com",   address: "45 Galle Rd, Colombo 3",       maxCredit: 30000,  balance: 15000, status: "Active"  },
-  { id: "CC-002", name: "Roshan Fernando",     phone: "+94 76 345 6789", nic: "900234789V",  email: "",                  address: "7 Main St, Negombo",           maxCredit: 10000,  balance: 3500,  status: "Overdue" },
-  { id: "CC-003", name: "Chamara Wijesinghe",  phone: "+94 72 789 0123", nic: "881122334V",  email: "chamara@mail.com",  address: "3 Baudhaloka Mw, Colombo 7",   maxCredit: 8000,   balance: 3000,  status: "Active"  },
-  { id: "CC-004", name: "Samantha Bandara",    phone: "+94 78 678 9012", nic: "955678901V",  email: "sam@email.com",     address: "14 Lake Dr, Kandy",            maxCredit: 15000,  balance: 0,     status: "Settled" },
-  { id: "CC-005", name: "Pradeep Jayawardena", phone: "+94 75 567 8901", nic: "870456123V",  email: "",                  address: "88 Baseline Rd, Colombo 9",    maxCredit: 5000,   balance: 3000,  status: "Overdue" },
-];
+export const INITIAL_POS_CREDIT_CUSTOMERS: POSCreditCustomer[] = [];
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 

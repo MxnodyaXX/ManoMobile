@@ -32,25 +32,7 @@ interface Quote {
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 
-const SEED_QUOTES: Quote[] = [
-  {
-    id: "q1", quoteNo: "QT-001", date: "2026-05-18", validUntil: "2026-05-25",
-    customer: "Ranil Perera", phone: "+94 77 111 2222",
-    status: "Active", notes: "Customer to confirm by Friday",
-    items: [
-      { id: "i1", description: "Samsung Galaxy S25 128GB (Phantom Black)", qty: 1, unitPrice: 165000, discount: 0 },
-      { id: "i2", description: "Spigen Case + Baseus Tempered Glass",       qty: 1, unitPrice: 2400,   discount: 10 },
-    ],
-  },
-  {
-    id: "q2", quoteNo: "QT-002", date: "2026-05-15", validUntil: "2026-05-22",
-    customer: "Shirani Fernando", phone: "+94 71 333 4444",
-    status: "Expired", notes: "",
-    items: [
-      { id: "i3", description: "iPhone 15 Pro 256GB", qty: 1, unitPrice: 205000, discount: 0 },
-    ],
-  },
-];
+const SEED_QUOTES: Quote[] = [];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

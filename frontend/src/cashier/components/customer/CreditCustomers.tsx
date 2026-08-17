@@ -52,63 +52,7 @@ interface CreditCustomer {
 
 // ─── Mock Data ────────────────────────────────────────────────────────────────
 
-const INITIAL_CREDIT: CreditCustomer[] = [
-  {
-    id: "CC-001", name: "Kasun Perera", phone: "+94 77 123 4567", nic: "942341567V", email: "kasun@email.com", address: "45 Galle Rd, Colombo 3",
-    maxCredit: 30000, totalInvoiced: 25000, totalPaid: 10000, balance: 15000,
-    creditSince: "2025-04-22", approvedBy: "ADMIN", status: "Active",
-    entries: [
-      { invoiceNo: "0012345678", jobId: "RM-001", device: "Apple iPhone 14 Pro", date: "2025-04-22", invoiced: 25000, paid: 10000, due: 15000 },
-    ],
-    payments: [
-      { id: "P1", date: "2025-04-22", amount: 5000, method: "Cash", note: "Initial advance", recordedBy: "ADMIN" },
-      { id: "P2", date: "2025-04-25", amount: 5000, method: "Bank Transfer", note: "Partial payment", recordedBy: "ADMIN" },
-    ],
-  },
-  {
-    id: "CC-002", name: "Roshan Fernando", phone: "+94 76 345 6789", nic: "900234789V", email: "", address: "7 Main St, Negombo",
-    maxCredit: 10000, totalInvoiced: 4500, totalPaid: 1000, balance: 3500,
-    creditSince: "2025-03-15", approvedBy: "MANAGER", status: "Overdue",
-    entries: [
-      { invoiceNo: "0023456789", jobId: "RM-003", device: "Xiaomi Redmi Note 12", date: "2025-03-15", invoiced: 4500, paid: 1000, due: 3500 },
-    ],
-    payments: [
-      { id: "P1", date: "2025-03-15", amount: 1000, method: "Cash", note: "Advance on collection", recordedBy: "MANAGER" },
-    ],
-  },
-  {
-    id: "CC-003", name: "Chamara Wijesinghe", phone: "+94 72 789 0123", nic: "881122334V", email: "chamara@mail.com", address: "3 Baudhaloka Mw, Colombo 7",
-    maxCredit: 8000, totalInvoiced: 5000, totalPaid: 2000, balance: 3000,
-    creditSince: "2025-04-20", approvedBy: "ADMIN", status: "Active",
-    entries: [
-      { invoiceNo: "0034567890", jobId: "RM-007", device: "Huawei P30 Pro", date: "2025-04-20", invoiced: 5000, paid: 2000, due: 3000 },
-    ],
-    payments: [
-      { id: "P1", date: "2025-04-20", amount: 2000, method: "Cash", note: "", recordedBy: "ADMIN" },
-    ],
-  },
-  {
-    id: "CC-004", name: "Samantha Bandara", phone: "+94 78 678 9012", nic: "955678901V", email: "sam@email.com", address: "14 Lake Dr, Kandy",
-    maxCredit: 15000, totalInvoiced: 12000, totalPaid: 12000, balance: 0,
-    creditSince: "2025-04-10", approvedBy: "ADMIN", status: "Settled",
-    entries: [
-      { invoiceNo: "0045678901", jobId: "RM-006", device: "Samsung Galaxy A54", date: "2025-04-10", invoiced: 12000, paid: 12000, due: 0 },
-    ],
-    payments: [
-      { id: "P1", date: "2025-04-10", amount: 3000, method: "Cash", note: "Advance", recordedBy: "ADMIN" },
-      { id: "P2", date: "2025-04-18", amount: 9000, method: "Bank Transfer", note: "Final settlement", recordedBy: "ADMIN" },
-    ],
-  },
-  {
-    id: "CC-005", name: "Pradeep Jayawardena", phone: "+94 75 567 8901", nic: "870456123V", email: "", address: "88 Baseline Rd, Colombo 9",
-    maxCredit: 5000, totalInvoiced: 3000, totalPaid: 0, balance: 3000,
-    creditSince: "2025-02-28", approvedBy: "MANAGER", status: "Overdue",
-    entries: [
-      { invoiceNo: "0056789012", jobId: "RM-005", device: "Oppo Reno 8", date: "2025-02-28", invoiced: 3000, paid: 0, due: 3000 },
-    ],
-    payments: [],
-  },
-];
+const INITIAL_CREDIT: CreditCustomer[] = [];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

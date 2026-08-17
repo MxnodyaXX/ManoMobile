@@ -85,32 +85,7 @@ export function daysRemaining(w: Warranty): number | null {
 const now = Date.now();
 const iso = (offsetDays: number) => new Date(now + offsetDays * 86_400_000).toISOString();
 
-const SEED_WARRANTIES: Warranty[] = [
-  {
-    id: "WR-0001", jobId: "RM-004", invoiceNo: "INV-R-0044",
-    customerName: "Dilini Rajapaksa", customerPhone: "+94 70 456 7890",
-    deviceModel: "Apple iPhone 13", imei: "356822002345678",
-    partsCovered: ["iPhone 13 Rear Camera Module"], scope: "Parts & Labour",
-    durationDays: 90, issuedAt: iso(-25), startsAt: iso(-24), expiresAt: iso(66),
-    status: "Active", exclusions: DEFAULT_EXCLUSIONS,
-  },
-  {
-    id: "WR-0002", jobId: "RM-008", invoiceNo: "INV-R-0081",
-    customerName: "Isuru Madushanka", customerPhone: "+94 74 890 1234",
-    deviceModel: "OnePlus Nord 3", imei: "860123456789012",
-    partsCovered: ["Back Glass Panel"], scope: "Parts Only",
-    durationDays: 30, issuedAt: iso(-28), startsAt: iso(-27), expiresAt: iso(3),
-    status: "Active", exclusions: DEFAULT_EXCLUSIONS,
-  },
-  {
-    id: "WR-0003", jobId: "RM-101", invoiceNo: "INV-R-0101",
-    customerName: "Chathura Bandara", customerPhone: "+94 77 555 1212",
-    deviceModel: "Samsung Galaxy S22", imei: "353091104567821",
-    partsCovered: ["Battery", "Charging Port"], scope: "Parts & Labour",
-    durationDays: 90, issuedAt: iso(-120), startsAt: iso(-119), expiresAt: iso(-29),
-    status: "Active", exclusions: DEFAULT_EXCLUSIONS, // will auto-show as Expired
-  },
-];
+const SEED_WARRANTIES: Warranty[] = [];
 
 const SEED_CLAIMS: WarrantyClaim[] = [];
 

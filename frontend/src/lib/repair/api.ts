@@ -20,6 +20,9 @@ import type {
 
 const INTAKE_BUCKET = "repair-intake";
 
+/** What the technician column holds until somebody takes the job on. */
+export const UNASSIGNED_TECHNICIAN = "Unassigned";
+
 // ─── Row shapes ──────────────────────────────────────────────────────────────
 
 interface JobRow {
@@ -143,6 +146,7 @@ export function jobToRow(job: Partial<RepairJob>): Record<string, unknown> {
   set("imei", job.imei);
   set("issue", job.issue);
   set("technician", job.technician);
+  set("assignment_source", job.assignmentSource);
   set("status", job.status);
   set("priority", job.priority);
   set("estimated_cost", job.estimatedCost);
@@ -235,6 +239,37 @@ export async function patchJob(id: string, changes: Partial<RepairJob>): Promise
 
   if (error) throw new Error(`Could not update ${id}: ${error.message}`);
   return rowToJob(data as JobRow);
+}
+
+/**
+ * Claim an unassigned job for a technician.
+ *
+ * The `.eq("technician", UNASSIGNED)` guard is the whole point: it makes the
+ * update conditional inside a single SQL statement, so when two technicians tap
+ * Start on the same job at the same moment, Postgres lets exactly one through.
+ * The loser gets zero rows back and is told the job is taken — no last-write-wins.
+ *
+ * Returns the claimed job, or null if somebody else got there first.
+ */
+export async function claimJob(id: string, technician: string): Promise<RepairJob | null> {
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("repair_jobs")
+    .update({
+      technician,
+      status: "Issued",
+      started_at: new Date().toISOString(),
+      // Recorded explicitly so repair_assignments.assignment_type says
+      // "Self-Taken" rather than the trigger having to infer it.
+      assignment_source: "Self-Taken",
+    })
+    .eq("id", id)
+    .eq("technician", UNASSIGNED_TECHNICIAN)
+    .eq("status", "Non-Issued")
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw new Error(`Could not start ${id}: ${error.message}`);
+  return data ? rowToJob(data as JobRow) : null;
 }
 
 export async function upsertDealer(dealer: Partial<RepairDealer> & { name: string }): Promise<RepairDealer> {

@@ -85,62 +85,19 @@ function ReportFilters({
 function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const categoryData = [
-    { name: "Mobile",      revenue: 85000, transactions: 3  },
-    { name: "Accessories", revenue: 16400, transactions: 9  },
-    { name: "Repair",      revenue: 43800, transactions: 11 },
-    { name: "Others",      revenue: 5400,  transactions: 4  },
-  ];
+  const categoryData: { name: string; revenue: number; transactions: number }[] = [];
 
-  const hourlyData = [
-    { time: "9 AM",  revenue: 8200  },
-    { time: "10 AM", revenue: 14500 },
-    { time: "11 AM", revenue: 22800 },
-    { time: "12 PM", revenue: 18900 },
-    { time: "1 PM",  revenue: 31200 },
-    { time: "2 PM",  revenue: 28400 },
-    { time: "3 PM",  revenue: 19600 },
-    { time: "4 PM",  revenue: 24100 },
-    { time: "5 PM",  revenue: 13500 },
-  ];
+  const hourlyData: { time: string; revenue: number }[] = [];
 
-  const comparisonData = [
-    { time: "9 AM",  today: 8200,  yesterday: 6400  },
-    { time: "10 AM", today: 14500, yesterday: 11200 },
-    { time: "11 AM", today: 22800, yesterday: 19500 },
-    { time: "12 PM", today: 18900, yesterday: 16200 },
-    { time: "1 PM",  today: 31200, yesterday: 24800 },
-    { time: "2 PM",  today: 28400, yesterday: 22100 },
-    { time: "3 PM",  today: 19600, yesterday: 17300 },
-    { time: "4 PM",  today: 24100, yesterday: 19600 },
-    { time: "5 PM",  today: 13500, yesterday: 11800 },
-  ];
+  const comparisonData: { time: string; today: number; yesterday: number }[] = [];
 
-  const cashFlowData = [
-    { label: "Opening", cashIn: 5000,  cashOut: 0,    running: 5000   },
-    { label: "Sales",   cashIn: 58200, cashOut: 0,    running: 63200  },
-    { label: "Repairs", cashIn: 43800, cashOut: 0,    running: 107000 },
-    { label: "Refunds", cashIn: 0,     cashOut: 2100, running: 104900 },
-    { label: "Petty",   cashIn: 0,     cashOut: 1500, running: 103400 },
-  ];
+  const cashFlowData: { label: string; cashIn: number; cashOut: number; running: number }[] = [];
 
-  const cashRows = [
-    { label: "Opening Float",        amount: 5000,   type: "neutral" as const },
-    { label: "Cash Sales",           amount: 58200,  type: "in" as const },
-    { label: "Cash Repair Payments", amount: 43800,  type: "in" as const },
-    { label: "Cash Refunds Issued",  amount: -2100,  type: "out" as const },
-    { label: "Petty Cash Withdrawn", amount: -1500,  type: "out" as const },
-    { label: "Expected Closing",     amount: 103400, type: "neutral" as const },
-    { label: "Actual Closing",       amount: 103200, type: "neutral" as const },
-  ];
+  const cashRows: { label: string; amount: number; type: string }[] = [];
 
   const variance: number = -200;
   const totalRevenue = 181200;
-  const paymentMethods = [
-    { method: "Cash",          amount: 102000, pct: 56, color: "#4ade80" },
-    { method: "Card",          amount: 54600,  pct: 30, color: "#60a5fa" },
-    { method: "Bank Transfer", amount: 24600,  pct: 14, color: "#a78bfa" },
-  ];
+  const paymentMethods: { method: string; amount: number; pct: number; color: string }[] = [];
   const drFilename = `daily-report-${dateFrom}`;
 
   const buildSections = () => [
@@ -185,29 +142,14 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
   const statIcons  = [DollarSign, FileText, DollarSign, variance < 0 ? TrendingDown : TrendingUp];
   const statColors = ["#4ade80", "#60a5fa", "#fbbf24", variance < 0 ? "#f87171" : "#4ade80"];
 
-  const topItemsToday = [
-    { item: "Samsung A15",    category: "Mobile",      revenue: 62500 },
-    { item: "Redmi Note 13",  category: "Mobile",      revenue: 38000 },
-    { item: "iPhone Screen",  category: "Repair",      revenue: 9500  },
-    { item: "Type-C Charger", category: "Accessories", revenue: 5200  },
-    { item: "Screen Prot.",   category: "Accessories", revenue: 4200  },
-  ];
+  const topItemsToday: { item: string; category: string; revenue: number }[] = [];
   const itemCatColors: Record<string, string> = {
     Mobile: "#a78bfa", Repair: "#34d399", Accessories: "#60a5fa", Others: "#94a3b8",
   };
 
-  const customerData = [
-    { type: "Returning",   count: 18, pct: 67, color: "#6355ff" },
-    { type: "New Walk-in", count: 9,  pct: 33, color: "#60a5fa" },
-  ];
+  const customerData: { type: string; count: number; pct: number; color: string }[] = [];
 
-  const txnVolumeData = [
-    { time: "9 AM",  txn: 2 }, { time: "10 AM", txn: 4 },
-    { time: "11 AM", txn: 6 }, { time: "12 PM", txn: 3 },
-    { time: "1 PM",  txn: 8 }, { time: "2 PM",  txn: 5 },
-    { time: "3 PM",  txn: 3 }, { time: "4 PM",  txn: 6 },
-    { time: "5 PM",  txn: 2 },
-  ];
+  const txnVolumeData: { time: string; txn: number }[] = [];
 
   return (
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -526,31 +468,11 @@ onPng={() => {
 function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const products = [
-    { name: "Samsung A15",    category: "Mobile",      qty: 2,  revenue: 85000 },
-    { name: "Redmi Note 13",  category: "Mobile",      qty: 1,  revenue: 38000 },
-    { name: "Type-C Charger", category: "Accessories", qty: 8,  revenue: 5200  },
-    { name: "Screen Prot.",   category: "Accessories", qty: 12, revenue: 4200  },
-    { name: "Memory Card",    category: "Others",      qty: 3,  revenue: 4800  },
-    { name: "Photocopy",      category: "Others",      qty: 40, revenue: 600   },
-  ];
+  const products: { name: string; category: string; qty: number; revenue: number }[] = [];
 
-  const categoryData = [
-    { name: "Mobile",      revenue: 123000, transactions: 3  },
-    { name: "Accessories", revenue: 9400,   transactions: 20 },
-    { name: "Repair",      revenue: 43800,  transactions: 11 },
-    { name: "Others",      revenue: 5400,   transactions: 5  },
-  ];
+  const categoryData: { name: string; revenue: number; transactions: number }[] = [];
 
-  const trendData = [
-    { day: "Mon", revenue: 18200 },
-    { day: "Tue", revenue: 34500 },
-    { day: "Wed", revenue: 28900 },
-    { day: "Thu", revenue: 45200 },
-    { day: "Fri", revenue: 52100 },
-    { day: "Sat", revenue: 67800 },
-    { day: "Sun", revenue: 23400 },
-  ];
+  const trendData: { day: string; revenue: number }[] = [];
 
   const catColors: Record<string, string> = {
     Mobile: "#a78bfa", Accessories: "#60a5fa", Repair: "#34d399", Others: "#94a3b8",
@@ -567,63 +489,28 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
   const srFilename = `sales-report-${new Date().toISOString().slice(0, 10)}`;
   const totalRevSR = categoryData.reduce((a, c) => a + c.revenue, 0);
 
-  const brandData = [
-    { brand: "Samsung", revenue: 95000, units: 8  },
-    { brand: "Apple",   revenue: 72000, units: 3  },
-    { brand: "Oppo",    revenue: 38000, units: 5  },
-    { brand: "Redmi",   revenue: 21000, units: 4  },
-    { brand: "Others",  revenue: 9000,  units: 6  },
-  ];
+  const brandData: { brand: string; revenue: number; units: number }[] = [];
   const brandColors = ["#60a5fa", "#a78bfa", "#34d399", "#fbbf24", "#94a3b8"];
 
-  const supplierData = [
-    { name: "TechBridge PVT", revenue: 87000, items: 12, pct: 48, color: "#6355ff" },
-    { name: "Mobile Hub LK",  revenue: 54000, items: 8,  pct: 30, color: "#60a5fa" },
-    { name: "Lanka Dist.",    revenue: 28000, items: 6,  pct: 15, color: "#34d399" },
-    { name: "Direct Import",  revenue: 12600, items: 3,  pct: 7,  color: "#fbbf24" },
-  ];
+  const supplierData: { name: string; revenue: number; items: number; pct: number; color: string }[] = [];
 
   const [openAccs, setOpenAccs] = useState<Set<string>>(new Set(["Mobile"]));
   const toggleAcc = (id: string) =>
     setOpenAccs(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  const mobileItems = [
-    { model: "Samsung A15",   brand: "Samsung", units: 5, unitPrice: 12500, revenue: 62500 },
-    { model: "iPhone 14",     brand: "Apple",   units: 2, unitPrice: 18750, revenue: 37500 },
-    { model: "Redmi Note 13", brand: "Redmi",   units: 1, unitPrice: 15000, revenue: 15000 },
-    { model: "Oppo A57",      brand: "Oppo",    units: 1, unitPrice: 8000,  revenue: 8000  },
-  ];
+  const mobileItems: { model: string; brand: string; units: number; unitPrice: number; revenue: number }[] = [];
   const mobileTotal = mobileItems.reduce((a, b) => a + b.revenue, 0);
 
-  const accessoryItems = [
-    { item: "Type-C Charger", units: 8,  unitPrice: 450, revenue: 3600 },
-    { item: "Screen Prot.",   units: 12, unitPrice: 200, revenue: 2400 },
-    { item: "Earphones",      units: 5,  unitPrice: 600, revenue: 3000 },
-    { item: "Phone Case",     units: 5,  unitPrice: 80,  revenue: 400  },
-  ];
+  const accessoryItems: { item: string; units: number; unitPrice: number; revenue: number }[] = [];
   const accessoryTotal = accessoryItems.reduce((a, b) => a + b.revenue, 0);
 
-  const repairItems = [
-    { type: "Screen Replacement",  jobs: 5, avgCharge: 5000, parts: 11000, labor: 14000, revenue: 25000 },
-    { type: "Battery Replacement", jobs: 3, avgCharge: 3800, parts: 4500,  labor: 6900,  revenue: 11400 },
-    { type: "Charging Port",       jobs: 2, avgCharge: 3600, parts: 1600,  labor: 5600,  revenue: 7200  },
-    { type: "Water Damage",        jobs: 1, avgCharge: 200,  parts: 100,   labor: 100,   revenue: 200   },
-  ];
+  const repairItems: { type: string; jobs: number; avgCharge: number; parts: number; labor: number; revenue: number }[] = [];
   const repairTotal = repairItems.reduce((a, b) => a + b.revenue, 0);
 
-  const otherItems = [
-    { service: "Memory Card",     units: 3,  unitPrice: 1200, revenue: 3600 },
-    { service: "SIM Replacement", units: 2,  unitPrice: 700,  revenue: 1400 },
-    { service: "Photocopy",       units: 40, unitPrice: 10,   revenue: 400  },
-  ];
+  const otherItems: { service: string; units: number; unitPrice: number; revenue: number }[] = [];
   const otherTotal = otherItems.reduce((a, b) => a + b.revenue, 0);
 
-  const brandBarData = [
-    { brand: "Samsung", revenue: 62500, profit: 18750 },
-    { brand: "Apple",   revenue: 37500, profit: 11250 },
-    { brand: "Redmi",   revenue: 15000, profit: 4200  },
-    { brand: "Oppo",    revenue: 8000,  profit: 2080  },
-  ];
+  const brandBarData: { brand: string; revenue: number; profit: number }[] = [];
   const mobileTotalProfit = brandBarData.reduce((a, b) => a + b.profit, 0);
   const mobileBrandColors = ["#60a5fa", "#a78bfa", "#34d399", "#fbbf24"];
   const brandTooltipData: Record<string, { topItem: string; topItemUnits: number; topItemRevenue: number; topItemProfit: number }> = {
@@ -667,29 +554,12 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
   };
 
   const accItemLabels: Record<string, string> = { TypeC: "Type-C Charger", ScreenProt: "Screen Prot.", Earphones: "Earphones", PhoneCase: "Phone Case" };
-  const accTrendData = [
-    { day: "Mon", TypeC: 900,  ScreenProt: 400, Earphones: 600,  PhoneCase: 80  },
-    { day: "Tue", TypeC: 450,  ScreenProt: 600, Earphones: 1200, PhoneCase: 160 },
-    { day: "Wed", TypeC: 900,  ScreenProt: 400, Earphones: 600,  PhoneCase: 0   },
-    { day: "Thu", TypeC: 450,  ScreenProt: 400, Earphones: 600,  PhoneCase: 80  },
-    { day: "Fri", TypeC: 450,  ScreenProt: 200, Earphones: 0,    PhoneCase: 80  },
-    { day: "Sat", TypeC: 450,  ScreenProt: 200, Earphones: 0,    PhoneCase: 0   },
-    { day: "Sun", TypeC: 0,    ScreenProt: 200, Earphones: 0,    PhoneCase: 0   },
-  ];
-  const accSupplierData = [
-    { supplier: "Lanka Accessories", pct: 55, color: "#60a5fa" },
-    { supplier: "TechBridge PVT",    pct: 30, color: "#a78bfa" },
-    { supplier: "Direct Import",     pct: 15, color: "#34d399" },
-  ];
+  const accTrendData: { day: string; TypeC: number; ScreenProt: number; Earphones: number; PhoneCase: number }[] = [];
+  const accSupplierData: { supplier: string; pct: number; color: string }[] = [];
 
   const repairFaultData = repairItems.map(r => ({ fault: r.type, count: r.jobs }));
   const repairFaultColors = ["#6355ff", "#60a5fa", "#34d399", "#fbbf24"];
-  const repairBrandFreqData = [
-    { brand: "Samsung", count: 5 },
-    { brand: "Apple",   count: 3 },
-    { brand: "Oppo",    count: 2 },
-    { brand: "Redmi",   count: 1 },
-  ];
+  const repairBrandFreqData: { brand: string; count: number }[] = [];
   const repairBrandColors2 = ["#60a5fa", "#a78bfa", "#34d399", "#fbbf24"];
   const repairBrandModels: Record<string, Array<{ model: string; parts: number; labor: number; revenue: number; profit: number }>> = {
     Samsung: [
@@ -1405,50 +1275,17 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
 function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const jobs = [
-    { id: "JOB-1041", device: "iPhone 13",   type: "Screen Replacement",  tech: "Ashan",   status: "Completed", charge: 9500,  parts: 4500, labor: 5000 },
-    { id: "JOB-1040", device: "Oppo A57",    type: "Battery Replacement", tech: "Nilufar", status: "Completed", charge: 4200,  parts: 1800, labor: 2400 },
-    { id: "JOB-1039", device: "Samsung A32", type: "Charging Port",       tech: "Ashan",   status: "Pending",   charge: 2800,  parts: 800,  labor: 2000 },
-    { id: "JOB-1038", device: "Redmi 9C",    type: "Screen Replacement",  tech: "Nilufar", status: "Issued",    charge: 6500,  parts: 3200, labor: 3300 },
-    { id: "JOB-1037", device: "iPhone SE",   type: "Water Damage",        tech: "Ashan",   status: "Completed", charge: 12000, parts: 6000, labor: 6000 },
-  ];
+  const jobs: { id: string; device: string; type: string; tech: string; status: string; charge: number; parts: number; labor: number }[] = [];
 
-  const techData = [
-    { name: "Ashan",   jobs: 3, revenue: 24300, parts: 11300, labor: 13000 },
-    { name: "Nilufar", jobs: 2, revenue: 10700, parts: 5000,  labor: 5700  },
-  ];
+  const techData: { name: string; jobs: number; revenue: number; parts: number; labor: number }[] = [];
 
-  const radarData = [
-    { metric: "Jobs",       Ashan: 60,  Nilufar: 40  },
-    { metric: "Revenue",    Ashan: 80,  Nilufar: 45  },
-    { metric: "Completion", Ashan: 100, Nilufar: 100 },
-    { metric: "Speed",      Ashan: 75,  Nilufar: 88  },
-    { metric: "Parts Eff.", Ashan: 68,  Nilufar: 74  },
-  ];
+  const radarData: { metric: string; technicianA: number; technicianB: number }[] = [];
 
-  const repairTypes = [
-    { type: "Screen Replacement",  count: 2 },
-    { type: "Water Damage",        count: 1 },
-    { type: "Battery Replacement", count: 1 },
-    { type: "Charging Port",       count: 1 },
-  ];
+  const repairTypes: { type: string; count: number }[] = [];
 
-  const statusGroups = [
-    { label: "Completed", count: 3, color: "#4ade80", pct: 60 },
-    { label: "Issued",    count: 1, color: "#60a5fa", pct: 20 },
-    { label: "Pending",   count: 1, color: "#fbbf24", pct: 20 },
-    { label: "Cancelled", count: 0, color: "#f87171", pct: 0  },
-  ];
+  const statusGroups: { label: string; count: number; color: string; pct: number }[] = [];
 
-  const trendData = [
-    { day: "Mon", revenue: 9500  },
-    { day: "Tue", revenue: 4200  },
-    { day: "Wed", revenue: 2800  },
-    { day: "Thu", revenue: 6500  },
-    { day: "Fri", revenue: 12000 },
-    { day: "Sat", revenue: 7200  },
-    { day: "Sun", revenue: 0     },
-  ];
+  const trendData: { day: string; revenue: number }[] = [];
 
   const statusCfg: Record<string, { color: string; bg: string }> = {
     Completed: { color: "#4ade80", bg: "rgba(74,222,128,0.08)"  },
@@ -1475,29 +1312,12 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
   const statIcons  = [Wrench, FileText, DollarSign, Package];
   const statColors = ["#34d399", "#4ade80", "#fbbf24", "#f87171"];
 
-  const deviceBrandData = [
-    { brand: "Samsung", repairs: 8 },
-    { brand: "Apple",   repairs: 5 },
-    { brand: "Oppo",    repairs: 4 },
-    { brand: "Redmi",   repairs: 3 },
-    { brand: "Huawei",  repairs: 2 },
-  ];
+  const deviceBrandData: { brand: string; repairs: number }[] = [];
   const deviceBrandColors = ["#60a5fa", "#a78bfa", "#34d399", "#fbbf24", "#94a3b8"];
 
-  const partsSupplierData = [
-    { name: "Parts Hub LK",  cost: 18000, pct: 45, color: "#6355ff" },
-    { name: "Fix It All",    cost: 12000, pct: 30, color: "#60a5fa" },
-    { name: "TechSpare.lk",  cost: 6400,  pct: 16, color: "#34d399" },
-    { name: "Direct Order",  cost: 3600,  pct: 9,  color: "#fbbf24" },
-  ];
+  const partsSupplierData: { name: string; cost: number; pct: number; color: string }[] = [];
 
-  const profitTrendData = [
-    { month: "Jan", revenue: 52000, cost: 34000, profit: 18000 },
-    { month: "Feb", revenue: 48000, cost: 29000, profit: 19000 },
-    { month: "Mar", revenue: 63000, cost: 38000, profit: 25000 },
-    { month: "Apr", revenue: 71000, cost: 42000, profit: 29000 },
-    { month: "May", revenue: 58000, cost: 36000, profit: 22000 },
-  ];
+  const profitTrendData: { month: string; revenue: number; cost: number; profit: number }[] = [];
 
   return (
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -1584,8 +1404,8 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
               <PolarGrid stroke="var(--border)" />
               <PolarAngleAxis dataKey="metric" tick={{ fontSize: 10, fill: "var(--text-muted)", fontFamily: ff }} />
               <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
-              <Radar name="Ashan"   dataKey="Ashan"   stroke="#6355ff" fill="#6355ff" fillOpacity={0.18} strokeWidth={2} />
-              <Radar name="Nilufar" dataKey="Nilufar" stroke="#34d399" fill="#34d399" fillOpacity={0.18} strokeWidth={2} />
+              <Radar name="Technician A"   dataKey="technicianA"   stroke="#6355ff" fill="#6355ff" fillOpacity={0.18} strokeWidth={2} />
+              <Radar name="Technician B" dataKey="technicianB" stroke="#34d399" fill="#34d399" fillOpacity={0.18} strokeWidth={2} />
               <Legend wrapperStyle={{ fontSize: 11.5, fontFamily: ff, paddingTop: 4 }} />
               <Tooltip contentStyle={tooltipStyle} formatter={(val, name) => [`${val}/100`, name]} />
             </RadarChart>
@@ -1808,19 +1628,8 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
 /* ── P&L Report ── */
 function PLReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const monthlyData = [
-    { month: "Jan", revenue: 580000, cogs: 310000, gross: 270000, expenses: 95000, net: 175000 },
-    { month: "Feb", revenue: 620000, cogs: 330000, gross: 290000, expenses: 98000, net: 192000 },
-    { month: "Mar", revenue: 710000, cogs: 370000, gross: 340000, expenses: 102000, net: 238000 },
-    { month: "Apr", revenue: 690000, cogs: 355000, gross: 335000, expenses: 105000, net: 230000 },
-    { month: "May", revenue: 755000, cogs: 390000, gross: 365000, expenses: 108000, net: 257000 },
-  ];
-  const categoryPL = [
-    { category: "Mobile Sales",  revenue: 320000, cogs: 245000, gross: 75000,  margin: 23.4 },
-    { category: "Accessories",   revenue: 85000,  cogs: 42000,  gross: 43000,  margin: 50.6 },
-    { category: "Repair Services",revenue: 290000, cogs: 88000,  gross: 202000, margin: 69.7 },
-    { category: "Other Services", revenue: 60000,  cogs: 15000,  gross: 45000,  margin: 75.0 },
-  ];
+  const monthlyData: { month: string; revenue: number; cogs: number; gross: number; expenses: number; net: number }[] = [];
+  const categoryPL: { category: string; revenue: number; cogs: number; gross: number; margin: number }[] = [];
   const totalRevenue = 755000; const totalCOGS = 390000; const grossProfit = 365000;
   const expenses = 108000; const netProfit = 257000; const grossMargin = 48.3; const netMargin = 34.0;
   return (
@@ -1897,21 +1706,8 @@ function PLReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
 /* ── Stock Valuation ── */
 function StockValuation({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const categories = [
-    { name: "Smartphones",  items: 24, units: 18, costValue: 1240000, sellValue: 1620000, potentialProfit: 380000 },
-    { name: "Accessories",  items: 87, units: 342, costValue: 185000, sellValue: 298000, potentialProfit: 113000 },
-    { name: "Repair Parts", items: 56, units: 218, costValue: 320000, sellValue: 495000, potentialProfit: 175000 },
-    { name: "Equipment",    items: 8,  units: 12,  costValue: 95000,  sellValue: 130000, potentialProfit: 35000  },
-  ];
-  const stockItems = [
-    { sku: "SAM-A55-128-BLK", name: "Samsung Galaxy A55 128GB",  category: "Smartphones",  units: 3,  cost: 65000, sell: 89900, totalCost: 195000, status: "Normal" },
-    { sku: "IPH-14-256-MID",  name: "iPhone 14 256GB Midnight",  category: "Smartphones",  units: 2,  cost: 145000,sell: 198000,totalCost: 290000, status: "Normal" },
-    { sku: "SCR-IP14-OLED",   name: "iPhone 14 Screen Assembly", category: "Repair Parts", units: 3,  cost: 14500, sell: 21000, totalCost: 43500,  status: "Low"    },
-    { sku: "BAT-A54",         name: "Samsung A54 Battery",       category: "Repair Parts", units: 10, cost: 1800,  sell: 3500,  totalCost: 18000,  status: "Normal" },
-    { sku: "CASE-ASST-50",    name: "Phone Cases Assorted (50)", category: "Accessories",  units: 4,  cost: 4500,  sell: 8500,  totalCost: 18000,  status: "Normal" },
-    { sku: "CHRG-65W-10",     name: "Fast Chargers 65W (10pcs)", category: "Accessories",  units: 2,  cost: 6500,  sell: 11000, totalCost: 13000,  status: "Low"    },
-    { sku: "SCR-IP12-OLED",   name: "iPhone 12 Screen (OLED)",   category: "Repair Parts", units: 0,  cost: 8500,  sell: 13500, totalCost: 0,      status: "Out"    },
-  ];
+  const categories: { name: string; items: number; units: number; costValue: number; sellValue: number; potentialProfit: number }[] = [];
+  const stockItems: { sku: string; name: string; category: string; units: number; cost: number; sell: number; totalCost: number; status: string }[] = [];
   const totalCost = categories.reduce((s, c) => s + c.costValue, 0);
   const totalSell = categories.reduce((s, c) => s + c.sellValue, 0);
   return (
@@ -2002,17 +1798,8 @@ function StockValuation({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProp
 /* ── Cashier Performance ── */
 function CashierPerformance({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const cashiers = [
-    { name: "Ruwan Perera",    transactions: 48, revenue: 385000, avgTicket: 8021, discountsGiven: 3, refunds: 1, cashHandled: 215000 },
-    { name: "Niluka Fernando", transactions: 41, revenue: 312000, avgTicket: 7610, discountsGiven: 5, refunds: 2, cashHandled: 178000 },
-  ];
-  const dailyData = [
-    { day: "Mon", ruwan: 78000, niluka: 65000 },
-    { day: "Tue", ruwan: 92000, niluka: 58000 },
-    { day: "Wed", ruwan: 65000, niluka: 82000 },
-    { day: "Thu", ruwan: 88000, niluka: 71000 },
-    { day: "Fri", ruwan: 62000, niluka: 36000 },
-  ];
+  const cashiers: { name: string; transactions: number; revenue: number; avgTicket: number; discountsGiven: number; refunds: number; cashHandled: number }[] = [];
+  const dailyData: { day: string; cashierA: number; cashierB: number }[] = [];
   return (
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <ReportFilters dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}
@@ -2057,8 +1844,8 @@ function CashierPerformance({ dateFrom, dateTo, setDateFrom, setDateTo }: Filter
             <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11, fontFamily: ff }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}K`} />
             <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => fmtRs(v)} />
             <Legend wrapperStyle={{ fontSize: 12, fontFamily: ff }} />
-            <Bar dataKey="ruwan"  name="Ruwan Perera"    fill="#6355ff" radius={[4,4,0,0]} />
-            <Bar dataKey="niluka" name="Niluka Fernando" fill="#34d399" radius={[4,4,0,0]} />
+            <Bar dataKey="cashierA"  name="Cashier A"    fill="#6355ff" radius={[4,4,0,0]} />
+            <Bar dataKey="cashierB" name="Cashier B" fill="#34d399" radius={[4,4,0,0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -2069,13 +1856,7 @@ function CashierPerformance({ dateFrom, dateTo, setDateFrom, setDateTo }: Filter
 /* ── Supplier Report ── */
 function SupplierReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const suppliers = [
-    { name: "TechParts Lanka",     category: "Parts",       orders: 8,  totalSpend: 420000, avgLeadDays: 5,  onTimeRate: 95, lastOrder: "2026-05-05" },
-    { name: "Samsung Distributors",category: "Phones",      orders: 4,  totalSpend: 890000, avgLeadDays: 8,  onTimeRate: 88, lastOrder: "2026-05-15" },
-    { name: "Accessory World",     category: "Accessories", orders: 12, totalSpend: 185000, avgLeadDays: 3,  onTimeRate: 100,lastOrder: "2026-05-18" },
-    { name: "Fix-It Tools",        category: "Equipment",   orders: 2,  totalSpend: 48000,  avgLeadDays: 10, onTimeRate: 100,lastOrder: "2026-04-20" },
-    { name: "Oppo/Huawei Partners",category: "Phones",      orders: 3,  totalSpend: 620000, avgLeadDays: 7,  onTimeRate: 90, lastOrder: "2026-05-10" },
-  ];
+  const suppliers: { name: string; category: string; orders: number; totalSpend: number; avgLeadDays: number; onTimeRate: number; lastOrder: string }[] = [];
   const spendData = suppliers.map(s => ({ name: s.name.split(" ")[0], spend: s.totalSpend }));
   const totalSpend = suppliers.reduce((a, s) => a + s.totalSpend, 0);
   return (
@@ -2141,13 +1922,7 @@ function SupplierReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProp
 /* ── Credit Aging ── */
 function CreditAging({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const customers = [
-    { name: "Telecom Hub (Pvt) Ltd",   total: 120000, current: 45000, d30: 35000, d60: 25000, d90: 15000, overdue: 75000 },
-    { name: "City Mobile Repair",       total: 85000,  current: 30000, d30: 28000, d60: 15000, d90: 12000, overdue: 55000 },
-    { name: "Lanka Electronics",        total: 62000,  current: 20000, d30: 22000, d60: 12000, d90: 8000,  overdue: 42000 },
-    { name: "QuickFix Services",        total: 38000,  current: 18000, d30: 12000, d60: 5000,  d90: 3000,  overdue: 20000 },
-    { name: "Colombo Mobile Center",    total: 25000,  current: 25000, d30: 0,     d60: 0,     d90: 0,     overdue: 0     },
-  ];
+  const customers: { name: string; total: number; current: number; d30: number; d60: number; d90: number; overdue: number }[] = [];
   const buckets = [
     { label: "Current (0–30d)", value: customers.reduce((s,c)=>s+c.current,0), color: "#34d399" },
     { label: "31–60 days",      value: customers.reduce((s,c)=>s+c.d30,0),     color: "#fbbf24" },
@@ -2220,16 +1995,9 @@ function CreditAging({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
 /* ── Repair SLA ── */
 function RepairSLA({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const technicians = [
-    { name: "Kamal",  jobs: 18, completed: 16, withinSLA: 14, avgDays: 2.1, breach: 2, slaRate: 87.5 },
-    { name: "Nimal",  jobs: 15, completed: 13, withinSLA: 12, avgDays: 2.8, breach: 1, slaRate: 92.3 },
-    { name: "Suresh", jobs: 11, completed: 9,  withinSLA: 7,  avgDays: 3.4, breach: 2, slaRate: 77.8 },
-  ];
+  const technicians: { name: string; jobs: number; completed: number; withinSLA: number; avgDays: number; breach: number; slaRate: number }[] = [];
   const slaData = technicians.map(t => ({ name: t.name, "Within SLA": t.withinSLA, Breach: t.breach }));
-  const trendData = [
-    { week: "W1", slaRate: 88 }, { week: "W2", slaRate: 91 }, { week: "W3", slaRate: 85 },
-    { week: "W4", slaRate: 93 }, { week: "W5", slaRate: 90 },
-  ];
+  const trendData: { week: string; slaRate: number }[] = [];
   const totalJobs    = technicians.reduce((s,t)=>s+t.jobs,0);
   const totalBreaches= technicians.reduce((s,t)=>s+t.breach,0);
   const avgSLA       = (technicians.reduce((s,t)=>s+t.slaRate,0)/technicians.length).toFixed(1);

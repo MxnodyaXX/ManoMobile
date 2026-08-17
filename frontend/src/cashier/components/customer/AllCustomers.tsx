@@ -27,18 +27,7 @@ interface Customer {
 
 // ─── Mock Data ────────────────────────────────────────────────────────────────
 
-const INITIAL_CUSTOMERS: Customer[] = [
-  { id: "CU-001", name: "Kasun Perera",       phone: "+94 77 123 4567", nic: "942341567V", email: "kasun@email.com",   address: "45 Galle Rd, Colombo 3",       totalJobs: 4,  totalSpent: 62000,  memberSince: "2024-01-15", status: "Active",   lastActivity: "2025-04-22" },
-  { id: "CU-002", name: "Nimali Silva",        phone: "+94 71 234 5678", nic: "951234890V", email: "nimali@email.com",  address: "12 Kandy Rd, Peradeniya",      totalJobs: 2,  totalSpent: 18000,  memberSince: "2024-03-20", status: "Active",   lastActivity: "2025-04-21" },
-  { id: "CU-003", name: "Roshan Fernando",     phone: "+94 76 345 6789", nic: "900234789V", email: "",                  address: "7 Main St, Negombo",           totalJobs: 6,  totalSpent: 45000,  memberSince: "2023-11-05", status: "Active",   lastActivity: "2025-03-15" },
-  { id: "CU-004", name: "Dilini Rajapaksa",    phone: "+94 70 456 7890", nic: "985678901V", email: "dilini@gmail.com",  address: "23 Flower Rd, Colombo 7",      totalJobs: 1,  totalSpent: 15000,  memberSince: "2025-01-10", status: "Active",   lastActivity: "2025-04-18" },
-  { id: "CU-005", name: "Pradeep Jayawardena", phone: "+94 75 567 8901", nic: "870456123V", email: "",                  address: "88 Baseline Rd, Colombo 9",    totalJobs: 3,  totalSpent: 21000,  memberSince: "2024-06-18", status: "Active",   lastActivity: "2025-02-28" },
-  { id: "CU-006", name: "Samantha Bandara",    phone: "+94 78 678 9012", nic: "955678901V", email: "sam@email.com",     address: "14 Lake Dr, Kandy",            totalJobs: 5,  totalSpent: 73000,  memberSince: "2023-08-22", status: "Active",   lastActivity: "2025-04-21" },
-  { id: "CU-007", name: "Chamara Wijesinghe",  phone: "+94 72 789 0123", nic: "881122334V", email: "chamara@mail.com",  address: "3 Baudhaloka Mw, Colombo 7",   totalJobs: 2,  totalSpent: 9000,   memberSince: "2025-02-14", status: "Active",   lastActivity: "2025-04-20" },
-  { id: "CU-008", name: "Isuru Madushanka",    phone: "+94 74 890 1234", nic: "920789456V", email: "isuru@yahoo.com",   address: "56 Kirula Rd, Colombo 5",      totalJobs: 3,  totalSpent: 27500,  memberSince: "2024-09-03", status: "Active",   lastActivity: "2025-04-17" },
-  { id: "CU-009", name: "Tharaka Pemalatha",   phone: "+94 77 901 2345", nic: "860345678V", email: "",                  address: "22 Hospital Rd, Ratnapura",    totalJobs: 1,  totalSpent: 6000,   memberSince: "2025-03-30", status: "Inactive", lastActivity: "2025-03-30" },
-  { id: "CU-010", name: "Nimesha Rodrigo",     phone: "+94 71 012 3456", nic: "930901234V", email: "nimesha@email.com", address: "9 Duplication Rd, Colombo 3",  totalJobs: 7,  totalSpent: 115000, memberSince: "2023-05-11", status: "Active",   lastActivity: "2025-04-19" },
-];
+const INITIAL_CUSTOMERS: Customer[] = [];
 
 // ─── Customer Detail Modal ────────────────────────────────────────────────────
 

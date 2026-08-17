@@ -39,26 +39,12 @@ interface DealerProfile {
   outstanding: number;
 }
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
+// ─── Live data only ───────────────────────────────────────────────────────────
 
-const COMPLETED_REPAIRS: CompletedRepair[] = [
-  { id: "RM-004", dealer: "MANO MOBILE CENTRE",  customerName: "Dilini Rajapaksa",  brand: "Apple",   model: "iPhone 13",    imei: "356822002345678", warranty: "3 MONTHS WARRANTY [NORMAL]", advance: 15000, unitPrice: 15000, discount: 0 },
-  { id: "RM-008", dealer: "MANO MOBILE CENTRE",  customerName: "Isuru Madushanka",  brand: "OnePlus", model: "Nord 3",        imei: "860123456789012", warranty: "1 MONTH WARRANTY [NORMAL]",  advance: 6000,  unitPrice: 6000,  discount: 0 },
-  { id: "RM-009", dealer: "MANO MOBILE CENTRE",  customerName: "Dilini Rajapaksa",  brand: "Samsung", model: "Galaxy A52",    imei: "354668771114184", warranty: "3 MONTHS WARRANTY [NORMAL]", advance: 3500,  unitPrice: 7000,  discount: 500 },
-  { id: "RM-010", dealer: "CITY PHONE REPAIRS",  customerName: "Kasun Perera",      brand: "Xiaomi",  model: "Redmi Note 11", imei: "351988100241349", warranty: "NO WARRANTY [NORMAL]",       advance: 0,     unitPrice: 2500,  discount: 0 },
-  { id: "RM-011", dealer: "CITY PHONE REPAIRS",  customerName: "Nimali Silva",      brand: "Vivo",    model: "Y21",           imei: "864562049583598", warranty: "6 MONTHS WARRANTY [NORMAL]", advance: 1000,  unitPrice: 4000,  discount: 200 },
-  { id: "RM-012", dealer: "MANO MOBILE CENTRE",  customerName: "Nimali Silva",      brand: "Samsung", model: "Galaxy A14",    imei: "352667108901234", warranty: "NO WARRANTY [FOC]",          advance: 0,     unitPrice: 3200,  discount: 0 },
-  { id: "RM-013", dealer: "SMART FIX SOLUTIONS", customerName: "Kasun Perera",      brand: "Apple",   model: "iPhone SE",     imei: "350023456789012", warranty: "3 MONTHS WARRANTY [NORMAL]", advance: 5000,  unitPrice: 12000, discount: 0 },
-  { id: "RM-014", dealer: "SMART FIX SOLUTIONS", customerName: "Samantha Bandara",  brand: "Oppo",    model: "A78",           imei: "867543210987654", warranty: "1 MONTH WARRANTY [NORMAL]",  advance: 0,     unitPrice: 1800,  discount: 100 },
-];
+const COMPLETED_REPAIRS: CompletedRepair[] = [];
 
-/** Canned figures for the demo dealers that only exist in COMPLETED_REPAIRS.
- *  Dealers managed in Admin Control get their stats computed from live jobs. */
-const DEALER_PROFILES: Record<string, Pick<DealerProfile, "stats" | "totalEarned" | "outstanding">> = {
-  "MANO MOBILE CENTRE":  { stats: { total: 47, completed: 38, pending: 5, inProgress: 4 }, totalEarned: 285000, outstanding: 12500 },
-  "CITY PHONE REPAIRS":  { stats: { total: 22, completed: 17, pending: 3, inProgress: 2 }, totalEarned: 112000, outstanding: 8000 },
-  "SMART FIX SOLUTIONS": { stats: { total: 14, completed: 10, pending: 2, inProgress: 2 }, totalEarned: 76000,  outstanding: 0 },
-};
+/** Dealer stats are computed from live jobs; no canned figures. */
+const DEALER_PROFILES: Record<string, Pick<DealerProfile, "stats" | "totalEarned" | "outstanding">> = {};
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 

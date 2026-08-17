@@ -10,6 +10,7 @@ import { useRepairDrafts, newDraftId, fmtSaved, type RepairDraft, type RepairFor
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
 import JobReceiptSlip from "@/cashier/components/repair/JobReceiptSlip";
 import { uploadIntakePhotos } from "@/lib/repair/api";
+import { useTechnicians, type Technician } from "@/lib/repair/technicians";
 import Combobox from "@/cashier/components/shared/Combobox";
 import { lookupModelNumber } from "@/cashier/data/modelNumbers";
 import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2, AlertCircle, FileClock } from "lucide-react";
@@ -36,12 +37,7 @@ const TERMS_VERSION = "v1.0";
 
 // ─── Sample Data ──────────────────────────────────────────────────────────────
 
-const REPAIRMEN = [
-  { id: 1, name: "Kasun Perera", speciality: "Screen & Battery", available: true, activeJobs: 2 },
-  { id: 2, name: "Dilshan Fernando", speciality: "Motherboard & IC", available: true, activeJobs: 1 },
-  { id: 3, name: "Nuwan Silva", speciality: "Software & Flashing", available: false, activeJobs: 4 },
-  { id: 4, name: "Asitha Jayawardena", speciality: "Water Damage", available: true, activeJobs: 0 },
-];
+
 
 const RECEIVED_ITEMS = ["SIM Card", "Back Cover", "Charger", "Data Cable", "Earphones", "Memory Card", "SIM Tray", "Battery", "Box", "Other Accessories"];
 
@@ -60,13 +56,7 @@ const COMMON_FAULTS = [
   "Signal / Network Issue",
 ];
 
-const DEVICE_MODELS = [
-  "iPhone 16 Pro Max", "iPhone 16 Pro", "iPhone 16", "iPhone 15 Pro Max", "iPhone 15",
-  "Samsung Galaxy S25 Ultra", "Samsung Galaxy S25", "Samsung Galaxy A55", "Samsung Galaxy A35",
-  "Xiaomi 14 Pro", "Xiaomi 14", "Redmi Note 13 Pro", "Redmi 13C",
-  "OPPO Reno 12 Pro", "OPPO A60", "OnePlus 12", "Realme GT 6",
-  "Huawei Nova 12", "Vivo Y200 Pro",
-];
+const DEVICE_MODELS: string[] = [];
 
 // ─── Step Indicator ───────────────────────────────────────────────────────────
 
@@ -584,21 +574,46 @@ function Step3({ data, onChange, isMobile, errors }: { data: FormData; onChange:
 
 // ─── Step 4: Assign Repairman ─────────────────────────────────────────────────
 
-function Step4({ data, onChange, isMobile }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean }) {
+function Step4({ data, onChange, isMobile, technicians, techLoading }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; technicians: Technician[]; techLoading: boolean }) {
+  const { jobs } = useRepair();
+  // Live workload rather than a hard-coded number, so the cashier can see who is
+  // actually loaded up before assigning.
+  const workload = (name: string) =>
+    jobs.filter(j => j.technician === name && (j.status === "Issued" || j.status === "Pending")).length;
+
   return (
     <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
       <div style={{ ...panelStyle, flex: 1.3 }}>
         <div style={sectionHeaderStyle}>🛠️ Available Repairmen</div>
+
+        {techLoading && (
+          <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", padding: "10px 0" }}>
+            Loading technicians…
+          </p>
+        )}
+
+        {/* An empty roster is a setup problem, not "no one is free" — say so. */}
+        {!techLoading && technicians.length === 0 && (
+          <div style={{ display: "flex", gap: 9, padding: "11px 13px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)" }}>
+            <AlertCircle size={15} color="var(--warning)" style={{ flexShrink: 0, marginTop: 1 }} />
+            <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
+              No technicians in the staff directory yet. Add staff with the{" "}
+              <strong>Technician</strong> role in Supabase (or Admin Control), or skip this step and
+              let any technician pick the job up.
+            </p>
+          </div>
+        )}
+
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {REPAIRMEN.map((r) => {
-            const isSelected = data.assignedRepairman === r.id.toString();
+          {technicians.map((r) => {
+            const isSelected = data.assignedRepairman === r.id;
             const canSelect = r.available;
             return (
               <div
                 key={r.id}
                 // Clicking the assigned repairman again unassigns them, so a
                 // misclick can be undone and the step left as "Skip".
-                onClick={() => canSelect && onChange({ assignedRepairman: isSelected ? "" : r.id.toString() })}
+                onClick={() => canSelect && onChange({ assignedRepairman: isSelected ? "" : r.id })}
                 title={!canSelect ? `${r.name} is busy` : isSelected ? "Click to unassign" : `Assign to ${r.name}`}
                 style={{
                   display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
@@ -623,7 +638,7 @@ function Step4({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
                     {r.name}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                    {r.speciality} · {r.activeJobs} active job{r.activeJobs !== 1 ? "s" : ""}
+                    {r.speciality} · {workload(r.name)} active job{workload(r.name) !== 1 ? "s" : ""}
                   </div>
                 </div>
                 <div style={{
@@ -667,7 +682,7 @@ function Step4({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
               border: "1px solid var(--accent)",
             }}>
               {(() => {
-                const r = REPAIRMEN.find((rm) => rm.id.toString() === data.assignedRepairman);
+                const r = technicians.find((rm) => rm.id === data.assignedRepairman);
                 return r ? (
                   <>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
@@ -709,7 +724,7 @@ function Step4({ data, onChange, isMobile }: { data: FormData; onChange: (d: Par
               REPAIR SUMMARY
             </div>
             {[
-              ["Repairman", REPAIRMEN.find((r) => r.id.toString() === data.assignedRepairman)?.name ?? "Not assigned"],
+              ["Repairman", technicians.find((r) => r.id === data.assignedRepairman)?.name ?? "Not assigned"],
               ["Completion", data.estimatedCompletion || "Not set"],
             ].map(([k, v]) => (
               <div key={k} style={{ display: "flex", justifyContent: "space-between", marginBottom: 7 }}>
@@ -899,6 +914,7 @@ function detectBrand(model: string): string {
  */
 export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () => void; initialDraft?: RepairDraft | null }) {
   const { addJob, updateJob, dealers } = useRepair();
+  const { technicians, loading: techLoading } = useTechnicians();
   const { warranties } = useWarranty();
   const [customModels, setCustomModels] = usePersistentState<string[]>("mano_custom_models", []);
   const [step, setStep] = useState(initialDraft?.step ?? 1);
@@ -1009,7 +1025,7 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
     setSaving(true);
     setSaveError(null);
 
-    const repairman = REPAIRMEN.find(r => String(r.id) === form.assignedRepairman);
+    const repairman = technicians.find(r => r.id === form.assignedRepairman);
     // The dealer picked in step 1 travels with the job — it drives the dealer
     // panel in Repair Management and whether the slip prints as a job receipt
     // (in-house) or a sales invoice billed to the dealer.
@@ -1028,6 +1044,9 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
       modelNumber: form.deviceModelNumber || undefined,
       issue: issueFaults,
       technician: repairman?.name ?? "Unassigned",
+      // Picked at the counter, so the technician stage records it as handed to
+      // them rather than self-taken.
+      assignmentSource: repairman ? "Assigned" : undefined,
       status: "Non-Issued",
       priority: (form.jobPriority as "Low" | "Normal" | "High" | "Urgent") || "Normal",
       estimatedCost: parseFloat(form.estimatedCost) || 0,
@@ -1110,7 +1129,7 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
         {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} dealers={dealers} errors={errors} />}
         {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} models={modelOptions} onAddModel={addModel} errors={errors} />}
         {step === 3 && <Step3 data={form} onChange={update} isMobile={isMobile} errors={errors} />}
-        {step === 4 && <Step4 data={form} onChange={update} isMobile={isMobile} />}
+        {step === 4 && <Step4 data={form} onChange={update} isMobile={isMobile} technicians={technicians} techLoading={techLoading} />}
         {step === 5 && <Step5 data={form} onChange={update} isMobile={isMobile} errors={errors} />}
       </div>
 
@@ -1235,6 +1254,7 @@ const RECEIPT_IDLE_MS = 10 * 60 * 1000;
 function JobReceiptPopup({ job, onNew, onClose }: { job: RepairJob; onNew: () => void; onClose?: () => void }) {
   const slipRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
+  const { backend } = useRepair();
 
   // Dismissing hands the counter back a blank intake for the next customer; the
   // job itself is already saved, so nothing is lost by closing.
@@ -1291,6 +1311,16 @@ function JobReceiptPopup({ job, onNew, onClose }: { job: RepairJob; onNew: () =>
           <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>
             Job <strong style={{ color: "var(--accent)" }}>{job.id}</strong> · {job.brand} {job.model}
           </p>
+          {backend === "local" && (
+            <p style={{
+              marginTop: 10, padding: "8px 12px", borderRadius: 8, fontSize: 11.5, lineHeight: 1.5,
+              background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)",
+              color: "var(--text-secondary)",
+            }}>
+              <strong style={{ color: "var(--warning)" }}>Demo mode — this job was NOT saved.</strong>{" "}
+              Supabase isn&apos;t configured, so it exists in this browser tab only and will be gone on reload.
+            </p>
+          )}
         </div>
 
         {/* The receipt exactly as it will print — this element is what gets printed */}

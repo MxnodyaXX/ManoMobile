@@ -45,14 +45,7 @@ interface AccessoryCartItem {
 
 // ─── Sample Data ──────────────────────────────────────────────────────────────
 
-const PHONE_INVENTORY: Phone[] = [
-  { id: 1, imei: "352000001234567", name: "iPhone 15 Pro Max",        brand: "Apple",   supplier: "Apple Official LK",   storage: "256GB", color: "Black Titanium", buyingPrice: 285000, boughtDate: "2024-12-10", minSellingPrice: 295000, suggestedPrice: 312000 },
-  { id: 2, imei: "860000009876543", name: "Samsung Galaxy S25 Ultra", brand: "Samsung", supplier: "Samsung Official LK", storage: "512GB", color: "Phantom Black",  buyingPrice: 235000, boughtDate: "2025-01-15", minSellingPrice: 248000, suggestedPrice: 262000 },
-  { id: 3, imei: "490154203237518", name: "Xiaomi 14 Pro",            brand: "Xiaomi",  supplier: "Digital Zone",        storage: "512GB", color: "White",          buyingPrice: 145000, boughtDate: "2025-02-01", minSellingPrice: 155000, suggestedPrice: 168000 },
-  { id: 4, imei: "353170062581234", name: "OnePlus 12",               brand: "OnePlus", supplier: "TechSupply Co.",      storage: "256GB", color: "Silky Black",    buyingPrice: 132000, boughtDate: "2025-02-20", minSellingPrice: 140000, suggestedPrice: 152000 },
-  { id: 5, imei: "867400023456789", name: "iPhone 16",                brand: "Apple",   supplier: "Apple Official LK",   storage: "128GB", color: "Ultramarine",    buyingPrice: 210000, boughtDate: "2025-03-05", minSellingPrice: 220000, suggestedPrice: 235000 },
-  { id: 6, imei: "359304050987654", name: "Samsung Galaxy A55",       brand: "Samsung", supplier: "Mobile Parts Ltd.",   storage: "128GB", color: "Awesome Navy",   buyingPrice:  82000, boughtDate: "2025-01-28", minSellingPrice:  88000, suggestedPrice:  95000 },
-];
+const PHONE_INVENTORY: Phone[] = [];
 
 const ACCESSORIES = [
   { id: 1, code: "ACC001", name: "Tempered Glass",  model: "Universal 6.5\"",   brand: "OG Shield", price: 350  },
