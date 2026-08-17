@@ -26,7 +26,9 @@ export function useStaffByRole(role: StaffRoleName) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!configured) { setLoading(false); return; }
+    // `loading` already starts false when unconfigured — setting it here
+    // would just cascade an extra render.
+    if (!configured) return;
     let active = true;
     (async () => {
       const { data, error } = await getSupabaseBrowserClient()

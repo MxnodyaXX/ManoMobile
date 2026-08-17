@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { Check, Save, RotateCcw } from "lucide-react";
+import WorkRulesCard from "@/admin/components/permissions/WorkRulesCard";
+import TechnicianPermissions from "@/admin/components/permissions/TechnicianPermissions";
 
 const AA = "#a78bfa";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -111,6 +113,12 @@ export default function Permissions() {
           </button>
         </div>
       </div>
+
+      {/* Work rules sit with permissions: both answer "what is this role allowed to do?" */}
+      <WorkRulesCard />
+
+      {/* Then the exceptions, per person */}
+      <TechnicianPermissions />
 
       {/* Legend */}
       <div className="fade-up" style={{ display: "flex", gap: 16, padding: "10px 16px", background: "var(--bg-card)", borderRadius: 10, border: "1px solid var(--border)", width: "fit-content" }}>

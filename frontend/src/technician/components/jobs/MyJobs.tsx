@@ -21,6 +21,7 @@ import CustomerMessageModal from "@/technician/components/jobs/CustomerMessageMo
 import TransferAgentModal from "@/technician/components/jobs/TransferAgentModal";
 import { fetchOpenTransfers, markTransferReturned, type AgentTransfer } from "@/lib/repair/agents";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { rulesForTechnician, type EffectiveRules } from "@/lib/settings/staffRules";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -247,6 +248,16 @@ export default function MyJobs() {
   const [transferJob, setTransferJob]     = useState<RepairJob | null>(null);
   // Which of my jobs are physically out at an agent right now.
   const [openTransfers, setOpenTransfers] = useState<AgentTransfer[]>([]);
+  // What this technician is allowed to do, per their own permissions.
+  const [myRules, setMyRules] = useState<EffectiveRules | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    rulesForTechnician(technicianName)
+      .then(r => { if (active) setMyRules(r); })
+      .catch(() => { /* defaults apply; never block the queue on a rules lookup */ });
+    return () => { active = false; };
+  }, [technicianName]);
 
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
@@ -352,6 +363,17 @@ export default function MyJobs() {
       setFilterTab("Active");
     } else if (result === "taken") {
       setClaimNotice({ kind: "warn", text: `${job.id} was just started by another technician.` });
+    } else if (result === "not-allowed") {
+      setClaimNotice({
+        kind: "warn",
+        text: "You are not permitted to take unassigned jobs. An Admin can change this under Permissions.",
+      });
+    } else if (result === "busy") {
+      // The shop's work rules, not a failure — say which rule and what to do.
+      setClaimNotice({
+        kind: "warn",
+        text: "You already have as many repairs in progress as the shop allows. Finish or pause one before starting another, or ask an Admin to change the work rules.",
+      });
     } else {
       setClaimNotice({ kind: "warn", text: `Could not start ${job.id}. Check your connection and try again.` });
     }
@@ -658,7 +680,7 @@ export default function MyJobs() {
                           >
                             <Building2 size={11} /> Back from agent
                           </button>
-                        ) : ["Non-Issued", "Issued", "Pending"].includes(job.status) && (
+                        ) : (myRules?.canTransferToAgent ?? true) && ["Non-Issued", "Issued", "Pending"].includes(job.status) && (
                           <button onClick={() => setTransferJob(job)} title="Transfer to external repair agent" style={{ padding: "5px 7px", borderRadius: 7, background: "none", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" }}>
                             <Building2 size={13} />
                           </button>

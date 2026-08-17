@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef, ReactNode, type Dispatch, type SetStateAction } from "react";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { notifyJobEvent } from "@/lib/sms/notify";
+import { rulesForTechnician } from "@/lib/settings/staffRules";
 import { fetchJobs, fetchDealers, insertJob, patchJob, upsertDealer, deleteDealer, claimJob as claimJobRow, UNASSIGNED_TECHNICIAN } from "@/lib/repair/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -243,7 +244,11 @@ export function isClaimable(job: RepairJob): boolean {
   return isUnassigned(job) && job.status === "Non-Issued";
 }
 
-export type ClaimResult = "claimed" | "taken" | "error";
+/**
+ * "busy"        - already at their limit of jobs in progress.
+ * "not-allowed" - this technician may not take unassigned jobs at all.
+ */
+export type ClaimResult = "claimed" | "taken" | "busy" | "not-allowed" | "error";
 
 interface RepairContextValue {
   jobs: RepairJob[];
@@ -383,6 +388,14 @@ export function RepairProvider({ children }: { children: ReactNode }) {
    * overwriting the earlier one.
    */
   const claimJob = useCallback(async (id: string, technician: string): Promise<ClaimResult> => {
+    // This technician's own rules, falling back to the shop rule.
+    const rules = await rulesForTechnician(technician);
+    if (!rules.canClaimUnassigned) return "not-allowed";
+
+    const mine = jobs.filter(j => j.technician === technician && j.status === "Issued").length;
+    if (!rules.allowMultipleActiveJobs && mine >= 1) return "busy";
+    if (rules.allowMultipleActiveJobs && rules.maxActiveJobs != null && mine >= rules.maxActiveJobs) return "busy";
+
     if (!configured) {
       // Same rule locally: only claim if it is still free.
       const current = jobs.find(j => j.id === id);
