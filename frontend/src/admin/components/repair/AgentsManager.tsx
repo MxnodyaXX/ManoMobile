@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { Search, Plus, Pencil, Trash2, Building2, AlertCircle } from "lucide-react";
 import { useAgents, saveAgent, deleteAgent, type RepairAgent } from "@/lib/repair/agents";
+import { useToast } from "@/lib/ui/toast";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 const today = () => new Date().toISOString().slice(0, 10);
@@ -157,6 +158,7 @@ function AgentModal({ agent, onSave, onClose }: {
  */
 export default function AgentsManager() {
   const { agents, loading, error, reload, configured } = useAgents();
+  const toast = useToast();
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<RepairAgent | null | "new">(null);
   const [deleteTarget, setDeleteTarget] = useState<RepairAgent | null>(null);
@@ -169,8 +171,10 @@ export default function AgentsManager() {
 
   const handleSave = async (a: RepairAgent) => {
     if (!configured) throw new Error("Supabase isn't configured — agents cannot be saved in demo mode.");
+    const isEdit = agents.some(x => x.id === a.id);
     await saveAgent(a);
     await reload();
+    toast.dialog("success", isEdit ? "Agent updated" : "Agent added", a.name);
   };
 
   const handleDelete = async (a: RepairAgent) => {
@@ -178,9 +182,12 @@ export default function AgentsManager() {
     try {
       await deleteAgent(a.id);
       await reload();
+      toast.dialog("success", "Agent deleted", `${a.name} has been removed.`);
       setDeleteTarget(null);
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setActionError(msg);
+      toast.error("Could not delete the agent", msg);
     }
   };
 

@@ -22,6 +22,7 @@ import TransferAgentModal from "@/technician/components/jobs/TransferAgentModal"
 import { fetchOpenTransfers, markTransferReturned, type AgentTransfer } from "@/lib/repair/agents";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { rulesForTechnician, type EffectiveRules } from "@/lib/settings/staffRules";
+import { useToast } from "@/lib/ui/toast";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -243,6 +244,7 @@ export default function MyJobs() {
   const [notesJob, setNotesJob]           = useState<RepairJob | null>(null);
   const [escalationJob, setEscalationJob] = useState<RepairJob | null>(null);
   const [messageJob, setMessageJob]       = useState<RepairJob | null>(null);
+  const toast = useToast();
   const [claimingId, setClaimingId]       = useState<string | null>(null);
   const [claimNotice, setClaimNotice]     = useState<{ kind: "ok" | "warn"; text: string } | null>(null);
   const [transferJob, setTransferJob]     = useState<RepairJob | null>(null);
@@ -345,6 +347,7 @@ export default function MyJobs() {
       if (transfer) await markTransferReturned(transfer.id);
       updateJob(job.id, { status: "Issued", pauseReason: undefined, pausedAt: undefined });
       setOpenTransfers(prev => prev.filter(t => t.jobId !== job.id));
+      toast.success(`${job.id} is back in the shop`, `Returned from ${transfer?.agentName ?? "the agent"}.`);
       setClaimNotice({ kind: "ok", text: `${job.id} is back from ${transfer?.agentName ?? "the agent"} and in progress again.` });
     } catch (e) {
       setClaimNotice({ kind: "warn", text: e instanceof Error ? e.message : String(e) });
@@ -359,6 +362,7 @@ export default function MyJobs() {
     setClaimingId(null);
 
     if (result === "claimed") {
+      toast.dialog("success", `${job.id} is yours`, `${job.brand} ${job.model} has moved into your active jobs.`);
       setClaimNotice({ kind: "ok", text: `${job.id} is yours — it's now in your active jobs.` });
       setFilterTab("Active");
     } else if (result === "taken") {

@@ -43,18 +43,11 @@ interface AccessoryCartItem {
   qty: number;
 }
 
-// ─── Sample Data ──────────────────────────────────────────────────────────────
+// ─── Live data only — stock comes from the inventory backend ─────────────────
 
 const PHONE_INVENTORY: Phone[] = [];
 
-const ACCESSORIES = [
-  { id: 1, code: "ACC001", name: "Tempered Glass",  model: "Universal 6.5\"",   brand: "OG Shield", price: 350  },
-  { id: 2, code: "ACC002", name: "Phone Case",       model: "iPhone 15 Pro Max", brand: "Spigen",    price: 1200 },
-  { id: 3, code: "ACC003", name: "USB-C Cable 1m",  model: "65W Fast Charge",   brand: "Anker",     price: 850  },
-  { id: 4, code: "ACC004", name: "Power Bank",       model: "10000mAh PD",       brand: "Romoss",    price: 3500 },
-  { id: 5, code: "ACC005", name: "TWS Earbuds",      model: "Pro X1 Active",     brand: "Haylou",    price: 2800 },
-  { id: 6, code: "ACC006", name: "Wireless Charger", model: "15W Qi2",           brand: "Baseus",    price: 2200 },
-];
+const ACCESSORIES: { id: number; code: string; name: string; model: string; brand: string; price: number }[] = [];
 
 
 // ─── Shared Styles ────────────────────────────────────────────────────────────

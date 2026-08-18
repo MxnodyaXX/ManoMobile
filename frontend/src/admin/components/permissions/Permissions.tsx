@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Check, Save, RotateCcw } from "lucide-react";
 import WorkRulesCard from "@/admin/components/permissions/WorkRulesCard";
 import TechnicianPermissions from "@/admin/components/permissions/TechnicianPermissions";
@@ -151,8 +151,10 @@ export default function Permissions() {
             </thead>
             <tbody>
               {groups.map(group => (
-                <>
-                  <tr key={`grp-${group}`}>
+                // The key belongs on what map returns — a bare <> cannot carry
+                // one, which is what React was warning about.
+                <Fragment key={group}>
+                  <tr>
                     <td colSpan={6} style={{ padding: "7px 16px", background: "var(--bg-secondary)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
                       <span style={{ fontSize: 10, fontWeight: 700, color: AA, textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: ff }}>{group}</span>
                     </td>
@@ -174,7 +176,7 @@ export default function Permissions() {
                       ))}
                     </tr>
                   ))}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>

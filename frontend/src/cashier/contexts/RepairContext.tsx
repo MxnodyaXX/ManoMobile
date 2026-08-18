@@ -8,6 +8,8 @@ import { fetchJobs, fetchDealers, insertJob, patchJob, upsertDealer, deleteDeale
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export type CompletionType = "Normal" | "Return" | "FOC";
+
 export type JobStatus = "Non-Issued" | "Issued" | "Pending" | "Completed" | "Delivered" | "Cancelled";
 
 export type ConditionGrade = "Pristine" | "Good" | "Worn" | "Damaged";
@@ -67,6 +69,13 @@ export interface RepairJob {
   warrantyId?: string;           // FK into WarrantyContext
   /** How the current technician got the job — drives repair_assignments.assignment_type. */
   assignmentSource?: "Assigned" | "Self-Taken";
+  /**
+   * How the job finished. Set when it is completed.
+   *   Normal - repaired and charged as quoted
+   *   Return - could not be repaired; device goes back unrepaired
+   *   FOC    - repaired, no charge
+   */
+  completionType?: CompletionType;
   dealer?: string;               // dealer name as recorded at intake (printed on slips)
   dealerId?: number;             // FK into the managed dealer registry
   cancelReason?: string;
@@ -254,7 +263,12 @@ interface RepairContextValue {
   jobs: RepairJob[];
   /** Resolves with the saved job — the job number is assigned by the database. */
   addJob: (partial: Omit<RepairJob, "id">) => Promise<RepairJob>;
-  updateJob: (id: string, changes: Partial<RepairJob>) => void;
+  /**
+   * Apply changes optimistically and persist them. Resolves with the outcome so
+   * a caller can report a rejection — a silent revert looks identical to "the
+   * button does nothing".
+   */
+  updateJob: (id: string, changes: Partial<RepairJob>) => Promise<{ ok: boolean; error?: string }>;
   /** Take an unassigned job. "taken" means another technician got it first. */
   claimJob: (id: string, technician: string) => Promise<ClaimResult>;
   dealers: RepairDealer[];
@@ -272,7 +286,7 @@ interface RepairContextValue {
 const RepairContext = createContext<RepairContextValue>({
   jobs: [],
   addJob: async () => ({} as RepairJob),
-  updateJob: () => {},
+  updateJob: async () => ({ ok: true }),
   claimJob: async () => "error",
   dealers: [],
   setDealers: () => {},
@@ -357,7 +371,7 @@ export function RepairProvider({ children }: { children: ReactNode }) {
    * the database actually stored. A failure reverts by reloading, so the UI can
    * never quietly show a change that was rejected by RLS.
    */
-  const updateJob = useCallback((id: string, changes: Partial<RepairJob>) => {
+  const updateJob = useCallback(async (id: string, changes: Partial<RepairJob>): Promise<{ ok: boolean; error?: string }> => {
     // Notify from the transition, not from the caller: every screen that moves a
     // job goes through here, so the customer hears about it however it happened.
     // Comparing against the previous status also stops a repeated save from
@@ -367,18 +381,28 @@ export function RepairProvider({ children }: { children: ReactNode }) {
       const after: RepairJob = { ...before, ...changes };
       if (changes.status === "Issued" && before.status === "Non-Issued") notifyJobEvent("started", after);
       else if (changes.status === "Pending") notifyJobEvent("paused", after);
-      else if (changes.status === "Completed") notifyJobEvent("finished", after);
+      else if (changes.status === "Completed") {
+        // The "repaired and ready to collect" message is false for a Return —
+        // nothing was repaired. Those customers get a call, not a template.
+        if (after.completionType !== "Return") notifyJobEvent("finished", after);
+      }
     }
 
     setJobs(prev => prev.map(j => (j.id === id ? { ...j, ...changes } : j)));
-    if (!configured) return;
+    if (!configured) return { ok: true };
 
-    patchJob(id, changes)
-      .then(fresh => setJobs(prev => prev.map(j => (j.id === id ? fresh : j))))
-      .catch(e => {
-        setError(e instanceof Error ? e.message : String(e));
-        void load();
-      });
+    try {
+      const fresh = await patchJob(id, changes);
+      setJobs(prev => prev.map(j => (j.id === id ? fresh : j)));
+      return { ok: true };
+    } catch (e) {
+      // Put the row back to what the database actually holds, and hand the
+      // reason to the caller rather than reverting in silence.
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      void load();
+      return { ok: false, error: message };
+    }
   }, [configured, load, jobs]);
 
   /**

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { X, Send, AlertCircle, Building2 } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import { useAgents, transferJobToAgent } from "@/lib/repair/agents";
+import { useToast } from "@/lib/ui/toast";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -30,6 +31,7 @@ export default function TransferAgentModal({
   const [expectedReturn, setExpectedReturn] = useState("");
   const [agreedCost, setAgreedCost] = useState("");
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
   const [error, setError] = useState<string | null>(null);
 
   const activeAgents = agents.filter(a => a.active);
@@ -52,6 +54,7 @@ export default function TransferAgentModal({
           sentBy: technicianName,
         });
       }
+      toast.dialog("success", `${job.id} sent out`, `The device is now with ${agent?.name ?? "the agent"}.`);
       onTransferred(agent?.name ?? "external agent", reason.trim());
       onClose();
     } catch (e) {

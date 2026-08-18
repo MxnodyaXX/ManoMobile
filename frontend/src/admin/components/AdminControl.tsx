@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import AgentsManager from "@/admin/components/repair/AgentsManager";
+import { useToast } from "@/lib/ui/toast";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import Barcode from "react-barcode";
 import {
@@ -507,6 +508,7 @@ function DealerModal({ dealer, onSave, onClose }: { dealer: RepairDealer | null;
 
 function DealersManager() {
   const { dealers, setDealers } = useRepair();
+  const toast = useToast();
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<RepairDealer | null | "new">(null);
   const [deleteTarget, setDeleteTarget] = useState<RepairDealer | null>(null);
@@ -567,8 +569,17 @@ function DealersManager() {
         <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{filtered.length} of {dealers.length} dealers</div>
       </div>
 
-      {modal !== null && <DealerModal dealer={modal === "new" ? null : modal} onSave={d => { setDealers(prev => prev.find(x => x.id === d.id) ? prev.map(x => x.id === d.id ? d : x) : [...prev, d]); setModal(null); }} onClose={() => setModal(null)} />}
-      {deleteTarget && <DeleteConfirm name={deleteTarget.name} onConfirm={() => { setDealers(prev => prev.filter(d => d.id !== deleteTarget.id)); setDeleteTarget(null); }} onClose={() => setDeleteTarget(null)} />}
+      {modal !== null && <DealerModal dealer={modal === "new" ? null : modal} onSave={d => {
+          const isEdit = dealers.some(x => x.id === d.id);
+          setDealers(prev => prev.find(x => x.id === d.id) ? prev.map(x => x.id === d.id ? d : x) : [...prev, d]);
+          toast.dialog("success", isEdit ? "Dealer updated" : "Dealer added", d.name);
+          setModal(null);
+        }} onClose={() => setModal(null)} />}
+      {deleteTarget && <DeleteConfirm name={deleteTarget.name} onConfirm={() => {
+          setDealers(prev => prev.filter(d => d.id !== deleteTarget.id));
+          toast.dialog("success", "Dealer deleted", `${deleteTarget.name} has been removed from the registry.`);
+          setDeleteTarget(null);
+        }} onClose={() => setDeleteTarget(null)} />}
     </div>
   );
 }

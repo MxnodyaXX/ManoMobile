@@ -8,6 +8,7 @@ import {
   useStaffRules, mergeRules, blankOverride,
   type StaffRuleOverride,
 } from "@/lib/settings/staffRules";
+import { useToast } from "@/lib/ui/toast";
 
 const AA = "#a78bfa";
 const TA = "#34d399";
@@ -95,6 +96,7 @@ export default function TechnicianPermissions() {
   const { staff, loading: staffLoading, configured } = useStaff();
   const { rules: shopRules, loading: shopLoading } = useWorkRules();
   const { overrides, loading: rulesLoading, error, save } = useStaffRules();
+  const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, StaffRuleOverride>>({});
@@ -111,6 +113,7 @@ export default function TechnicianPermissions() {
     setDrafts(d => ({ ...d, [next.profileId]: next }));
     try {
       await save(next);
+      toast.success("Permission saved");
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e));
       // Drop the draft so the row falls back to what is actually stored — a

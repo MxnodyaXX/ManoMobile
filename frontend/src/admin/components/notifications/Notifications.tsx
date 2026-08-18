@@ -7,6 +7,7 @@ import { useAdmin, type NotificationChannel } from "@/admin/contexts/AdminContex
 import { useSmsTemplates, type SmsTemplate } from "@/lib/sms/templatesApi";
 import { JOB_SMS_LABEL, JOB_SMS_PURPOSE, JOB_SMS_VARIABLES, SAMPLE_JOB, renderTemplate } from "@/lib/sms/templates";
 import SmsTemplateEditor from "@/admin/components/notifications/SmsTemplateEditor";
+import { useToast } from "@/lib/ui/toast";
 
 const AA = "#a78bfa";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -69,6 +70,7 @@ export default function Notifications() {
   // deploy, and so the cashier and technician apps read the same text.
   const { templates: smsTemplates, loading: tplLoading, error: tplError, save: saveTemplate, configured } = useSmsTemplates();
   const [editing, setEditing] = useState<SmsTemplate | null>(null);
+  const toast = useToast();
   const [toggling, setToggling] = useState<string | null>(null);
   const [toggleError, setToggleError] = useState<string | null>(null);
 
@@ -83,8 +85,14 @@ export default function Notifications() {
     setToggleError(null);
     try {
       await saveTemplate({ ...tpl, isActive: !tpl.isActive });
+      toast.success(
+        tpl.isActive ? `${tpl.name} switched off` : `${tpl.name} switched on`,
+        tpl.isActive ? "Customers will no longer get this message automatically." : "Customers will get this message automatically.",
+      );
     } catch (e) {
-      setToggleError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setToggleError(msg);
+      toast.error("Not saved", msg);
     } finally {
       setToggling(null);
     }

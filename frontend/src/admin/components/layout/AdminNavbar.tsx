@@ -28,7 +28,7 @@ export default function AdminNavbar({ activePage, onMenuClick }: Props) {
   const { purchaseOrders } = useAdmin();
   const isMobile = useIsMobile();
   const pendingPOs = purchaseOrders.filter(p => p.status === "Approved" || p.status === "Sent").length;
-  const today = new Date("2026-05-22").toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+  const today = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
 
   return (
     <div style={{

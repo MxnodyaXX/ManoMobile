@@ -9,6 +9,7 @@ import {
 } from "@/lib/sms/templates";
 import { smsPartCount } from "@/lib/sms/client";
 import type { SmsTemplate } from "@/lib/sms/templatesApi";
+import { useToast } from "@/lib/ui/toast";
 
 const AA = "#a78bfa";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -30,6 +31,7 @@ export default function SmsTemplateEditor({ template, onSave, onClose }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const toast = useToast();
 
   const preview = renderTemplate(body, SAMPLE_JOB);
   const parts = smsPartCount(preview);
@@ -59,6 +61,7 @@ export default function SmsTemplateEditor({ template, onSave, onClose }: {
     setError(null);
     try {
       await onSave({ ...template, body, isActive });
+      toast.success("Template saved", `${template.name} — ${parts} SMS credit${parts > 1 ? "s" : ""} per send.`);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

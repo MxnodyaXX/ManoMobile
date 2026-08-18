@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AlertCircle, Wrench } from "lucide-react";
 import { useWorkRules, type WorkRules } from "@/lib/settings/workRules";
+import { useToast } from "@/lib/ui/toast";
 
 const AA = "#a78bfa";
 const TA = "#34d399";
@@ -42,6 +43,7 @@ function RuleSwitch({ on, busy, onChange }: { on: boolean; busy: boolean; onChan
 export default function WorkRulesCard() {
   const { rules, loading, error, save, configured } = useWorkRules();
   const [draft, setDraft] = useState<WorkRules>(rules);
+  const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -60,6 +62,7 @@ export default function WorkRulesCard() {
     setDraft(next);
     try {
       await save(next);
+      toast.success("Work rule saved");
     } catch (e) {
       setDraft(previous); // never leave a switch showing a rule that did not save
       setSaveError(e instanceof Error ? e.message : String(e));

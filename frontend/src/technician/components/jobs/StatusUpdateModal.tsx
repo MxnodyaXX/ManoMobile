@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   X, AlertTriangle, Play, Pause, CheckCircle,
   XCircle, ArrowRight, Shield, CheckSquare, DollarSign,
 } from "lucide-react";
-import { type RepairJob, type JobStatus, type EstimateApproval, type ApprovalChannel, useRepair } from "@/cashier/contexts/RepairContext";
+import { type RepairJob, type JobStatus, type CompletionType, type EstimateApproval, type ApprovalChannel, useRepair } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
+import { rulesForTechnician, type EffectiveRules } from "@/lib/settings/staffRules";
+import { useToast } from "@/lib/ui/toast";
 import { useWarranty, type WarrantyScope } from "@/cashier/contexts/WarrantyContext";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
 
@@ -31,6 +33,11 @@ const PAUSE_REASONS = [
   "Waiting for software download",
 ];
 
+/**
+ * Baseline transitions. Widened at runtime by the technician's work rules —
+ * see `allowed` below. On its own this table forces every job to be Started in
+ * the system before it can be Completed, which a busy bench does not do.
+ */
 const ALLOWED_NEXT: Partial<Record<JobStatus, JobStatus[]>> = {
   "Non-Issued": ["Issued"],
   "Issued":     ["Pending", "Completed"],
@@ -49,6 +56,32 @@ const FUNCTIONAL_TESTS = [
   "Loudspeaker",
   "Volume & power buttons",
   "Fingerprint / Face ID",
+];
+
+/**
+ * How a finished job ended. All three leave the bench and wait for collection,
+ * but they are not the same event: only Normal is chargeable work, and only a
+ * repaired device can carry a warranty.
+ */
+const COMPLETION_TYPES = [
+  {
+    id: "Normal" as const,
+    label: "Normal",
+    blurb: "Repaired successfully and charged as quoted.",
+    color: "#34d399",
+  },
+  {
+    id: "Return" as const,
+    label: "Return",
+    blurb: "Could not be repaired. Device goes back to the customer unrepaired, with nothing to pay.",
+    color: "#f87171",
+  },
+  {
+    id: "FOC" as const,
+    label: "FOC",
+    blurb: "Repaired free of charge. Nothing to pay.",
+    color: "#60a5fa",
+  },
 ];
 
 const WARRANTY_OPTIONS = [
@@ -86,6 +119,20 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
   );
   const [testNotes, setTestNotes]       = useState("");
   const [warrantyDays, setWarrantyDays] = useState(30);
+  const [completionType, setCompletionType] = useState<CompletionType>("Normal");
+  // What this technician is allowed to do. Defaults are permissive, so a rules
+  // lookup that fails never traps a finished job on the bench.
+  const [rules, setRules] = useState<EffectiveRules | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const toast = useToast();
+
+  useEffect(() => {
+    let active = true;
+    rulesForTechnician(technicianName)
+      .then(r => { if (active) setRules(r); })
+      .catch(() => { /* defaults apply */ });
+    return () => { active = false; };
+  }, [technicianName]);
   const [warrantyScope, setWarrantyScope] = useState<WarrantyScope>("Parts & Labour");
 
   // Parts used (prefilled from installed part requests) + future faults — both printed on the receipt.
@@ -101,7 +148,12 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
   const [apprChannel, setApprChannel]   = useState<ApprovalChannel>("In-store");
   const [apprRef, setApprRef]           = useState("");
   const [apprSig, setApprSig]           = useState("");
-  const revisedNum   = parseFloat(revisedCost) || 0;
+  // Nothing is charged for a Return or an FOC, whatever was quoted. The
+  // original estimate stays on the job; this is the final charge.
+  const chargeable   = completionType === "Normal";
+  const revisedNum   = chargeable ? (parseFloat(revisedCost) || 0) : 0;
+  // A device that was not repaired cannot carry a repair warranty.
+  const canWarrant   = completionType !== "Return";
   const needsApproval = revisedNum > originalEstimate + 0.001 && !job.approval;
   const approvalCaptured = apprChannel === "In-store" ? apprSig.trim() !== "" : apprRef.trim().length > 2;
 
@@ -110,11 +162,39 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
     : undefined;
 
   const hasDiagnostic = !!diagnostics[job.id];
-  const allowed = ALLOWED_NEXT[job.status] ?? [];
+  const requireStart = rules?.requireStartBeforeFinish ?? true;
+
+  const allowed = (() => {
+    const list = [...(ALLOWED_NEXT[job.status] ?? [])];
+    // A paused job was already started; making the technician resume it just to
+    // finish it is friction that records nothing.
+    if (job.status === "Pending" && !list.includes("Completed")) list.push("Completed");
+    // Shop rule off: a job can be finished without ever being started here.
+    if (job.status === "Non-Issued" && !requireStart && !list.includes("Completed")) list.push("Completed");
+    return list;
+  })();
 
   const testsPassed = Object.values(testResults).filter(v => v === true).length;
   const testsFailed = Object.values(testResults).filter(v => v === false).length;
   const testsTotal  = FUNCTIONAL_TESTS.length;
+
+  /** The one thing standing between this form and a saved status. */
+  const blockedBecause = (() => {
+    if (!selectedNext) return "Choose the new status above.";
+    if (selectedNext === "Pending" && pauseReason.trim().length <= 3) return "Give a reason for putting the job on hold.";
+    if (selectedNext === "Completed") {
+      if (completionNotes.trim().length <= 5) {
+        return completionType === "Return"
+          ? "Explain why the repair could not be completed (at least 6 characters)."
+          : "Add a work summary (at least 6 characters).";
+      }
+      if (needsApproval && !approvalCaptured) {
+        return "The final cost is above the quote — capture the customer's approval first.";
+      }
+    }
+    if (selectedNext === "Cancelled" && cancelReason.trim().length <= 3) return "Give a reason for cancelling.";
+    return null;
+  })();
 
   const canSubmit = (() => {
     if (!selectedNext) return false;
@@ -124,7 +204,7 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
     return true;
   })();
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!selectedNext || !canSubmit) return;
 
     if (conflictJob) {
@@ -170,7 +250,7 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
       }
 
       // Issue the unified warranty (status: Pending Activation — clock starts at handover)
-      if (warrantyDays > 0) {
+      if (warrantyDays > 0 && canWarrant) {
         const wid = issueWarranty({
           jobId: job.id,
           customerName: job.customerName,
@@ -190,13 +270,29 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
 
       completedPatch.estimatedCost = revisedNum;
       completedPatch.revisedEstimate = revisedNum;
+      completedPatch.completionType = completionType;
       if (approval) completedPatch.approval = approval;
 
       addActivity({ jobId: job.id, type: "test_completed", description: `Functional tests: ${testsPassed}/${testsTotal} passed${testsFailed > 0 ? `, ${testsFailed} failed` : ""}` });
-      addActivity({ jobId: job.id, type: "status_change", description: `Job completed. ${completionNotes.slice(0, 80)}${completionNotes.length > 80 ? "…" : ""}` });
+      addActivity({
+        jobId: job.id,
+        type: "status_change",
+        description: `Job completed (${completionType}). ${completionNotes.slice(0, 70)}${completionNotes.length > 70 ? "…" : ""}`,
+      });
     }
 
-    updateJob(job.id, { status: selectedNext, ...completedPatch });
+    // Await the write: a status that the database rejected must not be shown
+    // as done, or the job silently springs back a moment later.
+    const result = await updateJob(job.id, { status: selectedNext, ...completedPatch });
+    if (!result.ok) {
+      const msg = result.error ?? "The status could not be saved.";
+      setSaveError(msg);
+      toast.dialog("error", `${job.id} was not updated`, msg, "Try again");
+      return;
+    }
+    toast.dialog("success", `${job.id} updated`, selectedNext === "Completed"
+      ? `Finished as ${completionType}. The device is ready for collection.`
+      : `Status is now ${selectedNext}.`);
     setConfirmed(true);
     setTimeout(onClose, 1400);
   };
@@ -242,6 +338,18 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
                 <AlertTriangle size={14} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
                 <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.55 }}>
                   <strong style={{ color: "#fbbf24" }}>No diagnostic on record.</strong> Consider running a pre-repair diagnostic before starting.
+                </p>
+              </div>
+            )}
+
+            {/* Why "Completed" is not on the list, when it is not */}
+            {job.status === "Non-Issued" && requireStart && (
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 13px", borderRadius: 10, background: "rgba(96,165,250,0.07)", border: "1px solid rgba(96,165,250,0.25)" }}>
+                <AlertTriangle size={14} color="#60a5fa" style={{ flexShrink: 0, marginTop: 1 }} />
+                <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.55 }}>
+                  <strong style={{ color: "#60a5fa" }}>Start this job before finishing it.</strong> The shop requires a
+                  start to be recorded. An Admin can turn that off under <strong>Permissions</strong>, and finishing
+                  directly becomes available.
                 </p>
               </div>
             )}
@@ -370,10 +478,47 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
                   )}
                 </div>
 
+                {/* How this job ended — drives the charge, the warranty and the receipt */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {sec("Completion Type *")}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {COMPLETION_TYPES.map(t => {
+                      const active = completionType === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => setCompletionType(t.id)}
+                          style={{
+                            flex: "1 1 150px", textAlign: "left", padding: "10px 12px", borderRadius: 10,
+                            border: `1px solid ${active ? t.color + "60" : "var(--border)"}`,
+                            background: active ? t.color + "12" : "var(--bg-secondary)",
+                            cursor: "pointer", fontFamily: ff, transition: "all 0.15s",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 3 }}>
+                            <span style={{ width: 9, height: 9, borderRadius: "50%", background: active ? t.color : "var(--border)", flexShrink: 0 }} />
+                            <span style={{ fontSize: 12.5, fontWeight: 700, color: active ? t.color : "var(--text-primary)" }}>{t.label}</span>
+                          </div>
+                          <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.45 }}>{t.blurb}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {completionType !== "Normal" && (
+                    <p style={{ fontSize: 11.5, color: "#fbbf24", fontFamily: ff, lineHeight: 1.5 }}>
+                      {completionType === "Return"
+                        ? "Nothing will be charged and no warranty is issued. Explain below what could not be repaired — it goes on the customer's receipt."
+                        : "Nothing will be charged. A warranty can still be issued for the work done."}
+                    </p>
+                  )}
+                </div>
+
                 {/* Work summary (technician remarks → printed on the Non-Issued receipt) */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {sec("Job Remarks / Work Summary * (required)")}
-                  <textarea placeholder="Describe all work performed — parts replaced, tests done, issues found…" value={completionNotes} onChange={e => setCompletionNotes(e.target.value)} rows={3} style={inputStyle} />
+                  {sec(completionType === "Return" ? "Reason Not Repaired * (required)" : "Job Remarks / Work Summary * (required)")}
+                  <textarea placeholder={completionType === "Return"
+                    ? "Why the repair could not be completed — what was tried, what failed…"
+                    : "Describe all work performed — parts replaced, tests done, issues found…"} value={completionNotes} onChange={e => setCompletionNotes(e.target.value)} rows={3} style={inputStyle} />
                   <p style={{ fontSize: 11, color: completionNotes.trim().length > 5 ? TA : "var(--text-muted)", fontFamily: ff }}>
                     {completionNotes.trim().length} chars {completionNotes.trim().length > 5 ? "✓" : "(min 6)"}
                   </p>
@@ -399,6 +544,28 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
                     <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: testsFailed > 0 ? "#f87171" : TA, fontFamily: ff }}>
                       {testsPassed}/{testsTotal} passed
                     </span>
+                  </div>
+
+                  {/* Marking eleven checks one at a time is the slowest part of
+                      finishing a job — set them all, then correct the odd one. */}
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {([
+                      { label: "Select all passed", v: true as const,  col: TA },
+                      { label: "Mark all failed",   v: false as const, col: "#f87171" },
+                      { label: "Clear all",         v: null as null,   col: "#94a3b8" },
+                    ]).map(b => (
+                      <button
+                        key={b.label}
+                        onClick={() => setTestResults(Object.fromEntries(FUNCTIONAL_TESTS.map(t => [t, b.v])))}
+                        style={{
+                          padding: "5px 11px", borderRadius: 7, fontSize: 11, fontWeight: 600,
+                          border: `1px solid ${b.col}40`, background: `${b.col}10`, color: b.col,
+                          cursor: "pointer", fontFamily: ff, transition: "all 0.12s",
+                        }}
+                      >
+                        {b.label}
+                      </button>
+                    ))}
                   </div>
                   <div style={{ background: "var(--bg-secondary)", borderRadius: 10, border: "1px solid var(--border)", padding: "4px 0" }}>
                     {FUNCTIONAL_TESTS.map(test => {
@@ -476,8 +643,23 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
               </div>
             )}
 
+            {/* The database refused it — say so instead of springing the row back */}
+            {saveError && (
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: 10, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.35)" }}>
+                <AlertTriangle size={14} color="#f87171" style={{ flexShrink: 0, marginTop: 1 }} />
+                <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.55 }}>
+                  <strong style={{ color: "#f87171" }}>Not saved:</strong> {saveError}
+                </p>
+              </div>
+            )}
+
             {/* Actions */}
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 }}>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", alignItems: "center", marginTop: 4 }}>
+              {blockedBecause && (
+                <p style={{ flex: 1, fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                  {blockedBecause}
+                </p>
+              )}
               <button onClick={onClose} style={{ padding: "9px 18px", borderRadius: 9, fontSize: 13, background: "none", border: "1px solid var(--border)", color: "var(--text-secondary)", cursor: "pointer", fontFamily: ff }}>Cancel</button>
               <button onClick={handleSubmit} disabled={!canSubmit} style={{
                 padding: "9px 20px", borderRadius: 9, fontSize: 13, fontWeight: 600,

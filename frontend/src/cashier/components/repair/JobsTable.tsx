@@ -61,6 +61,166 @@ const priorityColor: Record<string, string> = {
   Low: "#94a3b8", Normal: "#60a5fa", High: "#fbbf24", Urgent: "#f87171",
 };
 
+// ─── Table columns per view ──────────────────────────────────────────────────
+//
+// Each list shows what that stage of the job is actually about: money and
+// priority while the device is waiting, timings once work is under way, and the
+// full financial picture once it is repaired. One shared column registry keeps
+// a column identical wherever it appears.
+
+type ColId =
+  | "jobId" | "customer" | "device" | "issue" | "technician" | "status" | "priority"
+  | "deviceIssue" | "estCost" | "quotedCost" | "costDue" | "quotedDue" | "finalBill" | "paidAmount" | "advance" | "balance"
+  | "estCompletion" | "created" | "started" | "paused" | "completed" | "issued";
+
+const fmtDate = (d?: string) => {
+  if (!d) return "—";
+  const dt = new Date(d);
+  return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+};
+const rs = (n: number) => `Rs. ${Math.round(n).toLocaleString("en-LK")}`;
+
+interface ColSpec {
+  label: string;
+  align?: "left" | "right";
+  render: (job: RepairJob) => React.ReactNode;
+}
+
+const muted = { fontSize: 11.5, color: "var(--text-muted)" } as const;
+const plain = { fontSize: 12.5, color: "var(--text-primary)" } as const;
+
+const COLUMNS: Record<ColId, ColSpec> = {
+  jobId: {
+    label: "Job ID",
+    render: j => <span style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)" }}>{j.id}</span>,
+  },
+  customer: {
+    label: "Customer",
+    render: j => (
+      <>
+        <p style={{ fontSize: 13, color: "var(--text-primary)", fontWeight: 500 }}>{j.customerName}</p>
+        <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{j.phone}</p>
+      </>
+    ),
+  },
+  device: { label: "Device", render: j => <p style={plain}>{[j.brand, j.model].filter(Boolean).join(" ") || "—"}</p> },
+  // Device and its fault belong together: one column, two lines, the way the
+  // customer column already pairs a name with a phone number.
+  deviceIssue: {
+    label: "Device / Issue",
+    render: j => (
+      <>
+        <p style={{ ...plain, fontWeight: 500 }}>{[j.brand, j.model].filter(Boolean).join(" ") || "—"}</p>
+        <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, maxWidth: 210, overflow: "hidden", textOverflow: "ellipsis" }} title={j.issue}>
+          {j.issue || "—"}
+        </p>
+      </>
+    ),
+  },
+  issue: { label: "Issue", render: j => <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{j.issue || "—"}</span> },
+  technician: {
+    label: "Technician",
+    render: j => <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{j.technician || "Unassigned"}</span>,
+  },
+  status: { label: "Status", render: () => null },   // rendered specially (badge + icon)
+  priority: {
+    label: "Priority",
+    render: j => <span style={{ fontSize: 11, fontWeight: 600, color: priorityColor[j.priority] }}>● {j.priority}</span>,
+  },
+  estCost: { label: "Est. Cost", align: "right", render: j => <span style={plain}>{rs(j.estimatedCost)}</span> },
+  // Once a job is completed, estimatedCost holds the FINAL charge — the quote
+  // survives in originalEstimate, so the two can be shown side by side.
+  quotedCost: {
+    label: "Estimated Cost",
+    align: "right",
+    render: j => <span style={plain}>{rs(j.originalEstimate ?? j.estimatedCost)}</span>,
+  },
+  /** Everything the customer has actually handed over, advance plus settlement. */
+  paidAmount: {
+    label: "Paid Amount",
+    align: "right",
+    render: j => {
+      const paid = j.advancePaid;
+      return paid > 0
+        ? <span style={{ fontSize: 12.5, fontWeight: 600, color: "#4ade80" }}>{rs(paid)}</span>
+        : <span style={{ fontSize: 12, color: "var(--text-muted)" }}>—</span>;
+    },
+  },
+  finalBill: {
+    label: "Final Bill",
+    align: "right",
+    render: j => <span style={{ ...plain, fontWeight: 700 }}>{rs(j.estimatedCost)}</span>,
+  },
+  advance: {
+    label: "Advance Paid",
+    align: "right",
+    render: j => j.advancePaid > 0
+      ? <span style={{ fontSize: 12, fontWeight: 600, color: "#4ade80" }}>{rs(j.advancePaid)}</span>
+      : <span style={{ fontSize: 12, color: "var(--text-muted)" }}>—</span>,
+  },
+  balance: {
+    label: "Balance",
+    align: "right",
+    render: j => {
+      const b = j.estimatedCost - j.advancePaid;
+      return <span style={{ fontSize: 12.5, fontWeight: 600, color: b > 0 ? "#f87171" : "#4ade80" }}>{rs(b)}</span>;
+    },
+  },
+  estCompletion: { label: "Est. Completion", render: j => <span style={muted}>{fmtDate(j.estimatedCompletion)}</span> },
+  /** Quote with the date it is promised for — one column, two lines. */
+  costDue: {
+    label: "Est. Cost / Due",
+    align: "right",
+    render: j => (
+      <>
+        <p style={plain}>{rs(j.estimatedCost)}</p>
+        <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{fmtDate(j.estimatedCompletion)}</p>
+      </>
+    ),
+  },
+  /** Same pairing for a finished job, where estimatedCost is the final charge. */
+  quotedDue: {
+    label: "Estimated Cost / Due",
+    align: "right",
+    render: j => (
+      <>
+        <p style={plain}>{rs(j.originalEstimate ?? j.estimatedCost)}</p>
+        <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{fmtDate(j.estimatedCompletion)}</p>
+      </>
+    ),
+  },
+  created: { label: "Registered", render: j => <span style={muted}>{fmtDate(j.createdAt)}</span> },
+  started: { label: "Started", render: j => <span style={muted}>{fmtDate(j.startedAt)}</span> },
+  paused: {
+    label: "On Hold Since",
+    render: j => (
+      <>
+        <span style={muted}>{fmtDate(j.pausedAt)}</span>
+        {j.pauseReason && (
+          <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 3, maxWidth: 190, lineHeight: 1.35 }}>
+            {j.pauseReason}
+          </p>
+        )}
+      </>
+    ),
+  },
+  completed: { label: "Completed", render: j => <span style={muted}>{fmtDate(j.completedAt)}</span> },
+  issued: { label: "Issued On", render: j => <span style={muted}>{fmtDate(j.handover?.handedOverAt)}</span> },
+};
+
+/** Columns per shop-facing view. Anything not listed falls back to DEFAULT_COLS. */
+const DEFAULT_COLS: ColId[] = ["jobId", "customer", "deviceIssue", "technician", "status", "priority", "costDue", "advance", "balance", "created"];
+
+const VIEW_COLUMNS: Partial<Record<RepairView, ColId[]>> = {
+  "New":         ["jobId", "customer", "deviceIssue", "technician", "status", "priority", "costDue", "advance", "balance", "created"],
+  "Not Started": ["jobId", "customer", "deviceIssue", "technician", "status", "priority", "costDue", "advance", "balance", "created"],
+  "Started":     ["jobId", "customer", "deviceIssue", "technician", "status", "costDue", "created", "started"],
+  "Pending":     ["jobId", "customer", "deviceIssue", "technician", "status", "costDue", "created", "started", "paused"],
+  "Non-Issued":  ["jobId", "customer", "deviceIssue", "technician", "status", "quotedDue", "advance", "finalBill", "paidAmount", "balance", "created", "started", "completed"],
+  "Issued":      ["jobId", "customer", "deviceIssue", "technician", "status", "quotedDue", "advance", "finalBill", "paidAmount", "balance", "created", "started", "completed", "issued"],
+};
+
+
 const labelSt: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: "var(--text-muted)",
   letterSpacing: "0.08em", textTransform: "uppercase",
@@ -1107,6 +1267,8 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
   const { addEntry } = useCashRegister();
   const { jobs: allJobs, updateJob, dealers } = useRepair();
   const isMobile = useIsMobile();
+  // What this stage of the job is about decides which columns are worth space.
+  const cols = VIEW_COLUMNS[view] ?? DEFAULT_COLS;
   const [search,         setSearch]         = useState("");
   const [showFilters,    setShowFilters]    = useState(false);
   const [priorityFilter, setPriorityFilter] = useState("All");
@@ -1159,9 +1321,23 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
       addEntry("in", `Cash — Repair Pickup (${pickupJob!.id})`, paidNow);
     }
     const job = allJobs.find(j => j.id === pickupJob!.id);
-    updateJob(pickupJob!.id, {
+    const nowISO = new Date().toISOString();
+    void updateJob(pickupJob!.id, {
       status: "Delivered",
       advancePaid: (job?.advancePaid ?? 0) + paidNow,
+      // Without this the job is Delivered with no date of issue — the Issued
+      // list then shows a dash where the collection date should be.
+      handover: job?.handover ?? {
+        collectedBy: job?.customerName ?? "Customer",
+        relationship: "Owner",
+        idVerified: false,
+        balanceSettled: paidNow,
+        paymentMethod: "Cash",
+        handoverSignature: "",
+        warrantyCardIssued: false,
+        handedOverBy: "Cashier",
+        handedOverAt: nowISO,
+      },
     });
     setPickupJob(null);
     setDetailsJob(null);
@@ -1176,11 +1352,26 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
   const handleIssueComplete = (data: Omit<IssueInvoiceData, "job" | "invoiceNo" | "createdAt">) => {
     const invoiceNo = Date.now().toString().slice(-10).padStart(10, "0");
     const createdAt = new Date().toLocaleString("en-US", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: true });
-    updateJob(issueJobTarget!.id, {
-      status: "Issued",
+    const target = allJobs.find(j => j.id === issueJobTarget!.id);
+    const issuedISO = new Date().toISOString();
+    // "Delivered", not "Issued": the internal enum uses Issued for work in
+    // progress, so the old value pushed a collected job back onto the bench.
+    void updateJob(issueJobTarget!.id, {
+      status: "Delivered",
       imei: data.imei,
       jobWarranty: data.warranty,
       advancePaid: data.paidAmount,
+      handover: target?.handover ?? {
+        collectedBy: target?.customerName ?? "Customer",
+        relationship: "Owner",
+        idVerified: false,
+        balanceSettled: data.paidAmount,
+        paymentMethod: "Cash",
+        handoverSignature: "",
+        warrantyCardIssued: false,
+        handedOverBy: "Cashier",
+        handedOverAt: issuedISO,
+      },
     });
     setInvoiceData({ job: issueJobTarget!, ...data, invoiceNo, createdAt });
     setIssueJobTarget(null);
@@ -1285,17 +1476,18 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
 
       {/* Table */}
       <div className="table-scroll" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900, tableLayout: "auto" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                {["Job ID", "Customer", "Device", "Issue", "Technician", "Status", "Priority", "Est. Cost", "Advance", "Balance", "Date", ""].map((h, i) => (
-                  <th key={i} style={{ padding: "12px 14px", textAlign: i >= 7 && i <= 9 ? "right" : "left", fontSize: 11, color: "var(--text-secondary)", fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase" as const, whiteSpace: "nowrap", fontFamily: "'Plus Jakarta Sans', sans-serif", background: "var(--bg-secondary)" }}>{h}</th>
+                {cols.map(id => (
+                  <th key={id} style={{ padding: "12px 14px", textAlign: COLUMNS[id].align ?? "left", fontSize: 11, color: "var(--text-secondary)", fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase" as const, whiteSpace: "nowrap", fontFamily: "'Plus Jakarta Sans', sans-serif", background: "var(--bg-secondary)" }}>{COLUMNS[id].label}</th>
                 ))}
+                <th style={{ padding: "12px 14px", background: "var(--bg-secondary)" }}></th>
               </tr>
             </thead>
             <tbody>
               {jobs.length === 0 ? (
-                <tr><td colSpan={12} style={{ padding: "48px 16px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No jobs found</td></tr>
+                <tr><td colSpan={cols.length + 1} style={{ padding: "48px 16px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No jobs found</td></tr>
               ) : jobs.map((job, i) => {
                 const sc = statusConfig[job.status];
                 const StatusIcon = sc.icon;
@@ -1306,47 +1498,15 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
                   <tr key={job.id} style={{ borderBottom: i < jobs.length - 1 ? "1px solid var(--border)" : "none", transition: "background 0.15s" }}
                     onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = "var(--bg-card-hover)"}
                     onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = "transparent"}>
-                    <td style={{ padding: "13px 14px" }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{job.id}</span>
-                    </td>
-                    <td style={{ padding: "13px 14px" }}>
-                      <p style={{ fontSize: 13, color: "var(--text-primary)", fontWeight: 500 }}>{job.customerName}</p>
-                      <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{job.phone}</p>
-                    </td>
-                    <td style={{ padding: "13px 14px" }}>
-                      <p style={{ fontSize: 12.5, color: "var(--text-primary)" }}>{job.brand} {job.model}</p>
-                    </td>
-                    <td style={{ padding: "13px 14px" }}>
-                      <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{job.issue}</span>
-                    </td>
-                    <td style={{ padding: "13px 14px" }}>
-                      <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{job.technician}</span>
-                    </td>
-                    <td style={{ padding: "13px 14px" }}>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, background: meta.bg, border: `1px solid ${meta.border}`, color: meta.color, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
-                        <StatusIcon size={9} strokeWidth={2.5} />{label}
-                      </span>
-                      {job.status === "Pending" && job.pauseReason && (
-                        <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 4, maxWidth: 160, lineHeight: 1.35 }}>⏸ {job.pauseReason}</p>
-                      )}
-                    </td>
-                    <td style={{ padding: "13px 14px" }}>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: priorityColor[job.priority] }}>● {job.priority}</span>
-                    </td>
-                    <td style={{ padding: "13px 14px", textAlign: "right" }}>
-                      <span style={{ fontSize: 12.5, color: "var(--text-primary)" }}>Rs. {job.estimatedCost.toLocaleString()}</span>
-                    </td>
-                    <td style={{ padding: "13px 14px", textAlign: "right" }}>
-                      {job.advancePaid > 0 ? (
-                        <span style={{ fontSize: 12, fontWeight: 600, color: "#4ade80" }}>Rs. {job.advancePaid.toLocaleString()}</span>
-                      ) : <span style={{ fontSize: 12, color: "var(--text-muted)" }}>—</span>}
-                    </td>
-                    <td style={{ padding: "13px 14px", textAlign: "right" }}>
-                      <span style={{ fontSize: 12.5, color: balance > 0 ? "#f87171" : "#4ade80", fontWeight: 600 }}>Rs. {balance.toLocaleString()}</span>
-                    </td>
-                    <td style={{ padding: "13px 14px" }}>
-                      <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>{job.createdAt}</span>
-                    </td>
+                    {cols.map(id => (
+                      <td key={id} style={{ padding: "13px 14px", textAlign: COLUMNS[id].align ?? "left", whiteSpace: "nowrap", verticalAlign: "top" }}>
+                        {id === "status" ? (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, background: meta.bg, border: `1px solid ${meta.border}`, color: meta.color, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
+                            <StatusIcon size={9} strokeWidth={2.5} />{label}
+                          </span>
+                        ) : COLUMNS[id].render(job)}
+                      </td>
+                    ))}
                     <td style={{ padding: "13px 14px" }}>
                       <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
                         <button onClick={() => setIntakeSlipJob(job)}
@@ -1399,6 +1559,8 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
       {intakeSlipJob && <IntakeSlipModal job={intakeSlipJob} onClose={() => setIntakeSlipJob(null)} />}
       {labelJob && (
         <BarcodeLabelModal
+          variant="repair"
+          jobId={labelJob.id}
           code={labelJob.id}
           title={`${labelJob.brand} ${labelJob.model}`.trim()}
           subtitle={labelJob.customerName}

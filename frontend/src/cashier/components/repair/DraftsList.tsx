@@ -3,6 +3,7 @@
 import { FileClock, Trash2, Camera } from "lucide-react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useRepairDrafts, draftTitle, draftSubtitle, fmtSaved, type RepairDraft } from "@/cashier/hooks/useRepairDrafts";
+import { useToast } from "@/lib/ui/toast";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 const TOTAL_STEPS = 5;
@@ -14,6 +15,7 @@ const TOTAL_STEPS = 5;
  */
 export default function DraftsList({ onResume }: { onResume: (d: RepairDraft) => void }) {
   const { drafts, removeDraft } = useRepairDrafts();
+  const toast = useToast();
   const isMobile = useIsMobile();
 
   if (drafts.length === 0) {
@@ -111,7 +113,7 @@ export default function DraftsList({ onResume }: { onResume: (d: RepairDraft) =>
               </button>
               <button
                 type="button"
-                onClick={() => removeDraft(d.id)}
+                onClick={() => { removeDraft(d.id); toast.dialog("success", "Draft discarded", draftTitle(d.form)); }}
                 aria-label={`Discard draft for ${draftTitle(d.form)}`}
                 title="Discard this draft"
                 style={{

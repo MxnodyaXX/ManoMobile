@@ -10,6 +10,7 @@ import { useRepairDrafts, newDraftId, fmtSaved, type RepairDraft, type RepairFor
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
 import JobReceiptSlip from "@/cashier/components/repair/JobReceiptSlip";
 import { uploadIntakePhotos } from "@/lib/repair/api";
+import { useToast } from "@/lib/ui/toast";
 import { useTechnicians, type Technician } from "@/lib/repair/technicians";
 import Combobox from "@/cashier/components/shared/Combobox";
 import { lookupModelNumber } from "@/cashier/data/modelNumbers";
@@ -915,6 +916,7 @@ function detectBrand(model: string): string {
 export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () => void; initialDraft?: RepairDraft | null }) {
   const { addJob, updateJob, dealers } = useRepair();
   const { technicians, loading: techLoading } = useTechnicians();
+  const toast = useToast();
   const { warranties } = useWarranty();
   const [customModels, setCustomModels] = usePersistentState<string[]>("mano_custom_models", []);
   const [step, setStep] = useState(initialDraft?.step ?? 1);
@@ -1076,13 +1078,16 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
         }
       }
 
+      toast.dialog("success", `Job ${job.id} created`, `${job.customerName} — ${job.brand} ${job.model}. Print the receipt or hand over the job number.`);
       setCreatedJob(job);
       // The intake is now a real job — its draft has served its purpose.
       removeDraft(draftId);
     } catch (e) {
       // The wizard stays filled in and the draft survives, so nothing is lost
       // and the cashier can simply press Create again.
-      setSaveError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setSaveError(msg);
+      toast.dialog("error", "Job not saved", msg, "Try again");
     } finally {
       setSaving(false);
     }

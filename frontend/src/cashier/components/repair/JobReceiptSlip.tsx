@@ -130,7 +130,19 @@ const JobReceiptSlip = forwardRef<HTMLDivElement, { job: RepairJob; signatureOve
                 {job.modelNumber && <div style={{ fontSize: 8, fontStyle: "normal", color: "#555", marginTop: 2 }}>{job.modelNumber}</div>}
               </td>
               <td style={{ ...td, fontFamily: "monospace", fontStyle: "normal" }}>{job.imei || "—"}</td>
-              <td style={td}>{job.issue || "—"}</td>
+              <td style={td}>
+                {job.issue || "—"}
+                {job.completionType === "Return" && (
+                  <div style={{ fontSize: 8, fontStyle: "normal", fontWeight: 700, color: "#b91c1c", marginTop: 2 }}>
+                    NOT REPAIRED - RETURNED TO CUSTOMER
+                  </div>
+                )}
+                {job.completionType === "FOC" && (
+                  <div style={{ fontSize: 8, fontStyle: "normal", fontWeight: 700, color: "#1d4ed8", marginTop: 2 }}>
+                    FREE OF CHARGE
+                  </div>
+                )}
+              </td>
               <td style={td}>{money(job.estimatedCost)}</td>
               <td style={td}>{money(job.advancePaid)}</td>
             </tr>

@@ -97,6 +97,61 @@ body {
 .fade-up-7 { animation-delay: 0.35s; }
 .fade-up-8 { animation-delay: 0.41s; }
 
+/* ── Centred action dialog ── */
+@keyframes dlgBackdropIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes dlgBackdropOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes dlgCardIn {
+  0%   { opacity: 0; transform: translateY(18px) scale(0.94); }
+  60%  { opacity: 1; transform: translateY(0) scale(1.015); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes dlgCardOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(10px) scale(0.97); }
+}
+/* Rings bloom outward once, so the eye lands on the badge before the words */
+@keyframes dlgRing {
+  0%   { opacity: 0.9; transform: scale(0.4); }
+  70%  { opacity: 0.12; transform: scale(1.05); }
+  100% { opacity: 0.12; transform: scale(1); }
+}
+@keyframes dlgIcon {
+  0%   { opacity: 0; transform: scale(0.3) rotate(-18deg); }
+  70%  { opacity: 1; transform: scale(1.12) rotate(4deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+.dlg-backdrop-in  { animation: dlgBackdropIn 0.18s ease both; }
+.dlg-backdrop-out { animation: dlgBackdropOut 0.18s ease both; }
+.dlg-card-in  { animation: dlgCardIn 0.34s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.dlg-card-out { animation: dlgCardOut 0.18s ease both; }
+.dlg-ring   { animation: dlgRing 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.dlg-ring-2 { animation-delay: 0.09s; }
+.dlg-icon   { animation: dlgIcon 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dlg-card-in, .dlg-card-out, .dlg-ring, .dlg-icon { animation-duration: 0.01ms; }
+}
+
+/* ── Action feedback toasts ── */
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes toastOut {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to   { opacity: 0; transform: translateX(28px) scale(0.97); }
+}
+@keyframes toastTimer {
+  from { width: 100%; }
+  to   { width: 0%; }
+}
+.toast-in  { animation: toastIn 0.26s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.toast-out { animation: toastOut 0.24s cubic-bezier(0.4, 0, 1, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-in, .toast-out { animation-duration: 0.01ms; }
+}
+
 @keyframes fieldShake {
   0%, 100% { transform: translateX(0); }
   20%      { transform: translateX(-5px); }

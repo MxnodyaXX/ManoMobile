@@ -6,6 +6,7 @@ import Barcode from "react-barcode";
 import { Printer, X, Tag, AlertTriangle } from "lucide-react";
 import { useInventory } from "@/cashier/contexts/InventoryContext";
 import { printLabelNode } from "@/cashier/utils/printLabel";
+import { SHOP_DETAILS } from "@/lib/shop";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 const PX_PER_MM = 96 / 25.4;
@@ -24,6 +25,14 @@ interface BarcodeLabelModalProps {
   title: string;
   /** Optional short line printed below the barcode, e.g. price or customer name. */
   subtitle?: string;
+  /**
+   * "repair" prints the job tag that goes on the device: job number and device
+   * across the top, barcode in the middle, shop details along the bottom.
+   * "simple" (default) is the stock inventory label.
+   */
+  variant?: "simple" | "repair";
+  /** Job number for the repair tag — printed large, top-left. */
+  jobId?: string;
   onClose: () => void;
 }
 
@@ -41,15 +50,26 @@ interface BarcodeLabelModalProps {
  * until it fits. Runs for both axes since a narrower label (38mm) can
  * overflow sideways even when a wider one (50mm) had enough slack.
  */
-export default function BarcodeLabelModal({ code, title, subtitle, onClose }: BarcodeLabelModalProps) {
+export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, onClose }: BarcodeLabelModalProps) {
   const { barcodeSettings: s } = useInventory();
   const labelRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const barcodeWrapRef = useRef<HTMLDivElement>(null);
 
+  /**
+   * The repair tag is designed for 50 x 25 mm stock and pins itself to it.
+   * Inventory labels still follow Admin -> Barcode, but a job tag that changed
+   * shape because someone adjusted a product-label setting would stop fitting
+   * the tags on the roll — and that setting currently resets on reload.
+   */
+  const REPAIR_LABEL = { w: 50, h: 25, margin: 2 };
+  const labelW = variant === "repair" ? REPAIR_LABEL.w : s.labelWidthMm;
+  const labelH = variant === "repair" ? REPAIR_LABEL.h : s.labelHeightMm;
+  const labelMargin = variant === "repair" ? REPAIR_LABEL.margin : s.labelMarginMm;
+
   const handlePrint = () => {
     if (!labelRef.current) return;
-    printLabelNode(labelRef.current, s.labelWidthMm, s.labelHeightMm);
+    printLabelNode(labelRef.current, labelW, labelH);
   };
 
   // EAN-13 only encodes a 12-13 digit numeric value; anything else (an IMEI is
@@ -60,11 +80,20 @@ export default function BarcodeLabelModal({ code, title, subtitle, onClose }: Ba
   // CODE39 only supports uppercase letters, digits and a few symbols.
   const value = format === "CODE39" ? code.toUpperCase() : code;
 
-  const availableWidthPx = Math.max(10, (s.labelWidthMm - 2 * s.labelMarginMm) * PX_PER_MM);
-  const availableHeightPx = Math.max(10, s.labelHeightMm * PX_PER_MM - VERTICAL_PAD_MM * PX_PER_MM * 2);
+  // Roughly a quarter of the label height — big enough to read as a mark
+  // rather than a smudge, small enough to leave the barcode its room.
+  const logoMm = Math.max(4.5, Math.round(labelH * 0.26 * 10) / 10);
+
+  const availableWidthPx = Math.max(10, (labelW - 2 * labelMargin) * PX_PER_MM);
+  const availableHeightPx = Math.max(10, labelH * PX_PER_MM - VERTICAL_PAD_MM * PX_PER_MM * 2);
+
+  // 50x25 leaves roughly 11mm for bars once the header and footer band have
+  // taken theirs, so the repair tag opens near that instead of at the 60px
+  // inventory default — the loop below still trims from here if it must.
+  const startBarHeight = variant === "repair" ? Math.min(s.height, 42) : s.height;
 
   const [barWidth, setBarWidth] = useState(s.width);
-  const [barHeight, setBarHeight] = useState(s.height);
+  const [barHeight, setBarHeight] = useState(startBarHeight);
   const [tooTight, setTooTight] = useState(false);
   // How far to pull the subtitle up to sit right under the barcode's own
   // text ("RM-012"), closing the blank line-height/descender space
@@ -77,10 +106,10 @@ export default function BarcodeLabelModal({ code, title, subtitle, onClose }: Ba
   // shrink it again if it doesn't fit.
   useLayoutEffect(() => {
     setBarWidth(s.width);
-    setBarHeight(s.height);
+    setBarHeight(startBarHeight);
     setTooTight(false);
     setSubtitleMarginTop(0);
-  }, [s.width, s.height, s.labelWidthMm, s.labelHeightMm, s.labelMarginMm, s.showText, s.fontSize, value, format, title, subtitle]);
+  }, [s.width, startBarHeight, labelW, labelH, labelMargin, s.showText, s.fontSize, value, format, title, subtitle]);
 
   // Runs after every render (including ones triggered by its own state
   // updates below), measuring the real DOM and nudging bar width/height down
@@ -147,7 +176,7 @@ export default function BarcodeLabelModal({ code, title, subtitle, onClose }: Ba
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Tag size={15} color="var(--accent)" />
-            <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Print Barcode Label</p>
+            <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>{variant === "repair" ? "Print Repair Tag" : "Print Barcode Label"}</p>
           </div>
           <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <X size={14} />
@@ -156,7 +185,9 @@ export default function BarcodeLabelModal({ code, title, subtitle, onClose }: Ba
 
         <div style={{ padding: 20, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
           <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, textAlign: "center" }}>
-            Label size {s.labelWidthMm} × {s.labelHeightMm} mm, {s.labelMarginMm}mm side margin — adjust in Admin → Barcode if it doesn&apos;t match your label stock.
+            {variant === "repair"
+              ? <>Repair tag: fixed <strong>50 × 25 mm</strong>, 2mm side margin — the size of the job-tag roll.</>
+              : <>Label size {labelW} × {labelH} mm, {labelMargin}mm side margin — adjust in Admin → Barcode if it doesn&apos;t match your label stock.</>}
             <br />In the print dialog, keep <strong>Scale: Actual size</strong> — never a custom % (it distorts the bar widths).
           </div>
 
@@ -164,7 +195,7 @@ export default function BarcodeLabelModal({ code, title, subtitle, onClose }: Ba
             <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "9px 12px", borderRadius: 8, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)", width: "100%", boxSizing: "border-box" }}>
               <AlertTriangle size={13} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
               <span style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: ff, lineHeight: 1.5 }}>
-                This doesn&apos;t reliably fit on a {s.labelWidthMm}×{s.labelHeightMm}mm label — content will still overflow slightly. Try a larger label, a shorter code, or turn off &quot;Show Text Below&quot; in Admin → Barcode.
+                This doesn&apos;t reliably fit on a {labelW}×{labelH}mm label — content will still overflow slightly. Try a larger label, a shorter code, or turn off &quot;Show Text Below&quot; in Admin → Barcode.
               </span>
             </div>
           )}
@@ -173,43 +204,104 @@ export default function BarcodeLabelModal({ code, title, subtitle, onClose }: Ba
           <div
             ref={labelRef}
             style={{
-              width: `${s.labelWidthMm}mm`, height: `${s.labelHeightMm}mm`,
+              width: `${labelW}mm`, height: `${labelH}mm`,
               background: "#fff", border: "1px solid var(--border)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              padding: `${VERTICAL_PAD_MM}mm ${s.labelMarginMm}mm`, boxSizing: "border-box", overflow: "hidden",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: `${VERTICAL_PAD_MM}mm ${labelMargin}mm`, boxSizing: "border-box", overflow: "hidden",
             }}
           >
-            <div ref={contentRef} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: "#000", fontFamily: ff, textAlign: "center", lineHeight: 1.2, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {title}
-              </div>
-              <div ref={barcodeWrapRef}>
-                <Barcode
-                  value={value}
-                  format={format}
-                  width={barWidth}
-                  height={barHeight}
-                  fontSize={s.fontSize}
-                  displayValue={s.showText}
-                  marginTop={3}
-                  marginBottom={0}
-                  marginLeft={2}
-                  marginRight={2}
-                />
-              </div>
-              {subtitle && (
-                <div style={{ fontSize: 8, color: "#333", fontFamily: ff, textAlign: "center", lineHeight: 1.2, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: subtitleMarginTop }}>
-                  {subtitle}
+            {variant === "repair" ? (
+              /* Job tag: what a technician needs to identify the device on the
+                 bench without opening the system — job number, device, owner —
+                 plus the shop details for a customer holding the receipt. */
+              <div ref={contentRef} style={{ display: "flex", flexDirection: "column", width: "100%", gap: "0.7mm" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "#000", fontFamily: ff, letterSpacing: "-0.02em", whiteSpace: "nowrap" }}>
+                    {jobId ?? code}
+                  </span>
+                  <div style={{ textAlign: "right", minWidth: 0 }}>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: "#000", fontFamily: ff, lineHeight: 1.15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {title}
+                    </div>
+                    {subtitle && (
+                      <div style={{ fontSize: 6.5, color: "#444", fontFamily: ff, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {subtitle}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
+
+                <div ref={barcodeWrapRef} style={{ display: "flex", justifyContent: "center", width: "100%" }}>
+                  <Barcode
+                    value={value}
+                    format={format}
+                    width={barWidth}
+                    height={barHeight}
+                    fontSize={s.fontSize}
+                    displayValue={false}
+                    marginTop={0}
+                    marginBottom={0}
+                    marginLeft={0}
+                    marginRight={0}
+                  />
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "1.4mm" }}>
+                  {/* Sized in mm against the label height, not in pixels: the
+                      same tag prints on 25mm and 40mm stock, and a fixed pixel
+                      logo looks like a speck on the larger one. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={SHOP_DETAILS.logo}
+                    alt=""
+                    style={{
+                      width: `${logoMm}mm`, height: `${logoMm}mm`,
+                      objectFit: "contain", flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ minWidth: 0, lineHeight: 1.3 }}>
+                    <div style={{ fontSize: 8, fontWeight: 800, color: "#000", fontFamily: ff }}>{SHOP_DETAILS.name}</div>
+                    <div style={{ fontSize: 6.6, color: "#333", fontFamily: ff, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {SHOP_DETAILS.phone}&nbsp;&nbsp;&nbsp;{SHOP_DETAILS.address}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div ref={contentRef} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#000", fontFamily: ff, textAlign: "center", lineHeight: 1.2, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {title}
+                </div>
+                <div ref={barcodeWrapRef}>
+                  <Barcode
+                    value={value}
+                    format={format}
+                    width={barWidth}
+                    height={barHeight}
+                    fontSize={s.fontSize}
+                    displayValue={s.showText}
+                    marginTop={3}
+                    marginBottom={0}
+                    marginLeft={2}
+                    marginRight={2}
+                  />
+                </div>
+                {subtitle && (
+                  <div style={{ fontSize: 8, color: "#333", fontFamily: ff, textAlign: "center", lineHeight: 1.2, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: subtitleMarginTop }}>
+                    {subtitle}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <button
             onClick={handlePrint}
             style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 20px", borderRadius: 8, fontSize: 13, fontWeight: 600, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--accent-fg)", cursor: "pointer", fontFamily: ff }}
           >
-            <Printer size={14} /> Print Label
+            <Printer size={14} /> {variant === "repair" ? "Print Repair Tag" : "Print Label"}
           </button>
         </div>
       </div>

@@ -7,6 +7,7 @@ import {
   useStaff, createStaff, updateStaff,
   type StaffProfile, type StaffRoleName, type StaffStatusName,
 } from "@/lib/staff/api";
+import { useToast } from "@/lib/ui/toast";
 
 const AA = "#a78bfa";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -55,6 +56,7 @@ function StaffModal({ initial, onSaved, onClose }: {
   const [status, setStatus] = useState<StaffStatusName>(initial?.status ?? "Active");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   const valid = editing
     ? fullName.trim().length > 0
@@ -75,6 +77,8 @@ function StaffModal({ initial, onSaved, onClose }: {
         });
         if (!res.ok) { setError(res.error ?? "Could not add the staff member."); return; }
       }
+      toast.dialog("success", editing ? "Staff member updated" : "Staff member added",
+        editing ? fullName.trim() : `${fullName.trim()} can sign in with the email and password you set.`);
       onSaved();
       onClose();
     } catch (e) {
@@ -187,6 +191,7 @@ function StaffModal({ initial, onSaved, onClose }: {
 
 export default function StaffManagement() {
   const { staff, loading, error, reload, configured } = useStaff();
+  const toast = useToast();
   const isMobile = useIsMobile();
   const [query, setQuery] = useState("");
   const [roleFilter, setRole] = useState<StaffRoleName | "All">("All");
@@ -204,8 +209,11 @@ export default function StaffManagement() {
     try {
       await updateStaff(s.id, { status });
       await reload();
+      toast.success(`${s.fullName} is now ${status}`);
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setActionError(msg);
+      toast.error("Could not update the staff member", msg);
     }
   };
 

@@ -30,7 +30,7 @@ import { HeldSalesProvider } from "@/cashier/contexts/HeldSalesContext";
 import { AuditProvider } from "@/cashier/contexts/AuditContext";
 import { getDateLabel } from "@/cashier/utils/dataLabel";
 import {
-  DASHBOARD_STATS, REVENUE_CHART_DATA, SALES_CHART_DATA,
+  REVENUE_CHART_DATA, SALES_CHART_DATA,
   fmtRs, type FilterPeriod,
 } from "@/cashier/data/dashboardData";
 import {
@@ -39,6 +39,7 @@ import {
   Hammer, Box, ClipboardList,
   AlertTriangle, CheckCircle, Clock, ArrowRight,
 } from "lucide-react";
+import { useIssuedFigures } from "@/lib/repair/figures";
 
 export type ActivePage =
   | "Home"
@@ -159,11 +160,16 @@ function ActivityFeed() {
 
 /* ── Today snapshot strip ── */
 function TodaySnapshot() {
+  // Counted from live repair jobs. Sales figures are absent rather than zero:
+  // there is no sales backend yet, and an invented "Revenue Today" is the most
+  // misleading number a shop dashboard could show.
+  const { jobs } = useRepair();
+  const today = new Date().toISOString().slice(0, 10);
   const snaps = [
-    { label: "Revenue Today",     value: "Rs. 181,200", color: "#4ade80" },
-    { label: "Jobs In Queue",     value: "4",           color: "#fbbf24" },
-    { label: "Invoices Issued",   value: "27",          color: "#60a5fa" },
-    { label: "Pending Pickups",   value: "3",           color: "#a78bfa" },
+    { label: "Taken In Today",  value: String(jobs.filter(j => (j.createdAt ?? "").slice(0, 10) === today).length), color: "#4ade80" },
+    { label: "Jobs In Queue",   value: String(jobs.filter(j => j.status === "Non-Issued").length),                  color: "#fbbf24" },
+    { label: "In Progress",     value: String(jobs.filter(j => j.status === "Issued").length),                      color: "#60a5fa" },
+    { label: "Pending Pickups", value: String(jobs.filter(j => j.status === "Completed").length),                   color: "#a78bfa" },
   ];
   return (
     <div className="resp-grid-4">
@@ -189,7 +195,8 @@ export default function CashierPage() {
   const goToRepair = (section?: RepairSection) => { setRepairSection(section); setActivePage("Repair Management"); };
   const dateLabel = getDateLabel(filter);
 
-  const s = DASHBOARD_STATS[filter];
+  // Live figures, read from the database rather than the zeroed constants.
+  const fig = useIssuedFigures(filter);
   const isManaged = MANAGED_PAGES.includes(activePage);
 
   return (
@@ -274,28 +281,28 @@ export default function CashierPage() {
                 {/* Stat groups */}
                 <div className="resp-grid-3">
                   <StatGroup index={0} title="Revenue" dateLabel={dateLabel}>
-                    <StatCard title="Total Revenue"   value={fmtRs(s.totalRevenue.value)}   change={s.totalRevenue.change}   icon={DollarSign}  size="large" />
+                    <StatCard title="Total Revenue"   value={fmtRs(fig.repairIncome)}   change=""   icon={DollarSign}  size="large" />
                     <div className="resp-grid-2">
-                      <StatCard title="Sales"         value={fmtRs(s.salesRevenue.value)}   change={s.salesRevenue.change}   icon={TrendingUp}  size="small" />
-                      <StatCard title="Repairs"       value={fmtRs(s.repairRevenue.value)}  change={s.repairRevenue.change}  icon={Wrench}      size="small" />
+                      <StatCard title="Sales"         value={fmtRs(fig.salesRevenue)}   change=""   icon={TrendingUp}  size="small" />
+                      <StatCard title="Repairs"       value={fmtRs(fig.repairIncome)}  change=""  icon={Wrench}      size="small" />
                     </div>
                   </StatGroup>
 
                   <StatGroup index={1} title="Sales" dateLabel={dateLabel}>
-                    <StatCard title="Total Sales"     value={fmtRs(s.totalSales.value)}     change={s.totalSales.change}     icon={ShoppingCart}   size="large" />
+                    <StatCard title="Total Sales"     value={fmtRs(fig.salesRevenue)}     change=""     icon={ShoppingCart}   size="large" />
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                      <StatCard title="Mobile"        value={fmtRs(s.mobileSales.value)}    change={s.mobileSales.change}    icon={Smartphone}     size="small" />
-                      <StatCard title="Accessory"     value={fmtRs(s.accessorySales.value)} change={s.accessorySales.change} icon={Package}        size="small" />
-                      <StatCard title="Other"         value={fmtRs(s.otherSales.value)}     change={s.otherSales.change}     icon={MoreHorizontal} size="small" />
+                      <StatCard title="Mobile"        value={fmtRs(0)}    change=""    icon={Smartphone}     size="small" />
+                      <StatCard title="Accessory"     value={fmtRs(0)} change="" icon={Package}        size="small" />
+                      <StatCard title="Other"         value={fmtRs(0)}     change=""     icon={MoreHorizontal} size="small" />
                     </div>
                   </StatGroup>
 
                   <StatGroup index={2} title="Repairs" dateLabel={dateLabel}>
-                    <StatCard title="Repair Income"   value={fmtRs(s.repairIncome.value)}  change={s.repairIncome.change}  icon={Wrench}        size="large" />
+                    <StatCard title="Repair Income"   value={fmtRs(fig.repairIncome)}  change=""  icon={Wrench}        size="large" />
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                      <StatCard title="Labor Cost"    value={fmtRs(s.repairCost.value)}    change={s.repairCost.change}    icon={Hammer}        size="small" />
-                      <StatCard title="Parts Cost"    value={fmtRs(s.partsCost.value)}     change={s.partsCost.change}     icon={Box}           size="small" />
-                      <StatCard title="Total Jobs"    value={String(s.totalJobs.value)}    change={s.totalJobs.change}     icon={ClipboardList} size="small" isCount />
+                      <StatCard title="Labor Cost"    value={fmtRs(0)}    change=""    icon={Hammer}        size="small" />
+                      <StatCard title="Parts Cost"    value={fmtRs(fig.collected)}     change=""     icon={Box}           size="small" />
+                      <StatCard title="Total Jobs"    value={String(fig.totalJobs)}    change=""     icon={ClipboardList} size="small" isCount />
                     </div>
                   </StatGroup>
                 </div>
@@ -316,8 +323,8 @@ export default function CashierPage() {
 
                 {/* Charts */}
                 <div className="resp-grid-2">
-                  <ChartCard title="Revenue Growth"  index={0} color="#e8e8e8" data={REVENUE_CHART_DATA} badge="+28%" />
-                  <ChartCard title="Sales Overview"  index={1} color="#a8a8a8" data={SALES_CHART_DATA}   badge="+24%" />
+                  <ChartCard title="Revenue Growth"  index={0} color="#e8e8e8" data={REVENUE_CHART_DATA} />
+                  <ChartCard title="Sales Overview"  index={1} color="#a8a8a8" data={SALES_CHART_DATA}   />
                 </div>
 
                 {/* Info cards */}

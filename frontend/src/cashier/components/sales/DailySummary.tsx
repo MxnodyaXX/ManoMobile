@@ -73,10 +73,12 @@ export default function DailySummary() {
   const maxRev  = Math.max(...CATEGORIES.map(c => c.revenue), 1);
 
   const summaryCards = [
-    { label: "Total Revenue",    value: fmtRs(totals.revenue), icon: DollarSign,   color: "#4ade80", change: "+12%" },
-    { label: "Transactions",     value: totals.transactions,   icon: ShoppingCart, color: "#60a5fa", change: "+4" },
-    { label: "Avg. Transaction", value: fmtRs(avgTx),         icon: TrendingUp,   color: "#fbbf24", change: "+8%" },
-    { label: "Top Category",     value: topCat.name,          icon: topCat.icon,  color: topCat.color, change: fmtRs(topCat.revenue) },
+    // No day-on-day comparison is stored, so no trend is claimed. The figures
+    // themselves are real; "+12% vs yesterday" was not.
+    { label: "Total Revenue",    value: fmtRs(totals.revenue), icon: DollarSign,   color: "#4ade80", change: "" },
+    { label: "Transactions",     value: totals.transactions,   icon: ShoppingCart, color: "#60a5fa", change: "" },
+    { label: "Avg. Transaction", value: fmtRs(avgTx),          icon: TrendingUp,   color: "#fbbf24", change: "" },
+    { label: "Top Category",     value: topCat.name,           icon: topCat.icon,  color: topCat.color, change: fmtRs(topCat.revenue) },
   ];
 
   const DS_HEADERS = ["Category", "Transactions", "Revenue (Rs.)", "Avg. Value (Rs.)"];
@@ -132,7 +134,7 @@ export default function DailySummary() {
                 </div>
               </div>
               <p style={{ fontSize: 18, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", marginBottom: 4 }}>{card.value}</p>
-              <p style={{ fontSize: 11, color: card.color }}>{card.change} vs yesterday</p>
+              {card.change && <p style={{ fontSize: 11, color: card.color }}>{card.change}</p>}
             </div>
           );
         })}

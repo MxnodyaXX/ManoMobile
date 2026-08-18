@@ -17,6 +17,7 @@ import {
 import ExportButtons from "@/cashier/components/shared/ExportButtons";
 import { exportToExcel, exportToPng, exportMultiSectionToExcel, exportReportToPdf } from "@/cashier/utils/exportUtils";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
+import { useRepair } from "@/cashier/contexts/RepairContext";
 
 type ReportTab = "Daily Report" | "Sales Report" | "Repair Report" | "P&L Report" | "Stock Valuation" | "Cashier Performance" | "Supplier Report" | "Credit Aging" | "Repair SLA";
 
@@ -95,8 +96,12 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
 
   const cashRows: { label: string; amount: number; type: string }[] = [];
 
-  const variance: number = -200;
-  const totalRevenue = 181200;
+  // No sales backend yet: these are 0 rather than invented. When sales data
+  // exists they come from it, and the tiles below light up on their own.
+  const variance: number = 0;
+  const totalRevenue = 0;
+  const txCount = 0;
+  const cashCollected = 0;
   const paymentMethods: { method: string; amount: number; pct: number; color: string }[] = [];
   const drFilename = `daily-report-${dateFrom}`;
 
@@ -105,10 +110,10 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
       title: "Summary",
       headers: ["Metric", "Value", "Note"],
       rows: [
-        ["Total Revenue",  "Rs. 181,200", "All payment methods"],
-        ["Transactions",   "27",          "Paid & collected"],
-        ["Cash Collected", "Rs. 102,000", "Physical cash in drawer"],
-        ["Cash Variance",  "Rs. -200",    variance < 0 ? "⚠ Shortfall — investigate" : "✓ Balanced"],
+        ["Total Revenue",  fmtRs(totalRevenue), "All payment methods"],
+        ["Transactions",   String(txCount),     "Paid & collected"],
+        ["Cash Collected", fmtRs(cashCollected), "Physical cash in drawer"],
+        ["Cash Variance",  fmtRs(variance),     variance < 0 ? "Shortfall - investigate" : "Balanced"],
         ["Period",         dateFrom === dateTo ? dateFrom : `${dateFrom} to ${dateTo}`, "Report date range"],
       ],
     },
@@ -134,9 +139,9 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
   ];
 
   const statCards = [
-    { label: "Total Revenue",  value: fmtRs(totalRevenue), change: "+12.4%", sub: "vs yesterday", pos: true  },
-    { label: "Transactions",   value: "27",                change: "+4",      sub: "vs yesterday", pos: true  },
-    { label: "Cash Collected", value: fmtRs(102000),       change: "56%",     sub: "of total",     pos: true  },
+    { label: "Total Revenue",  value: fmtRs(totalRevenue),  change: "", sub: "today",  pos: true  },
+    { label: "Transactions",   value: String(txCount),      change: "", sub: "today",  pos: true  },
+    { label: "Cash Collected", value: fmtRs(cashCollected), change: "", sub: "in drawer", pos: true  },
     { label: "Cash Variance",  value: fmtRs(Math.abs(variance)), change: variance < 0 ? "Shortfall" : "Balanced", sub: "expected vs actual", pos: variance >= 0 },
   ];
   const statIcons  = [DollarSign, FileText, DollarSign, variance < 0 ? TrendingDown : TrendingUp];
@@ -200,7 +205,7 @@ onPng={() => {
               </div>
               <p style={{ fontSize: 26, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em", marginBottom: 8, fontFamily: ff }}>{c.value}</p>
               <p style={{ fontSize: 12.5, fontWeight: 600, color: c.pos ? "#4ade80" : "#f87171", fontFamily: ff }}>
-                {c.change} <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>{c.sub}</span>
+                {c.change ? `${c.change} ` : ""}<span style={{ color: "var(--text-muted)", fontWeight: 400 }}>{c.sub}</span>
               </p>
             </div>
           );
@@ -479,9 +484,9 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
   };
 
   const statCards = [
-    { label: "Total Revenue",    value: "Rs. 181,600", change: "+12.4%", sub: "vs yesterday", pos: true },
-    { label: "Transactions",     value: "39",           change: "+8.2%",  sub: "vs yesterday", pos: true },
-    { label: "Avg. Order Value", value: "Rs. 4,656",   change: "+3.8%",  sub: "vs yesterday", pos: true },
+    { label: "Total Revenue",    value: fmtRs(0), change: "", sub: "no sales data yet", pos: true },
+    { label: "Transactions",     value: "0",      change: "", sub: "no sales data yet", pos: true },
+    { label: "Avg. Order Value", value: fmtRs(0), change: "", sub: "no sales data yet", pos: true },
   ];
 
   const SR_HEADERS = ["Product", "Category", "Qty Sold", "Revenue (Rs.)"];
@@ -561,27 +566,11 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
   const repairFaultColors = ["#6355ff", "#60a5fa", "#34d399", "#fbbf24"];
   const repairBrandFreqData: { brand: string; count: number }[] = [];
   const repairBrandColors2 = ["#60a5fa", "#a78bfa", "#34d399", "#fbbf24"];
-  const repairBrandModels: Record<string, Array<{ model: string; parts: number; labor: number; revenue: number; profit: number }>> = {
-    Samsung: [
-      { model: "Galaxy A32", parts: 3800, labor: 5200, revenue: 9000,  profit: 5200 },
-      { model: "Galaxy M14", parts: 2200, labor: 3100, revenue: 5300,  profit: 3100 },
-      { model: "Galaxy A15", parts: 1800, labor: 2400, revenue: 4200,  profit: 2400 },
-      { model: "Galaxy S21", parts: 5500, labor: 4500, revenue: 10000, profit: 4500 },
-      { model: "Galaxy A13", parts: 900,  labor: 1500, revenue: 2400,  profit: 1500 },
-    ],
-    Apple: [
-      { model: "iPhone 13",  parts: 9500, labor: 8000, revenue: 17500, profit: 8000 },
-      { model: "iPhone SE",  parts: 6000, labor: 6000, revenue: 12000, profit: 6000 },
-      { model: "iPhone 12",  parts: 7500, labor: 6500, revenue: 14000, profit: 6500 },
-    ],
-    Oppo:  [
-      { model: "Oppo A57",   parts: 2800, labor: 3200, revenue: 6000,  profit: 3200 },
-      { model: "Oppo A17",   parts: 1800, labor: 2200, revenue: 4000,  profit: 2200 },
-    ],
-    Redmi: [
-      { model: "Redmi 9C",   parts: 3200, labor: 3300, revenue: 6500,  profit: 3300 },
-    ],
-  };
+  // Per-model repair economics come from job + parts data once parts are
+  // recorded against jobs; invented figures here fed a tooltip that looked
+  // authoritative.
+  const repairBrandModels: Record<string, Array<{ model: string; parts: number; labor: number; revenue: number; profit: number }>> = {};
+
   const RepairBrandTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
     const models = repairBrandModels[label as string] || [];
@@ -682,7 +671,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
             <p style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 12, fontFamily: ff }}>{c.label}</p>
             <p style={{ fontSize: 28, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em", marginBottom: 8, fontFamily: ff }}>{c.value}</p>
             <p style={{ fontSize: 12.5, fontWeight: 600, color: c.pos ? "#4ade80" : "#f87171", fontFamily: ff }}>
-              {c.change} <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>{c.sub}</span>
+              {c.change ? `${c.change} ` : ""}<span style={{ color: "var(--text-muted)", fontWeight: 400 }}>{c.sub}</span>
             </p>
           </div>
         ))}
@@ -1275,17 +1264,92 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
 function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const jobs: { id: string; device: string; type: string; tech: string; status: string; charge: number; parts: number; labor: number }[] = [];
+  // Real repair jobs, not a placeholder. This array was empty, which is why an
+  // issued repair showed no revenue however many jobs the shop had done.
+  const { jobs: repairJobs } = useRepair();
+
+  const inRange = (iso?: string) => {
+    if (!iso) return false;
+    const d = iso.slice(0, 10);
+    return d >= dateFrom && d <= dateTo;
+  };
+
+  const jobs = repairJobs.map(j => ({
+    id: j.id,
+    device: [j.brand, j.model].filter(Boolean).join(" ") || "—",
+    type: j.issue || "—",
+    tech: j.technician || "Unassigned",
+    status: j.status,
+    // The charge is what the job is billed at; parts are not costed per job
+    // yet (repair_parts_used is written but not loaded here), so labour is not
+    // split out rather than being invented.
+    charge: j.estimatedCost,
+    parts: 0,
+    labor: j.estimatedCost,
+    issuedAt: j.handover?.handedOverAt ?? j.completedAt,
+    createdAt: j.createdAt,
+    completionType: j.completionType,
+  }));
+
+  // Revenue counts jobs actually issued to the customer in this date range —
+  // money earned, not money quoted.
+  const issuedJobs  = jobs.filter(j => j.status === "Delivered" && inRange(j.issuedAt ?? j.createdAt));
+  const issuedValue = issuedJobs.reduce((a, b) => a + b.charge, 0);
+  const awaitingValue = jobs
+    .filter(j => j.status === "Completed")
+    .reduce((a, b) => a + b.charge, 0);
 
   const techData: { name: string; jobs: number; revenue: number; parts: number; labor: number }[] = [];
 
   const radarData: { metric: string; technicianA: number; technicianB: number }[] = [];
 
-  const repairTypes: { type: string; count: number }[] = [];
+  // Charts read the same live jobs as the tiles below, so nothing on this page
+  // can disagree with anything else on it.
+  const repairTypes = Object.entries(
+    repairJobs.reduce<Record<string, number>>((acc, j) => {
+      const key = (j.issue || "Unspecified").trim();
+      acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    }, {}),
+  )
+    .map(([type, count]) => ({ type, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6);
 
-  const statusGroups: { label: string; count: number; color: string; pct: number }[] = [];
+  const STATUS_META: Record<string, { label: string; color: string }> = {
+    "Non-Issued": { label: "Not started",  color: "#94a3b8" },
+    "Issued":     { label: "In progress",  color: "#60a5fa" },
+    "Pending":    { label: "On hold",      color: "#fbbf24" },
+    "Completed":  { label: "Awaiting collection", color: "#4ade80" },
+    "Delivered":  { label: "Issued",       color: "#a78bfa" },
+    "Cancelled":  { label: "Cancelled",    color: "#f87171" },
+  };
 
-  const trendData: { day: string; revenue: number }[] = [];
+  const statusGroups = Object.entries(STATUS_META)
+    .map(([status, meta]) => {
+      const count = repairJobs.filter(j => j.status === status).length;
+      return {
+        label: meta.label,
+        count,
+        color: meta.color,
+        pct: repairJobs.length ? Math.round((count / repairJobs.length) * 100) : 0,
+      };
+    })
+    .filter(g => g.count > 0);
+
+  // Revenue per day over the selected range, from jobs actually issued.
+  const trendData = (() => {
+    const byDay = new Map<string, number>();
+    for (const j of repairJobs) {
+      if (j.status !== "Delivered") continue;
+      const day = (j.handover?.handedOverAt ?? j.completedAt ?? j.createdAt ?? "").slice(0, 10);
+      if (!day || day < dateFrom || day > dateTo) continue;
+      byDay.set(day, (byDay.get(day) ?? 0) + j.estimatedCost);
+    }
+    return [...byDay.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, revenue]) => ({ day: day.slice(5), revenue }));
+  })();
 
   const statusCfg: Record<string, { color: string; bg: string }> = {
     Completed: { color: "#4ade80", bg: "rgba(74,222,128,0.08)"  },
@@ -1295,7 +1359,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
   };
 
   const completed   = jobs.filter(j => j.status === "Completed");
-  const totalCharge = jobs.reduce((a, b) => a + b.charge, 0);
+  const totalCharge = issuedValue;
   const totalParts  = jobs.reduce((a, b) => a + b.parts, 0);
   const totalLabor  = jobs.reduce((a, b) => a + b.labor, 0);
 
@@ -1304,10 +1368,10 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
   const rrFilename = `repair-report-${new Date().toISOString().slice(0, 10)}`;
 
   const statCards = [
-    { label: "Total Jobs",     value: String(jobs.length),      change: "+2",     sub: "vs last week", pos: true  },
-    { label: "Completed",      value: String(completed.length), change: "60%",    sub: "completion",   pos: true  },
-    { label: "Repair Revenue", value: fmtRs(totalCharge),       change: "+18.3%", sub: "vs last week", pos: true  },
-    { label: "Parts Cost",     value: fmtRs(totalParts),        change: `${Math.round((totalParts / totalCharge) * 100)}%`, sub: "of revenue", pos: false },
+    { label: "Total Jobs",     value: String(jobs.length),        change: "", sub: "all time", pos: true },
+    { label: "Issued To Customer", value: String(issuedJobs.length), change: "", sub: "in this range", pos: true },
+    { label: "Repair Revenue", value: fmtRs(issuedValue),         change: "", sub: "collected on issued jobs", pos: true },
+    { label: "Awaiting Collection", value: fmtRs(awaitingValue),  change: "", sub: "repaired, not yet issued", pos: true },
   ];
   const statIcons  = [Wrench, FileText, DollarSign, Package];
   const statColors = ["#34d399", "#4ade80", "#fbbf24", "#f87171"];
@@ -1356,7 +1420,7 @@ function RepairReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps)
               </div>
               <p style={{ fontSize: 26, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em", marginBottom: 8, fontFamily: ff }}>{c.value}</p>
               <p style={{ fontSize: 12.5, fontWeight: 600, color: c.pos ? "#4ade80" : "#f87171", fontFamily: ff }}>
-                {c.change} <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>{c.sub}</span>
+                {c.change ? `${c.change} ` : ""}<span style={{ color: "var(--text-muted)", fontWeight: 400 }}>{c.sub}</span>
               </p>
             </div>
           );
@@ -1630,8 +1694,10 @@ function PLReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const monthlyData: { month: string; revenue: number; cogs: number; gross: number; expenses: number; net: number }[] = [];
   const categoryPL: { category: string; revenue: number; cogs: number; gross: number; margin: number }[] = [];
-  const totalRevenue = 755000; const totalCOGS = 390000; const grossProfit = 365000;
-  const expenses = 108000; const netProfit = 257000; const grossMargin = 48.3; const netMargin = 34.0;
+  // Profit & loss reads from the accounting tables once they exist. Invented
+  // figures here would be indistinguishable from real ones on a printed report.
+  const totalRevenue = 0; const totalCOGS = 0; const grossProfit = 0;
+  const expenses = 0; const netProfit = 0; const grossMargin = 0; const netMargin = 0;
   return (
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <ReportFilters dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo}

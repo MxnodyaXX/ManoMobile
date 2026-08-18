@@ -65,6 +65,7 @@ interface JobRow {
   approval: EstimateApproval | null;
   handover: HandoverRecord | null;
   warranty_id: string | null;
+  completion_type: RepairJob["completionType"] | null;
 }
 
 interface DealerRow {
@@ -128,6 +129,7 @@ export function rowToJob(row: JobRow): RepairJob {
     approval: opt(row.approval),
     handover: opt(row.handover),
     warrantyId: opt(row.warranty_id),
+    completionType: opt(row.completion_type),
   };
 }
 
@@ -176,6 +178,7 @@ export function jobToRow(job: Partial<RepairJob>): Record<string, unknown> {
   set("approval", job.approval);
   set("handover", job.handover);
   set("warranty_id", job.warrantyId);
+  set("completion_type", job.completionType);
 
   return row;
 }
