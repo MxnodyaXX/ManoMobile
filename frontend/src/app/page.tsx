@@ -3,9 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Wrench, ShoppingCart, Shield, Landmark, ArrowRight, Smartphone, X, Zap, Loader2 } from "lucide-react";
+import { useTechnicians } from "@/lib/repair/technicians";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
-const TECH_NAMES = ["Kamal", "Nimal", "Suresh"];
 
 const ROLES = [
   {
@@ -52,6 +52,11 @@ export default function LoginPage() {
   // since this page unmounts once navigation actually completes.
   const [pendingRoleId, setPendingRoleId] = useState<string | null>(null);
 
+  // Same source as the technician page's own picker (profiles.role =
+  // 'Technician'), so a name chosen here is always one the technician
+  // page will recognize — no more picking twice.
+  const { technicians, loading: techLoading } = useTechnicians();
+
   const handleRoleClick = (id: string) => {
     if (id === "technician") { setShowTechPicker(true); return; }
     const path = id === "accounts" ? "/accounts" : id === "admin" ? "/admin" : "/cashier";
@@ -61,7 +66,7 @@ export default function LoginPage() {
 
   const handleTechClick = (name: string) => {
     setPendingRoleId("technician");
-    router.push(`/technician?tech=${name}`);
+    router.push(`/technician?tech=${encodeURIComponent(name)}`);
   };
 
   const pendingRole = ROLES.find(r => r.id === pendingRoleId);
@@ -218,7 +223,20 @@ export default function LoginPage() {
 
             {/* Tech cards */}
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {TECH_NAMES.map(name => {
+              {techLoading && (
+                <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff, textAlign: "center", padding: "12px 0" }}>
+                  Loading technicians&hellip;
+                </p>
+              )}
+
+              {!techLoading && technicians.length === 0 && (
+                <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff, textAlign: "center", padding: "12px 0" }}>
+                  No technicians found. Add staff with the Technician role first.
+                </p>
+              )}
+
+              {technicians.map(tech => {
+                const name = tech.name;
                 const hov = hoveredTech === name;
                 return (
                   <button
@@ -247,7 +265,7 @@ export default function LoginPage() {
                     </div>
                     <div style={{ flex: 1, textAlign: "left" }}>
                       <p style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff }}>{name}</p>
-                      <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff }}>Repair Technician</p>
+                      <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff }}>{tech.speciality}</p>
                     </div>
                     <ArrowRight size={14} style={{ color: hov ? "#34d399" : "var(--text-muted)", transition: "color 0.15s", flexShrink: 0 }} />
                   </button>

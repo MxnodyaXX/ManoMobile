@@ -6,11 +6,12 @@ import {
   Smartphone, Package, AlertTriangle, XCircle,
   Plus, Search, Edit2, Trash2, X, Check,
   BarChart3, ArrowUpCircle, ArrowDownCircle, Sliders,
-  ChevronDown, ShieldAlert, Truck,
+  ChevronDown, ShieldAlert, Truck, Tag,
 } from "lucide-react";
 import StockReceiving from "./StockReceiving";
 import { useInventory } from "@/cashier/contexts/InventoryContext";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
+import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1122,6 +1123,7 @@ function MobileDevicesTab({ devices, setDevices }: {
   const [statusFilter, setStatusFilter] = useState("All");
   const [editDevice, setEditDevice] = useState<DeviceItem | null | "new">(null);
   const [deleteTarget, setDeleteTarget] = useState<DeviceItem | null>(null);
+  const [labelDevice, setLabelDevice] = useState<DeviceItem | null>(null);
 
   const { brands: brandList } = useInventory();
   const brands = useMemo(
@@ -1225,8 +1227,9 @@ function MobileDevicesTab({ devices, setDevices }: {
                     <td style={tdBase}>
                       <span style={{ background: sc.bg, color: sc.color, fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, textTransform: "capitalize" }}>{d.status}</span>
                     </td>
-                    <td style={{ ...tdBase, width: 72 }}>
+                    <td style={{ ...tdBase, width: 96 }}>
                       <div style={{ display: "flex", gap: 4 }}>
+                        <button onClick={() => setLabelDevice(d)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Print barcode label"><Tag size={14} /></button>
                         <button onClick={() => setEditDevice(d)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Edit"><Edit2 size={14} /></button>
                         <button onClick={() => setDeleteTarget(d)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }} title="Delete"><Trash2 size={14} /></button>
                       </div>
@@ -1252,6 +1255,14 @@ function MobileDevicesTab({ devices, setDevices }: {
           onClose={() => setDeleteTarget(null)}
         />
       )}
+      {labelDevice && (
+        <BarcodeLabelModal
+          code={labelDevice.imei}
+          title={`${labelDevice.brand} ${labelDevice.name}`.trim()}
+          subtitle={`${labelDevice.storage} · ${labelDevice.color}`}
+          onClose={() => setLabelDevice(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1268,6 +1279,7 @@ function AccessoriesTab({ accessories, setAccessories }: {
   const [editProduct, setEditProduct] = useState<AccessoryProduct | null | "new">(null);
   const [adjustProduct, setAdjustProduct] = useState<AccessoryProduct | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AccessoryProduct | null>(null);
+  const [labelProduct, setLabelProduct] = useState<AccessoryProduct | null>(null);
 
   const { categories: categoryList } = useInventory();
   const categories = useMemo(() => ["All", ...categoryList.map(c => c.name).sort()], [categoryList]);
@@ -1378,6 +1390,7 @@ function AccessoriesTab({ accessories, setAccessories }: {
                         >
                           Stock
                         </button>
+                        <button onClick={() => setLabelProduct(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Print barcode label"><Tag size={14} /></button>
                         <button onClick={() => setEditProduct(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Edit"><Edit2 size={14} /></button>
                         <button onClick={() => setDeleteTarget(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }} title="Delete"><Trash2 size={14} /></button>
                       </div>
@@ -1408,6 +1421,14 @@ function AccessoriesTab({ accessories, setAccessories }: {
           name={`${deleteTarget.name} (${deleteTarget.code})`}
           onConfirm={() => { setAccessories(prev => prev.filter(x => x.id !== deleteTarget.id)); setDeleteTarget(null); }}
           onClose={() => setDeleteTarget(null)}
+        />
+      )}
+      {labelProduct && (
+        <BarcodeLabelModal
+          code={labelProduct.code}
+          title={labelProduct.name}
+          subtitle={`${labelProduct.brand} · ${labelProduct.model}`}
+          onClose={() => setLabelProduct(null)}
         />
       )}
     </div>

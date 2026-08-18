@@ -19,6 +19,7 @@ import ReportsManagement from "@/cashier/components/reports/ReportsManagement";
 import CashRegister from "@/cashier/components/cashregister/CashRegister";
 import InvoiceHistory from "@/cashier/components/invoicehistory/InvoiceHistory";
 import AuditLog from "@/cashier/components/audit/AuditLog";
+import JobScanFab from "@/cashier/components/shared/JobScanFab";
 import { InventoryProvider } from "@/cashier/contexts/InventoryContext";
 import { CashRegisterProvider } from "@/cashier/contexts/CashRegisterContext";
 import { RepairProvider } from "@/cashier/contexts/RepairContext";
@@ -330,6 +331,7 @@ export default function CashierPage() {
           </main>
         </div>
       </div>
+      <JobScanFab />
     </InventoryProvider>
     </HeldSalesProvider>
     </SalesProvider>

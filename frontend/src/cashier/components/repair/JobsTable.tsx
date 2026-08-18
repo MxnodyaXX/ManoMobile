@@ -10,11 +10,12 @@ import type { JobStatus, RepairJob, RepairView } from "@/cashier/contexts/Repair
 export type { JobStatus, RepairJob } from "@/cashier/contexts/RepairContext";
 import { createPortal } from "react-dom";
 import JobReceiptSlip from "./JobReceiptSlip";
+import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import {
   Search, Filter, ChevronDown, MoreHorizontal,
   CheckCircle, Clock, AlertCircle, XCircle, Wrench,
   X, CheckSquare, Send, Printer, ShieldCheck, CreditCard,
-  Truck, Ban, FileText, Package,
+  Truck, Ban, FileText, Package, Tag,
 } from "lucide-react";
 
 interface FinishJobData {
@@ -1119,6 +1120,7 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
   const [cancelJob,      setCancelJob]      = useState<RepairJob | null>(null);
   const [pickupJob,      setPickupJob]      = useState<RepairJob | null>(null);
   const [intakeSlipJob,  setIntakeSlipJob]  = useState<RepairJob | null>(null);
+  const [labelJob,       setLabelJob]       = useState<RepairJob | null>(null);
 
   const jobs = useMemo(() => allJobs.filter(j => {
     const q = search.toLowerCase();
@@ -1354,6 +1356,13 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
                           onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-muted)"; }}>
                           <FileText size={12} />
                         </button>
+                        <button onClick={() => setLabelJob(job)}
+                          title="Print barcode label"
+                          style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border-active)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-primary)"; }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-muted)"; }}>
+                          <Tag size={12} />
+                        </button>
                         <button onClick={() => setDetailsJob(job)}
                           title="View details"
                           style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
@@ -1388,6 +1397,14 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
       {cancelJob && <CancelJobModal job={cancelJob} onClose={() => setCancelJob(null)} onCancel={handleCancel} />}
       {pickupJob && <PickupModal job={pickupJob} onClose={() => setPickupJob(null)} onConfirm={handlePickup} />}
       {intakeSlipJob && <IntakeSlipModal job={intakeSlipJob} onClose={() => setIntakeSlipJob(null)} />}
+      {labelJob && (
+        <BarcodeLabelModal
+          code={labelJob.id}
+          title={`${labelJob.brand} ${labelJob.model}`.trim()}
+          subtitle={labelJob.customerName}
+          onClose={() => setLabelJob(null)}
+        />
+      )}
     </div>
   );
 }

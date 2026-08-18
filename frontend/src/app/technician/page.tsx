@@ -15,6 +15,7 @@ import PendingCollection from "@/technician/components/collection/PendingCollect
 import PartsAvailability from "@/technician/components/parts/PartsAvailability";
 import MyPerformance from "@/technician/components/performance/MyPerformance";
 import ShiftTracker  from "@/technician/components/shift/ShiftTracker";
+import JobScanFab    from "@/cashier/components/shared/JobScanFab";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -228,6 +229,7 @@ function TechPageInner() {
           </main>
         </div>
       </div>
+      <JobScanFab />
     </TechProvider>
     </WarrantyProvider>
     </RepairProvider>

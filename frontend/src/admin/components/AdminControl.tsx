@@ -581,6 +581,15 @@ const FORMAT_OPTIONS: { value: BarcodeSettings["format"]; label: string; desc: s
   { value: "EAN13",   label: "EAN-13",   desc: "13-digit numeric retail standard" },
 ];
 
+// The two label rolls actually in use — picking a preset avoids retyping
+// (and mistyping) dimensions each time the roll gets swapped. Whichever one
+// is picked here must also be selected as the matching paper size/stock in
+// the printer driver — the app can't switch that half automatically.
+const LABEL_PRESETS: { width: number; height: number; label: string }[] = [
+  { width: 50, height: 25, label: "50 × 25mm" },
+  { width: 38, height: 25, label: "38 × 25mm" },
+];
+
 function BarcodeManager() {
   const { barcodeSettings: s, setBarcodeSettings } = useInventory();
   const set = <K extends keyof BarcodeSettings>(k: K, v: BarcodeSettings[K]) => setBarcodeSettings(prev => ({ ...prev, [k]: v }));
@@ -609,6 +618,44 @@ function BarcodeManager() {
             <input type="text" value={s.prefix} onChange={e => set("prefix", e.target.value.toUpperCase())} placeholder="e.g. MM" style={inputStyle} />
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Codes generated in inventory will start with this prefix</div>
           </div>
+          <div>
+            <label style={labelStyle}>Label Size (mm)</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              {LABEL_PRESETS.map(p => {
+                const active = s.labelWidthMm === p.width && s.labelHeightMm === p.height;
+                return (
+                  <button
+                    key={p.label}
+                    onClick={() => setBarcodeSettings(prev => ({ ...prev, labelWidthMm: p.width, labelHeightMm: p.height }))}
+                    style={{
+                      flex: 1, padding: "8px 10px", borderRadius: 8, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif",
+                      fontSize: 12, fontWeight: 700,
+                      border: active ? "1px solid var(--accent-glow)" : "1px solid var(--border)",
+                      background: active ? "var(--accent-dim)" : "var(--bg-surface)",
+                      color: active ? "var(--accent)" : "var(--text-primary)",
+                    }}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <input type="number" min={10} max={150} value={s.labelWidthMm} onChange={e => set("labelWidthMm", Number(e.target.value) || s.labelWidthMm)} placeholder="Width" style={inputStyle} />
+              <input type="number" min={10} max={150} value={s.labelHeightMm} onChange={e => set("labelHeightMm", Number(e.target.value) || s.labelHeightMm)} placeholder="Height" style={inputStyle} />
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              Must match the label stock loaded in the printer <strong>and</strong> the paper size/stock selected in the print dialog — switching this alone doesn&apos;t change what Windows sends to the printer.
+            </div>
+          </div>
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <label style={labelStyle}>Label Side Margin</label>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{s.labelMarginMm}mm</span>
+            </div>
+            <input type="range" min={0} max={8} step={0.5} value={s.labelMarginMm} onChange={e => set("labelMarginMm", Number(e.target.value))} style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }} />
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Blank space kept on the left and right of the barcode so it doesn&apos;t sit flush against the label edge</div>
+          </div>
           {([["Bar Width", "width", 1, 4], ["Bar Height", "height", 30, 120], ["Font Size", "fontSize", 8, 20]] as [string, "width" | "height" | "fontSize", number, number][]).map(([lbl, key, min, max]) => (
             <div key={key}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
@@ -635,7 +682,7 @@ function BarcodeManager() {
             <Barcode value={sampleCode} format={s.format} width={s.width} height={s.height} fontSize={s.fontSize} displayValue={s.showText} margin={6} />
           </div>
           <div style={{ background: "var(--bg-surface)", borderRadius: 10, padding: "14px 16px" }}>
-            {([["Format", FORMAT_OPTIONS.find(f => f.value === s.format)?.label ?? s.format], ["Sample Code", sampleCode], ["Bar Width", `${s.width}×`], ["Height", `${s.height}px`], ["Font", `${s.fontSize}px`], ["Show Text", s.showText ? "Yes" : "No"]] as [string, string][]).map(([k, v]) => (
+            {([["Format", FORMAT_OPTIONS.find(f => f.value === s.format)?.label ?? s.format], ["Sample Code", sampleCode], ["Bar Width", `${s.width}×`], ["Height", `${s.height}px`], ["Font", `${s.fontSize}px`], ["Show Text", s.showText ? "Yes" : "No"], ["Label Size", `${s.labelWidthMm} × ${s.labelHeightMm} mm`], ["Side Margin", `${s.labelMarginMm}mm`]] as [string, string][]).map(([k, v]) => (
               <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "3px 0", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                 <span style={{ color: "var(--text-muted)" }}>{k}</span>
                 <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{v}</span>

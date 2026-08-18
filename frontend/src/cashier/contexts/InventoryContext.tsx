@@ -31,6 +31,12 @@ export interface BarcodeSettings {
   fontSize: number;
   showText: boolean;
   prefix: string;
+  /** Physical label size (mm) for the thermal label printer. */
+  labelWidthMm: number;
+  labelHeightMm: number;
+  /** Blank margin (mm) kept on the left/right of the barcode content —
+   *  vertical spacing is handled separately since it's already tight. */
+  labelMarginMm: number;
 }
 
 export interface AdminCredentials { username: string; password: string; }
@@ -62,6 +68,7 @@ const INITIAL_SUPPLIERS: Supplier[] = [];
 
 const INITIAL_BARCODE: BarcodeSettings = {
   format: "CODE128", width: 2, height: 60, fontSize: 12, showText: true, prefix: "MM",
+  labelWidthMm: 50, labelHeightMm: 25, labelMarginMm: 3,
 };
 
 const INITIAL_ADMIN: AdminCredentials = { username: "admin", password: "admin123" };
