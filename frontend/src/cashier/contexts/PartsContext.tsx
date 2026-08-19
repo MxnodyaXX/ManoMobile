@@ -1,7 +1,12 @@
 "use client";
 
-import { createContext, useCallback, useContext, type Dispatch, type SetStateAction, type ReactNode } from "react";
-import { usePersistentState } from "@/cashier/hooks/usePersistentState";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  fetchParts, savePart as savePartRow, deletePart as deletePartRow,
+  fetchPartRequests, createPartRequest, resolvePartRequest, markRequestInstalled,
+  importLegacyParts,
+} from "@/lib/repair/parts";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 
 /**
  * The repair spare-parts catalog (screens, batteries, charging ports, etc. —
@@ -9,11 +14,14 @@ import { usePersistentState } from "@/cashier/hooks/usePersistentState";
  * workflow around it. Separate from InventoryContext's Accessories, which is
  * retail stock sold to customers.
  *
- * localStorage-backed (see usePersistentState), not plain Context state:
- * Admin (inside the Cashier route) adds parts and approves requests, and the
- * Technician route reads/creates them — two separate page loads with two
- * separate provider trees, which a normal Context can't cross but
- * localStorage can.
+ * Supabase-backed (repair_parts / repair_part_requests). This used to be
+ * localStorage, which worked only because Admin and Technician run in the same
+ * browser — but that also meant a technician on their own device saw an empty
+ * catalogue and two machines kept two different stock counts. An approval
+ * workflow needs one shared copy, so both now live in the database.
+ *
+ * Stock changes go through Postgres functions, never a read-modify-write from
+ * here: two admins approving the same request must not both deduct.
  */
 
 export type PartCategory =
@@ -55,69 +63,120 @@ export interface PartRequest {
   installedAt?: Date;
 }
 
-const INITIAL_PARTS: SparePart[] = [];
-const INITIAL_REQUESTS: PartRequest[] = [];
-
 interface PartsContextType {
   parts: SparePart[];
-  setParts: Dispatch<SetStateAction<SparePart[]>>;
+  /** Insert or update one part. A blank `id` inserts. Throws on failure so the
+   *  caller can keep the form open rather than reporting a false success. */
+  savePart: (part: SparePart) => Promise<SparePart>;
+  deletePart: (id: string) => Promise<void>;
 
   partRequests: PartRequest[];
   /**
    * Create a request. `autoApprove: true` (a technician with the "use parts
    * without approval" permission) skips straight to Approved and deducts
-   * stock immediately; otherwise it lands as Pending for Admin to resolve.
+   * stock in the same transaction; otherwise it lands as Pending for Admin.
+   * Throws if stock ran out, so nobody is told "approved" for a part that is
+   * no longer there.
    */
   requestPart: (
     req: Omit<PartRequest, "id" | "requestedAt" | "status" | "installedAt">,
     opts?: { autoApprove?: boolean },
-  ) => void;
-  /** Admin's Approve/Reject action on a Pending request. Approving deducts
-   *  the requested quantity from that part's stock (by SKU). */
-  resolveRequest: (id: string, status: "Approved" | "Rejected") => void;
-  markPartInstalled: (id: string) => void;
+  ) => Promise<PartRequest>;
+  /** Admin's Approve/Reject on a Pending request. Approving deducts stock. */
+  resolveRequest: (id: string, status: "Approved" | "Rejected") => Promise<void>;
+  markPartInstalled: (id: string) => Promise<void>;
+
+  loading: boolean;
+  error: string | null;
+  /** False when Supabase env vars are missing — the UI shows a notice rather
+   *  than pretending an empty catalogue is the real one. */
+  configured: boolean;
+  reload: () => Promise<void>;
 }
 
 const PartsContext = createContext<PartsContextType | null>(null);
 
 export function PartsProvider({ children }: { children: ReactNode }) {
-  const [parts, setParts] = usePersistentState<SparePart[]>("mano_repair_parts", INITIAL_PARTS);
-  const [partRequests, setPartRequests] = usePersistentState<PartRequest[]>("mano_part_requests", INITIAL_REQUESTS);
+  const configured = isSupabaseConfigured();
+  const [parts, setPartsState] = useState<SparePart[]>([]);
+  const [partRequests, setPartRequests] = useState<PartRequest[]>([]);
+  const [loading, setLoading] = useState(configured);
+  const [error, setError] = useState<string | null>(null);
 
-  const deductStock = useCallback((sku: string, quantity: number) => {
-    setParts(prev => prev.map(p => p.sku === sku ? { ...p, stock: Math.max(0, p.stock - quantity) } : p));
-  }, [setParts]);
+  const reload = useCallback(async () => {
+    if (!configured) { setLoading(false); return; }
+    try {
+      const [p, r] = await Promise.all([fetchParts(), fetchPartRequests()]);
+      setPartsState(p);
+      setPartRequests(r);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [configured]);
 
-  const requestPart = useCallback((
+  useEffect(() => {
+    if (!configured) { setLoading(false); return; }
+    let active = true;
+    // Carry any pre-database catalogue up first, so the shop doesn't open the
+    // Parts tab to an empty list and retype what it already entered.
+    importLegacyParts()
+      .catch(() => { /* reported on the next load; the fetch below still runs */ })
+      .then(() => { if (active) return reload(); });
+    return () => { active = false; };
+  }, [configured, reload]);
+
+  const savePart = useCallback(async (part: SparePart) => {
+    const saved = await savePartRow(part);
+    setPartsState(prev =>
+      prev.some(p => p.id === saved.id)
+        ? prev.map(p => (p.id === saved.id ? saved : p))
+        : [...prev, saved].sort((a, b) => a.name.localeCompare(b.name)),
+    );
+    return saved;
+  }, []);
+
+  const deletePart = useCallback(async (id: string) => {
+    await deletePartRow(id);
+    setPartsState(prev => prev.filter(p => p.id !== id));
+  }, []);
+
+  const requestPart = useCallback(async (
     req: Omit<PartRequest, "id" | "requestedAt" | "status" | "installedAt">,
     opts?: { autoApprove?: boolean },
   ) => {
-    const id = `PR-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const autoApprove = opts?.autoApprove ?? false;
-    const entry: PartRequest = {
-      ...req,
-      id,
-      requestedAt: new Date(),
-      status: autoApprove ? "Approved" : "Pending",
-      ...(autoApprove ? { resolvedAt: new Date() } : {}),
-    };
-    setPartRequests(prev => [...prev, entry]);
-    if (autoApprove) deductStock(req.partSku, req.quantity);
-  }, [setPartRequests, deductStock]);
+    const created = await createPartRequest(req, opts?.autoApprove ?? false);
+    setPartRequests(prev => [created, ...prev]);
+    // Auto-approval deducted stock server-side; refetch so the number on
+    // screen is the database's, not an arithmetic guess made here.
+    if (created.status === "Approved") {
+      fetchParts().then(setPartsState).catch(() => { /* next reload corrects it */ });
+    }
+    return created;
+  }, []);
 
-  const resolveRequest = useCallback((id: string, status: "Approved" | "Rejected") => {
-    const target = partRequests.find(r => r.id === id);
-    if (!target || target.status !== "Pending") return;
-    setPartRequests(prev => prev.map(r => r.id === id ? { ...r, status, resolvedAt: new Date() } : r));
-    if (status === "Approved") deductStock(target.partSku, target.quantity);
-  }, [partRequests, setPartRequests, deductStock]);
+  const resolveRequest = useCallback(async (id: string, status: "Approved" | "Rejected") => {
+    const updated = await resolvePartRequest(id, status);
+    setPartRequests(prev => prev.map(r => (r.id === id ? updated : r)));
+    if (status === "Approved") {
+      fetchParts().then(setPartsState).catch(() => { /* next reload corrects it */ });
+    }
+  }, []);
 
-  const markPartInstalled = useCallback((id: string) => {
-    setPartRequests(prev => prev.map(r => r.id === id ? { ...r, installedAt: new Date() } : r));
-  }, [setPartRequests]);
+  const markPartInstalled = useCallback(async (id: string) => {
+    await markRequestInstalled(id);
+    const at = new Date();
+    setPartRequests(prev => prev.map(r => (r.id === id ? { ...r, installedAt: at } : r)));
+  }, []);
 
   return (
-    <PartsContext.Provider value={{ parts, setParts, partRequests, requestPart, resolveRequest, markPartInstalled }}>
+    <PartsContext.Provider value={{
+      parts, savePart, deletePart,
+      partRequests, requestPart, resolveRequest, markPartInstalled,
+      loading, error, configured, reload,
+    }}>
       {children}
     </PartsContext.Provider>
   );

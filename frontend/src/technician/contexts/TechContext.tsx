@@ -123,8 +123,8 @@ interface TechContextValue {
   partRequests: PartRequest[];
   /** Returns the resulting status so the caller can tell the technician
    *  whether it needs Admin approval or was granted immediately. */
-  requestPart: (req: Omit<PartRequest, "id" | "requestedAt" | "status" | "installedAt" | "technicianName">) => PartRequestStatus;
-  markPartInstalled: (id: string) => void;
+  requestPart: (req: Omit<PartRequest, "id" | "requestedAt" | "status" | "installedAt" | "technicianName">) => Promise<PartRequestStatus>;
+  markPartInstalled: (id: string) => Promise<void>;
 
   // Job meta / timer
   jobMeta: Record<string, JobMeta>;
@@ -204,9 +204,14 @@ export function TechProvider({ children, technicianName }: { children: ReactNode
     return () => { active = false; };
   }, [technicianName]);
 
-  const requestPart = useCallback((req: Omit<PartRequest, "id" | "requestedAt" | "status" | "installedAt" | "technicianName">): PartRequestStatus => {
-    rawRequestPart({ ...req, technicianName }, { autoApprove });
-    return autoApprove ? "Approved" : "Pending";
+  // The status now comes back from the database rather than being predicted
+  // from the permission: auto-approval deducts stock in the same transaction,
+  // so it can legitimately fail when the last one just went.
+  const requestPart = useCallback(async (
+    req: Omit<PartRequest, "id" | "requestedAt" | "status" | "installedAt" | "technicianName">,
+  ): Promise<PartRequestStatus> => {
+    const created = await rawRequestPart({ ...req, technicianName }, { autoApprove });
+    return created.status;
   }, [rawRequestPart, technicianName, autoApprove]);
 
   // ── Job meta / timer ──

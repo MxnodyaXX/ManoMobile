@@ -1,9 +1,10 @@
 "use client";
 
 import {
-  createContext, useContext, useState,
+  createContext, useContext, useEffect, useState,
   type Dispatch, type SetStateAction, type ReactNode,
 } from "react";
+import { fetchDefaultTemplate } from "@/lib/inventory/barcodeTemplates";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -81,6 +82,27 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   const [suppliers,         setSuppliers]         = useState<Supplier[]>(INITIAL_SUPPLIERS);
   const [barcodeSettings,   setBarcodeSettings]   = useState<BarcodeSettings>(INITIAL_BARCODE);
   const [adminCredentials,  setAdminCredentials]  = useState<AdminCredentials>(INITIAL_ADMIN);
+
+  /**
+   * Adopt the saved default label template (Admin -> Barcode). INITIAL_BARCODE
+   * stays as the value rendered before this resolves — it matches the seeded
+   * 'Standard' template, so nothing shifts on screen when it arrives. A failure
+   * leaves those defaults in place rather than blocking every label in the app.
+   */
+  useEffect(() => {
+    let active = true;
+    fetchDefaultTemplate()
+      .then(t => {
+        if (!active || !t) return;
+        setBarcodeSettings({
+          format: t.format, width: t.width, height: t.height, fontSize: t.fontSize,
+          showText: t.showText, prefix: t.prefix, labelWidthMm: t.labelWidthMm,
+          labelHeightMm: t.labelHeightMm, labelMarginMm: t.labelMarginMm,
+        });
+      })
+      .catch(() => { /* INITIAL_BARCODE applies */ });
+    return () => { active = false; };
+  }, []);
 
   return (
     <InventoryContext.Provider value={{

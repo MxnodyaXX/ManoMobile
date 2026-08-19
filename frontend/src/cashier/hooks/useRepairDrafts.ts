@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { usePersistentState } from "./usePersistentState";
-import type { ConditionGrade, DeviceConditionMap } from "@/cashier/contexts/RepairContext";
+import type { ConditionGrade, DeviceConditionMap, JobPriority } from "@/cashier/contexts/RepairContext";
 
 /** Every field the new-repair wizard collects. */
 export interface RepairFormData {
@@ -25,7 +25,9 @@ export interface RepairFormData {
   estimatedCost: string;
   advancePaid: string;
   paymentMethod: string;
-  jobPriority: string;
+  /** Must stay in step with the job_priority enum — a value outside it
+   *  is only rejected at save time, once the whole form has been filled in. */
+  jobPriority: JobPriority;
   jobNotes: string;
 
   // Step 4

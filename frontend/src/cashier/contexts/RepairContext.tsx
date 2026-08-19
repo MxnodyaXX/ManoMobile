@@ -8,6 +8,9 @@ import { fetchJobs, fetchDealers, insertJob, patchJob, upsertDealer, deleteDeale
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/** Mirrors the job_priority enum in the database. */
+export type JobPriority = "Low" | "Normal" | "High" | "Urgent";
+
 export type CompletionType = "Normal" | "Return" | "FOC";
 
 export type JobStatus = "Non-Issued" | "Issued" | "Pending" | "Completed" | "Delivered" | "Cancelled";
@@ -58,7 +61,7 @@ export interface RepairJob {
   issue: string;
   technician: string;
   status: JobStatus;
-  priority: "Low" | "Normal" | "High" | "Urgent";
+  priority: JobPriority;
   estimatedCost: number;
   advancePaid: number;
   createdAt: string;
@@ -89,6 +92,9 @@ export interface RepairJob {
   pausedAt?: string;             // ISO when paused
   completedAt?: string;          // ISO when the repair was finished (Non-Issued)
   partsUsed?: string[];          // parts consumed in the repair
+  /** Labour cost recorded at completion, from the technician's rate at that
+   *  moment. Absent on jobs finished before labour costing existed. */
+  labourCost?: number;
   techRemarks?: string;          // technician's job remarks / work summary
   futureFaults?: string;         // future faults the technician identified
 

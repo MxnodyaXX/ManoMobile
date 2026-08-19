@@ -10,6 +10,7 @@ export default function StatCard({
   index = 0,
   size = "large",
   isCount = false,
+  onClick,
 }: {
   title: string;
   value: string;
@@ -18,18 +19,41 @@ export default function StatCard({
   index?: number;
   size?: "large" | "small";
   isCount?: boolean;
+  /** Opens the breakdown behind this figure. Omitted, the card is inert. */
+  onClick?: () => void;
 }) {
   const isPositive = change.startsWith("+");
   const isSmall = size === "small";
 
+  // A button when it does something, a div when it does not — so the pointer,
+  // focus ring and Enter key all follow from the element rather than being
+  // bolted onto a div that only looks clickable.
+  const Tag = onClick ? "button" : "div";
+
   return (
-    <div
+    <Tag
+      onClick={onClick}
+      title={onClick ? `See what makes up ${title}` : undefined}
+      className={onClick ? "stat-card-clickable" : undefined}
       style={{
         display: "flex",
         flexDirection: "column",
         gap: isSmall ? 6 : 12,
         padding: isSmall ? "12px 0" : "4px 0",
+        // Reset the button back to card appearance; only the interaction
+        // differs. All four borders as longhands, never the `border`
+        // shorthand — mixing the two makes React warn when one is dropped
+        // on a rerender.
         borderTop: isSmall ? "1px solid var(--border)" : "none",
+        borderRight: "none",
+        borderBottom: "none",
+        borderLeft: "none",
+        background: "none",
+        textAlign: "left",
+        width: "100%",
+        font: "inherit",
+        color: "inherit",
+        cursor: onClick ? "pointer" : "default",
       }}
     >
       {/* Title row */}
@@ -95,6 +119,6 @@ export default function StatCard({
           <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>vs last mo.</span>
         )}
       </div>
-    </div>
+    </Tag>
   );
 }

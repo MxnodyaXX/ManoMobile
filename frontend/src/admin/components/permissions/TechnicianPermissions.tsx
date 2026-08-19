@@ -5,9 +5,10 @@ import { AlertCircle, Users } from "lucide-react";
 import { useStaff } from "@/lib/staff/api";
 import { useWorkRules } from "@/lib/settings/workRules";
 import {
-  useStaffRules, mergeRules, blankOverride,
+  useStaffRules, mergeRules, blankOverride, LABOUR_MODES,
   type StaffRuleOverride,
 } from "@/lib/settings/staffRules";
+import { describeRate } from "@/lib/repair/labour";
 import { useToast } from "@/lib/ui/toast";
 
 const AA = "#a78bfa";
@@ -244,6 +245,72 @@ export default function TechnicianPermissions() {
                 <span style={{ ...label, flex: 1, minWidth: 190 }}>Use repair parts without approval</span>
                 <YesNo value={rule.canUsePartsWithoutApproval} disabled={saving} onChange={v => apply({ ...rule, canUsePartsWithoutApproval: v })} />
               </div>
+
+              {/* What their work costs the shop — the missing half of profit */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 9, borderTop: "1px dashed var(--border)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <span style={{ ...label, flex: 1, minWidth: 190 }}>Default charge per job</span>
+                  <div style={{ display: "flex", gap: 3, background: "var(--bg-secondary)", padding: 3, borderRadius: 8, border: "1px solid var(--border)", flexWrap: "wrap" }}>
+                    {LABOUR_MODES.map(m => {
+                      const active = rule.labourCostMode === m.id;
+                      return (
+                        <button
+                          key={m.id}
+                          title={m.blurb}
+                          disabled={saving}
+                          onClick={() => apply({
+                            ...rule,
+                            labourCostMode: m.id,
+                            // A rate left over from another mode would be read
+                            // as rupees where percent was meant, so it resets.
+                            labourCostValue: m.id === "fixed" || m.id === "percentage" ? rule.labourCostValue : 0,
+                          })}
+                          style={{
+                            padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: active ? 700 : 500,
+                            border: `1px solid ${active ? `${AA}55` : "transparent"}`,
+                            background: active ? `${AA}18` : "transparent",
+                            color: active ? AA : "var(--text-muted)",
+                            cursor: saving ? "not-allowed" : "pointer", fontFamily: ff, transition: "all 0.15s",
+                          }}
+                        >
+                          {m.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {(rule.labourCostMode === "fixed" || rule.labourCostMode === "percentage") && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                        {rule.labourCostMode === "fixed" ? "Rs." : "%"}
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={rule.labourCostMode === "percentage" ? 100 : undefined}
+                        step={rule.labourCostMode === "percentage" ? 1 : 50}
+                        value={rule.labourCostValue || ""}
+                        disabled={saving}
+                        onChange={e => setDrafts(d => ({ ...d, [tech.id]: { ...rule, labourCostValue: Number(e.target.value) || 0 } }))}
+                        onBlur={() => apply(ruleFor(tech.id))}
+                        style={{
+                          width: 82, padding: "5px 8px", borderRadius: 7, border: "1px solid var(--border)",
+                          background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 12, fontFamily: ff, outline: "none",
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <p style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                  {rule.labourCostMode === "none"
+                    ? "Their charge box starts at zero on each job — they type what they are charging."
+                    : rule.labourCostMode === "custom"
+                      ? "Their charge box starts empty, so they must think about it on every job."
+                      : `Their charge box is pre-filled with ${describeRate(rule.labourCostMode, rule.labourCostValue).toLowerCase()}, and they can change it. Only affects jobs completed from now on.`}
+                  {" "}This technician always enters what they are charging when they finish a job; this only sets what the box starts at.
+                </p>
+              </div>
             </div>
 
             {/* What this adds up to, in words */}
@@ -258,7 +325,11 @@ export default function TechnicianPermissions() {
               {effective.canClaimUnassigned ? "can take unassigned jobs" : "cannot take unassigned jobs"},{" "}
               {effective.canTransferToAgent ? "can send devices out" : "cannot send devices out"},{" "}
               {effective.requireStartBeforeFinish ? "must start a job before finishing it" : "can finish a job without starting it"}, and{" "}
-              {effective.canUsePartsWithoutApproval ? "can pull repair parts without approval" : "needs Admin approval to use repair parts"}.
+              {effective.canUsePartsWithoutApproval ? "can pull repair parts without approval" : "needs Admin approval to use repair parts"}.{" "}
+              Their charge box starts at{" "}
+              <strong style={{ color: "var(--text-secondary)" }}>
+                {describeRate(effective.labourCostMode, effective.labourCostValue).toLowerCase()}
+              </strong>.
             </p>
           </div>
         );

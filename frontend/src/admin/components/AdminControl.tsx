@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import AgentsManager from "@/admin/components/repair/AgentsManager";
 import { useToast } from "@/lib/ui/toast";
@@ -10,7 +10,7 @@ import {
   Tag, Layers, Truck, Barcode as BarcodeIcon, Settings,
   Plus, Edit2, Trash2, X, Search, Phone, Mail, Eye, KeyRound, Check,
   Store, MapPin, CalendarDays, Building2, Package, ClipboardCheck,
-  CheckCircle2, XCircle, Clock, AlertTriangle,
+  CheckCircle2, XCircle, Clock, AlertTriangle, AlertCircle, Star, Copy,
 } from "lucide-react";
 import {
   useInventory,
@@ -18,6 +18,16 @@ import {
 } from "@/cashier/contexts/InventoryContext";
 import { useRepair, type RepairDealer } from "@/cashier/contexts/RepairContext";
 import { useParts, PART_CATEGORIES, type SparePart, type PartCategory, type PartRequestStatus } from "@/cashier/contexts/PartsContext";
+import {
+  useBarcodeTemplates, createTemplate, updateTemplate, deleteTemplate, setDefaultTemplate,
+  LAYOUT_LABELS, type BarcodeTemplate, type BarcodeLayout,
+} from "@/lib/inventory/barcodeTemplates";
+import LabelCanvas from "@/admin/components/barcode/LabelCanvas";
+import type { LabelElement } from "@/lib/inventory/labelElements";
+
+/** A template being edited. Identity and default-ness are not editable here —
+ *  they are set by saving and by the Set as Default action. */
+type TemplateDraft = Omit<BarcodeTemplate, "id" | "isDefault">;
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
@@ -608,7 +618,7 @@ function PartModal({ part, onSave, onClose }: { part: SparePart | null; onSave: 
   function handleSave() {
     if (!validate()) return;
     const compatibleWith = compatText.split(",").map(s => s.trim()).filter(Boolean);
-    onSave({ ...form, id: form.id || `part-${Date.now()}`, compatibleWith });
+    onSave({ ...form, compatibleWith });
   }
 
   return createPortal(
@@ -677,7 +687,7 @@ function PartModal({ part, onSave, onClose }: { part: SparePart | null; onSave: 
 // ─── Repair Parts Manager ─────────────────────────────────────────────────────
 
 function PartsManager() {
-  const { parts, setParts } = useParts();
+  const { parts, savePart, deletePart, loading, error, configured } = useParts();
   const toast = useToast();
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState<PartCategory | "All">("All");
@@ -707,6 +717,16 @@ function PartsManager() {
         </select>
         <button onClick={() => setModal("new")} style={btnAccent}><Plus size={13} /> Add Part</button>
       </div>
+      {(!configured || error) && (
+        <div style={{ display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          <AlertCircle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+            {!configured
+              ? "Connect Supabase to store the parts catalog — nothing added here will be saved."
+              : `${error} — run migration 20260819000010_repair_parts_catalog.sql.`}
+          </p>
+        </div>
+      )}
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
@@ -716,7 +736,9 @@ function PartsManager() {
             <th style={thStyle}>Location</th><th style={{ ...thStyle, width: 104 }}></th>
           </tr></thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {loading ? (
+              <tr><td colSpan={8} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>Loading parts…</td></tr>
+            ) : filtered.length === 0 ? (
               <tr><td colSpan={8} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>{search || catFilter !== "All" ? "No parts match" : "No repair parts added yet — click “Add Part” to start the catalog"}</td></tr>
             ) : filtered.map(p => {
               const low = p.stock > 0 && p.stock <= p.reorderLevel;
@@ -751,10 +773,16 @@ function PartsManager() {
       {modal !== null && (
         <PartModal
           part={modal === "new" ? null : modal}
-          onSave={p => {
-            setParts(prev => prev.find(x => x.id === p.id) ? prev.map(x => x.id === p.id ? p : x) : [...prev, p]);
-            toast.dialog("success", modal === "new" ? "Part added" : "Part updated", `${p.name} (${p.sku})`);
-            setModal(null);
+          onSave={async p => {
+            try {
+              await savePart(p);
+              toast.dialog("success", modal === "new" ? "Part added" : "Part updated", `${p.name} (${p.sku})`);
+              setModal(null);
+            } catch (e) {
+              // Modal stays open with the values still in it — a save that
+              // failed must not look like one that worked.
+              toast.dialog("error", "Could not save part", e instanceof Error ? e.message : String(e));
+            }
           }}
           onClose={() => setModal(null)}
         />
@@ -762,9 +790,13 @@ function PartsManager() {
       {deleteTarget && (
         <DeleteConfirm
           name={deleteTarget.name}
-          onConfirm={() => {
-            setParts(prev => prev.filter(x => x.id !== deleteTarget.id));
-            toast.dialog("success", "Part removed", `${deleteTarget.name} has been removed from the catalog.`);
+          onConfirm={async () => {
+            try {
+              await deletePart(deleteTarget.id);
+              toast.dialog("success", "Part removed", `${deleteTarget.name} has been removed from the catalog.`);
+            } catch (e) {
+              toast.dialog("error", "Could not remove part", e instanceof Error ? e.message : String(e));
+            }
             setDeleteTarget(null);
           }}
           onClose={() => setDeleteTarget(null)}
@@ -811,13 +843,23 @@ function PartRequestsManager() {
   const filtered = statusFilter === "All" ? sorted : sorted.filter(r => r.status === statusFilter);
   const pendingCount = partRequests.filter(r => r.status === "Pending").length;
 
-  function approve(r: typeof partRequests[number]) {
-    resolveRequest(r.id, "Approved");
-    toast.dialog("success", "Request approved", `${r.quantity}× ${r.partName} for ${r.jobId} — stock updated.`);
+  async function approve(r: typeof partRequests[number]) {
+    try {
+      await resolveRequest(r.id, "Approved");
+      toast.dialog("success", "Request approved", `${r.quantity}× ${r.partName} for ${r.jobId} — stock updated.`);
+    } catch (e) {
+      // Most often the stock ran out between the request and this click; the
+      // database refused the deduction and says so.
+      toast.dialog("error", "Could not approve", e instanceof Error ? e.message : String(e));
+    }
   }
-  function reject(r: typeof partRequests[number]) {
-    resolveRequest(r.id, "Rejected");
-    toast.dialog("success", "Request rejected", `${r.partName} for ${r.jobId} was rejected — no stock deducted.`);
+  async function reject(r: typeof partRequests[number]) {
+    try {
+      await resolveRequest(r.id, "Rejected");
+      toast.dialog("success", "Request rejected", `${r.partName} for ${r.jobId} was rejected — no stock deducted.`);
+    } catch (e) {
+      toast.dialog("error", "Could not reject", e instanceof Error ? e.message : String(e));
+    }
   }
 
   return (
@@ -916,107 +958,418 @@ const LABEL_PRESETS: { width: number; height: number; label: string }[] = [
   { width: 38, height: 25, label: "38 × 25mm" },
 ];
 
+/**
+ * Label templates.
+ *
+ * One shop prints several different labels off the same printer — a product
+ * barcode, a repair job tag, a part label — and they are not the same design.
+ * Each saved template carries its own geometry and the `layout` that draws it,
+ * so editing one never silently changes another. The template marked default
+ * is what the app loads at startup.
+ */
 function BarcodeManager() {
-  const { barcodeSettings: s, setBarcodeSettings } = useInventory();
-  const set = <K extends keyof BarcodeSettings>(k: K, v: BarcodeSettings[K]) => setBarcodeSettings(prev => ({ ...prev, [k]: v }));
-  const sampleCode = s.format === "EAN13" ? "123456789012" : `${s.prefix || "MM"}-TG-001`;
+  const { setBarcodeSettings } = useInventory();
+  const { templates, loading, error, configured, reload } = useBarcodeTemplates();
+  const toast = useToast();
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<TemplateDraft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<"settings" | "design">("settings");
+
+  const asDraft = (t: BarcodeTemplate): TemplateDraft => ({
+    name: t.name, layout: t.layout, format: t.format, width: t.width, height: t.height,
+    fontSize: t.fontSize, showText: t.showText, prefix: t.prefix,
+    labelWidthMm: t.labelWidthMm, labelHeightMm: t.labelHeightMm, labelMarginMm: t.labelMarginMm,
+    elements: t.elements,
+  });
+
+  // Land on the default template once the list arrives, so the panel is never
+  // blank and the thing being edited is the thing that actually prints.
+  useEffect(() => {
+    if (draft || templates.length === 0) return;
+    const first = templates.find(t => t.isDefault) ?? templates[0];
+    setSelectedId(first.id);
+    setDraft(asDraft(first));
+  }, [templates, draft]);
+
+  const selected = templates.find(t => t.id === selectedId) ?? null;
+  const s = draft;
+  const set = <K extends keyof TemplateDraft>(k: K, v: TemplateDraft[K]) =>
+    setDraft(prev => (prev ? { ...prev, [k]: v } : prev));
+
+  const dirty = !!s && (!selected || JSON.stringify(asDraft(selected)) !== JSON.stringify(s));
+  const sampleCode = !s ? "" : s.format === "EAN13" ? "123456789012" : `${s.prefix || "MM"}-TG-001`;
+
+  const pick = (t: BarcodeTemplate) => {
+    if (dirty && !confirm("Discard unsaved changes to this template?")) return;
+    setSelectedId(t.id);
+    setDraft(asDraft(t));
+  };
+
+  const startNew = () => {
+    if (dirty && !confirm("Discard unsaved changes to this template?")) return;
+    setSelectedId(null);
+    setDraft({
+      name: "", layout: "simple", format: "CODE128", width: 2, height: 60, fontSize: 12,
+      showText: true, prefix: "MM", labelWidthMm: 50, labelHeightMm: 25, labelMarginMm: 3,
+      elements: [],
+    });
+  };
+
+  /** Keep the live app in step when the template it prints with changes. */
+  const syncIfDefault = (t: BarcodeTemplate) => {
+    if (!t.isDefault) return;
+    setBarcodeSettings({
+      format: t.format, width: t.width, height: t.height, fontSize: t.fontSize,
+      showText: t.showText, prefix: t.prefix, labelWidthMm: t.labelWidthMm,
+      labelHeightMm: t.labelHeightMm, labelMarginMm: t.labelMarginMm,
+    });
+  };
+
+  const save = async (asNew = false) => {
+    if (!s) return;
+    if (!s.name.trim()) { toast.dialog("error", "Name the template", "Give it a name you'll recognise on the printer, e.g. “Product 50×25”."); return; }
+    setBusy(true);
+    try {
+      const saved = (!asNew && selectedId)
+        ? await updateTemplate(selectedId, s)
+        : await createTemplate(s);
+      await reload();
+      setSelectedId(saved.id);
+      setDraft(asDraft(saved));
+      syncIfDefault(saved);
+      toast.dialog("success", asNew || !selectedId ? "Template created" : "Template saved", `${saved.name} — ${saved.labelWidthMm} × ${saved.labelHeightMm} mm`);
+    } catch (e) {
+      toast.dialog("error", "Could not save template", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const makeDefault = async () => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await setDefaultTemplate(selected.id);
+      await reload();
+      syncIfDefault({ ...selected, isDefault: true });
+      toast.dialog("success", "Default template set", `${selected.name} is now what the app prints with.`);
+    } catch (e) {
+      toast.dialog("error", "Could not set default", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!selected) return;
+    // Something has to be the default, or the app has no settings to start from.
+    if (selected.isDefault) {
+      toast.dialog("error", "This is the default template", "Make another template the default first, then delete this one.");
+      return;
+    }
+    if (!confirm(`Delete the template “${selected.name}”?`)) return;
+    setBusy(true);
+    try {
+      await deleteTemplate(selected.id);
+      await reload();
+      setSelectedId(null);
+      setDraft(null);
+      toast.dialog("success", "Template deleted", `${selected.name} has been removed.`);
+    } catch (e) {
+      toast.dialog("error", "Could not delete template", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const ff = "'Plus Jakarta Sans', sans-serif";
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+
+      {(!configured || error) && (
+        <div style={{ display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", fontFamily: ff }}>
+          <AlertCircle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+            {!configured
+              ? "Connect Supabase to save label templates."
+              : `${error} — run migration 20260819000011_barcode_templates.sql.`}
+          </p>
+        </div>
+      )}
+
+      {/* ── The saved designs ── */}
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
         <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
-          <Settings size={15} color="var(--accent)" /><span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Barcode Settings</span>
+          <BarcodeIcon size={15} color="var(--accent)" />
+          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Label Templates</span>
+          <span style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff }}>
+            {templates.length} saved
+          </span>
+          <button onClick={startNew} style={{ ...btnAccent, marginLeft: "auto" }}><Plus size={13} /> New Template</button>
         </div>
-        <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 18 }}>
-          <div>
-            <label style={labelStyle}>Format</label>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {FORMAT_OPTIONS.map(f => (
-                <button key={f.value} onClick={() => set("format", f.value)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", textAlign: "left", border: s.format === f.value ? "1px solid var(--accent-glow)" : "1px solid var(--border)", background: s.format === f.value ? "var(--accent-dim)" : "var(--bg-surface)" }}>
-                  <div><div style={{ fontSize: 13, fontWeight: 600, color: s.format === f.value ? "var(--accent)" : "var(--text-primary)" }}>{f.label}</div><div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{f.desc}</div></div>
-                  {s.format === f.value && <div style={{ width: 20, height: 20, borderRadius: "50%", background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Check size={11} color="#fff" /></div>}
+
+        <div style={{ padding: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {loading ? (
+            <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff, padding: "6px 2px" }}>Loading templates…</p>
+          ) : templates.length === 0 ? (
+            <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff, padding: "6px 2px" }}>
+              No templates yet — run the migration, or click New Template to create one.
+            </p>
+          ) : templates.map(t => {
+            const active = t.id === selectedId;
+            return (
+              <button
+                key={t.id}
+                onClick={() => pick(t)}
+                style={{
+                  textAlign: "left", padding: "11px 14px", borderRadius: 11, minWidth: 178, cursor: "pointer",
+                  fontFamily: ff, transition: "all 0.15s",
+                  border: active ? "1px solid var(--accent-glow)" : "1px solid var(--border)",
+                  background: active ? "var(--accent-dim)" : "var(--bg-surface)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: active ? "var(--accent)" : "var(--text-primary)" }}>{t.name}</span>
+                  {t.isDefault && (
+                    <span style={{ fontSize: 9.5, fontWeight: 800, padding: "1px 6px", borderRadius: 20, background: "var(--accent)", color: "#fff", letterSpacing: "0.04em" }}>DEFAULT</span>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{LAYOUT_LABELS[t.layout].label}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>{t.labelWidthMm} × {t.labelHeightMm} mm · {t.format}</div>
+              </button>
+            );
+          })}
+          {/* An unsaved new template sits in the row so it isn't invisible */}
+          {!selectedId && s && (
+            <div style={{ padding: "11px 14px", borderRadius: 11, minWidth: 178, fontFamily: ff, border: "1px dashed var(--accent-glow)", background: "var(--accent-dim)" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--accent)", marginBottom: 3 }}>{s.name || "Untitled template"}</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Not saved yet</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {!s ? null : (
+        <>
+          {/* Settings are the barcode itself; Design is where it sits on the label */}
+          <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, width: "fit-content" }}>
+            {([["settings", "Barcode Settings"], ["design", "Label Design"]] as const).map(([m, lbl]) => {
+              const active = mode === m;
+              return (
+                <button key={m} onClick={() => setMode(m)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 15px", borderRadius: 7, fontSize: 12.5, cursor: "pointer", fontFamily: ff, background: active ? "var(--bg-secondary)" : "transparent", border: active ? "1px solid var(--border-active)" : "1px solid transparent", color: active ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: active ? 600 : 400 }}>
+                  {lbl}
+                  {m === "design" && s.elements.length > 0 && (
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 20, background: "var(--accent)", color: "#fff" }}>{s.elements.length}</span>
+                  )}
                 </button>
-              ))}
-            </div>
+              );
+            })}
           </div>
-          <div>
-            <label style={labelStyle}>Product Code Prefix</label>
-            <input type="text" value={s.prefix} onChange={e => set("prefix", e.target.value.toUpperCase())} placeholder="e.g. MM" style={inputStyle} />
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Codes generated in inventory will start with this prefix</div>
-          </div>
-          <div>
-            <label style={labelStyle}>Label Size (mm)</label>
-            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-              {LABEL_PRESETS.map(p => {
-                const active = s.labelWidthMm === p.width && s.labelHeightMm === p.height;
-                return (
+
+          {mode === "design" ? (
+            <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+              <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <Eye size={15} color="var(--accent)" />
+                <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Label Design</span>
+                <span style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff }}>
+                  {s.elements.length === 0
+                    ? `Empty — this template prints the built-in ${LAYOUT_LABELS[s.layout].label.toLowerCase()}`
+                    : "This design replaces the built-in layout"}
+                </span>
+                {s.elements.length > 0 && (
                   <button
-                    key={p.label}
-                    onClick={() => setBarcodeSettings(prev => ({ ...prev, labelWidthMm: p.width, labelHeightMm: p.height }))}
-                    style={{
-                      flex: 1, padding: "8px 10px", borderRadius: 8, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif",
-                      fontSize: 12, fontWeight: 700,
-                      border: active ? "1px solid var(--accent-glow)" : "1px solid var(--border)",
-                      background: active ? "var(--accent-dim)" : "var(--bg-surface)",
-                      color: active ? "var(--accent)" : "var(--text-primary)",
-                    }}
+                    onClick={() => { if (confirm("Clear the design and go back to the built-in layout?")) set("elements", []); }}
+                    style={{ marginLeft: "auto", padding: "6px 12px", borderRadius: 8, fontSize: 11.5, fontWeight: 600, background: "none", border: "1px solid var(--border)", color: "#dc2626", cursor: "pointer", fontFamily: ff }}
                   >
-                    {p.label}
+                    Clear design
                   </button>
-                );
-              })}
-            </div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <input type="number" min={10} max={150} value={s.labelWidthMm} onChange={e => set("labelWidthMm", Number(e.target.value) || s.labelWidthMm)} placeholder="Width" style={inputStyle} />
-              <input type="number" min={10} max={150} value={s.labelHeightMm} onChange={e => set("labelHeightMm", Number(e.target.value) || s.labelHeightMm)} placeholder="Height" style={inputStyle} />
-            </div>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-              Must match the label stock loaded in the printer <strong>and</strong> the paper size/stock selected in the print dialog — switching this alone doesn&apos;t change what Windows sends to the printer.
-            </div>
-          </div>
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <label style={labelStyle}>Label Side Margin</label>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{s.labelMarginMm}mm</span>
-            </div>
-            <input type="range" min={0} max={8} step={0.5} value={s.labelMarginMm} onChange={e => set("labelMarginMm", Number(e.target.value))} style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }} />
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Blank space kept on the left and right of the barcode so it doesn&apos;t sit flush against the label edge</div>
-          </div>
-          {([["Bar Width", "width", 1, 4], ["Bar Height", "height", 30, 120], ["Font Size", "fontSize", 8, 20]] as [string, "width" | "height" | "fontSize", number, number][]).map(([lbl, key, min, max]) => (
-            <div key={key}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <label style={labelStyle}>{lbl}</label>
-                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{s[key]}{key === "width" ? "×" : "px"}</span>
+                )}
               </div>
-              <input type="range" min={min} max={max} value={s[key]} onChange={e => set(key, Number(e.target.value))} style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }} />
+              <div style={{ padding: 20 }}>
+                <LabelCanvas
+                  elements={s.elements}
+                  onChange={(els: LabelElement[]) => set("elements", els)}
+                  widthMm={s.labelWidthMm}
+                  heightMm={s.labelHeightMm}
+                  format={s.format}
+                  barWidth={s.width}
+                  // Only templates that actually have something to copy, and
+                  // never this one — copying a label onto itself is a no-op
+                  // that still looks like it did something.
+                  sources={templates
+                    .filter(t => t.elements.length > 0 && t.id !== selectedId)
+                    .map(t => ({
+                      id: t.id, name: t.name, layoutLabel: LAYOUT_LABELS[t.layout].label,
+                      widthMm: t.labelWidthMm, heightMm: t.labelHeightMm,
+                      format: t.format, barWidth: t.width, elements: t.elements,
+                    }))}
+                />
+              </div>
             </div>
-          ))}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div><div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Show Text Below</div><div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Human-readable code under bars</div></div>
-            <button onClick={() => set("showText", !s.showText)} style={{ width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer", position: "relative", background: s.showText ? "var(--accent)" : "var(--bg-surface)", boxShadow: "inset 0 0 0 1px var(--border)", transition: "background 0.2s" }}>
-              <div style={{ position: "absolute", top: 2, left: s.showText ? 22 : 2, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+          ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+            <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+              <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
+                <Settings size={15} color="var(--accent)" />
+                <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>
+                  {selectedId ? "Edit Template" : "New Template"}
+                </span>
+                {dirty && <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "#fbbf24", fontFamily: ff }}>Unsaved changes</span>}
+              </div>
+              <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 18 }}>
+
+                <div>
+                  <label style={labelStyle}>Template Name</label>
+                  <input type="text" value={s.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Product 50×25" style={inputStyle} />
+                </div>
+
+                <div>
+                  <label style={labelStyle}>Layout</label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {(Object.keys(LAYOUT_LABELS) as BarcodeLayout[]).map(l => {
+                      const active = s.layout === l;
+                      return (
+                        <button key={l} onClick={() => set("layout", l)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, cursor: "pointer", fontFamily: ff, textAlign: "left", border: active ? "1px solid var(--accent-glow)" : "1px solid var(--border)", background: active ? "var(--accent-dim)" : "var(--bg-surface)" }}>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: active ? "var(--accent)" : "var(--text-primary)" }}>{LAYOUT_LABELS[l].label}</div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{LAYOUT_LABELS[l].blurb}</div>
+                          </div>
+                          {active && <div style={{ width: 20, height: 20, borderRadius: "50%", background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Check size={11} color="#fff" /></div>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label style={labelStyle}>Format</label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {FORMAT_OPTIONS.map(f => (
+                      <button key={f.value} onClick={() => set("format", f.value)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, cursor: "pointer", fontFamily: ff, textAlign: "left", border: s.format === f.value ? "1px solid var(--accent-glow)" : "1px solid var(--border)", background: s.format === f.value ? "var(--accent-dim)" : "var(--bg-surface)" }}>
+                        <div><div style={{ fontSize: 13, fontWeight: 600, color: s.format === f.value ? "var(--accent)" : "var(--text-primary)" }}>{f.label}</div><div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{f.desc}</div></div>
+                        {s.format === f.value && <div style={{ width: 20, height: 20, borderRadius: "50%", background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Check size={11} color="#fff" /></div>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label style={labelStyle}>Product Code Prefix</label>
+                  <input type="text" value={s.prefix} onChange={e => set("prefix", e.target.value.toUpperCase())} placeholder="e.g. MM" style={inputStyle} />
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontFamily: ff }}>Codes generated in inventory will start with this prefix</div>
+                </div>
+
+                <div>
+                  <label style={labelStyle}>Label Size (mm)</label>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                    {LABEL_PRESETS.map(p => {
+                      const active = s.labelWidthMm === p.width && s.labelHeightMm === p.height;
+                      return (
+                        <button
+                          key={p.label}
+                          onClick={() => setDraft(prev => (prev ? { ...prev, labelWidthMm: p.width, labelHeightMm: p.height } : prev))}
+                          style={{
+                            flex: 1, padding: "8px 10px", borderRadius: 8, cursor: "pointer", fontFamily: ff,
+                            fontSize: 12, fontWeight: 700,
+                            border: active ? "1px solid var(--accent-glow)" : "1px solid var(--border)",
+                            background: active ? "var(--accent-dim)" : "var(--bg-surface)",
+                            color: active ? "var(--accent)" : "var(--text-primary)",
+                          }}
+                        >
+                          {p.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <input type="number" min={10} max={150} value={s.labelWidthMm} onChange={e => set("labelWidthMm", Number(e.target.value) || s.labelWidthMm)} placeholder="Width" style={inputStyle} />
+                    <input type="number" min={10} max={150} value={s.labelHeightMm} onChange={e => set("labelHeightMm", Number(e.target.value) || s.labelHeightMm)} placeholder="Height" style={inputStyle} />
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontFamily: ff }}>
+                    Must match the label stock loaded in the printer <strong>and</strong> the paper size/stock selected in the print dialog &mdash; switching this alone doesn&apos;t change what Windows sends to the printer.
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                    <label style={labelStyle}>Label Side Margin</label>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", fontFamily: ff }}>{s.labelMarginMm}mm</span>
+                  </div>
+                  <input type="range" min={0} max={8} step={0.5} value={s.labelMarginMm} onChange={e => set("labelMarginMm", Number(e.target.value))} style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }} />
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontFamily: ff }}>Blank space kept on the left and right of the barcode so it doesn&apos;t sit flush against the label edge</div>
+                </div>
+
+                {([["Bar Width", "width", 1, 4], ["Bar Height", "height", 30, 120], ["Font Size", "fontSize", 8, 20]] as [string, "width" | "height" | "fontSize", number, number][]).map(([lbl, key, min, max]) => (
+                  <div key={key}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                      <label style={labelStyle}>{lbl}</label>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", fontFamily: ff }}>{s[key]}{key === "width" ? "×" : "px"}</span>
+                    </div>
+                    <input type="range" min={min} max={max} step={key === "width" ? 0.1 : 1} value={s[key]} onChange={e => set(key, Number(e.target.value))} style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }} />
+                  </div>
+                ))}
+
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div><div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff }}>Show Text Below</div><div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff }}>Human-readable code under bars</div></div>
+                  <button onClick={() => set("showText", !s.showText)} style={{ width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer", position: "relative", background: s.showText ? "var(--accent)" : "var(--bg-surface)", boxShadow: "inset 0 0 0 1px var(--border)", transition: "background 0.2s" }}>
+                    <div style={{ position: "absolute", top: 2, left: s.showText ? 22 : 2, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+              <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
+                <Eye size={15} color="var(--accent)" /><span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Live Preview</span>
+              </div>
+              <div style={{ padding: 24 }}>
+                <div style={{ background: "#fff", borderRadius: 10, border: "1px solid var(--border)", padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                  <Barcode value={sampleCode} format={s.format} width={s.width} height={s.height} fontSize={s.fontSize} displayValue={s.showText} margin={6} />
+                </div>
+                <div style={{ background: "var(--bg-surface)", borderRadius: 10, padding: "14px 16px" }}>
+                  {([["Layout", LAYOUT_LABELS[s.layout].label], ["Format", FORMAT_OPTIONS.find(f => f.value === s.format)?.label ?? s.format], ["Sample Code", sampleCode], ["Bar Width", `${s.width}×`], ["Height", `${s.height}px`], ["Font", `${s.fontSize}px`], ["Show Text", s.showText ? "Yes" : "No"], ["Label Size", `${s.labelWidthMm} × ${s.labelHeightMm} mm`], ["Side Margin", `${s.labelMarginMm}mm`]] as [string, string][]).map(([k, v]) => (
+                    <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "3px 0", fontFamily: ff }}>
+                      <span style={{ color: "var(--text-muted)" }}>{k}</span>
+                      <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{v}</span>
+                    </div>
+                  ))}
+                </div>
+                {s.layout !== "simple" && (
+                  <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 12, lineHeight: 1.55, fontFamily: ff }}>
+                    The preview shows the barcode only. {LAYOUT_LABELS[s.layout].label} adds its own header and footer around it, which you&apos;ll see on the print dialog for that label.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+          )}
+
+          {/* ── Actions ── */}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <button onClick={() => save(false)} disabled={busy || !dirty} style={{ ...btnAccent, opacity: busy || !dirty ? 0.5 : 1, cursor: busy || !dirty ? "not-allowed" : "pointer" }}>
+              <Check size={13} /> {busy ? "Saving…" : selectedId ? "Save Changes" : "Create Template"}
             </button>
+            {selectedId && (
+              <button onClick={() => save(true)} disabled={busy} style={{ padding: "9px 16px", borderRadius: 9, fontSize: 12.5, fontWeight: 600, background: "var(--bg-surface)", border: "1px solid var(--border)", color: "var(--text-primary)", cursor: busy ? "not-allowed" : "pointer", fontFamily: ff, display: "flex", alignItems: "center", gap: 6 }}>
+                <Copy size={13} /> Save as New
+              </button>
+            )}
+            {selected && !selected.isDefault && (
+              <button onClick={makeDefault} disabled={busy} style={{ padding: "9px 16px", borderRadius: 9, fontSize: 12.5, fontWeight: 600, background: "var(--bg-surface)", border: "1px solid var(--border)", color: "var(--text-primary)", cursor: busy ? "not-allowed" : "pointer", fontFamily: ff, display: "flex", alignItems: "center", gap: 6 }}>
+                <Star size={13} /> Set as Default
+              </button>
+            )}
+            {selected && (
+              <button onClick={remove} disabled={busy} style={{ padding: "9px 16px", borderRadius: 9, fontSize: 12.5, fontWeight: 600, background: "none", border: "1px solid var(--border)", color: "#dc2626", cursor: busy ? "not-allowed" : "pointer", fontFamily: ff, display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+                <Trash2 size={13} /> Delete
+              </button>
+            )}
           </div>
-        </div>
-      </div>
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
-          <Eye size={15} color="var(--accent)" /><span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Live Preview</span>
-        </div>
-        <div style={{ padding: 24 }}>
-          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid var(--border)", padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
-            <Barcode value={sampleCode} format={s.format} width={s.width} height={s.height} fontSize={s.fontSize} displayValue={s.showText} margin={6} />
-          </div>
-          <div style={{ background: "var(--bg-surface)", borderRadius: 10, padding: "14px 16px" }}>
-            {([["Format", FORMAT_OPTIONS.find(f => f.value === s.format)?.label ?? s.format], ["Sample Code", sampleCode], ["Bar Width", `${s.width}×`], ["Height", `${s.height}px`], ["Font", `${s.fontSize}px`], ["Show Text", s.showText ? "Yes" : "No"], ["Label Size", `${s.labelWidthMm} × ${s.labelHeightMm} mm`], ["Side Margin", `${s.labelMarginMm}mm`]] as [string, string][]).map(([k, v]) => (
-              <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "3px 0", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                <span style={{ color: "var(--text-muted)" }}>{k}</span>
-                <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{v}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }

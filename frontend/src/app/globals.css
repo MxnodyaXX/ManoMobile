@@ -316,3 +316,18 @@ select option { background: var(--bg-card); color: var(--text-primary); }
   }
   .tabs-scroll::-webkit-scrollbar { display: none; }
 }
+/* Dashboard figures that open their own breakdown. The affordance is
+   deliberately quiet — these sit inside cards, so a full hover card would
+   fight the panel they live in. */
+.stat-card-clickable {
+  border-radius: 8px;
+  transition: background 0.15s, transform 0.15s;
+}
+.stat-card-clickable:hover {
+  background: var(--bg-secondary) !important;
+  transform: translateY(-1px);
+}
+.stat-card-clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

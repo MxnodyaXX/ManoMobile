@@ -7,6 +7,8 @@ import { Printer, X, Tag, AlertTriangle } from "lucide-react";
 import { useInventory } from "@/cashier/contexts/InventoryContext";
 import { printLabelNode } from "@/cashier/utils/printLabel";
 import { SHOP_DETAILS } from "@/lib/shop";
+import LabelRender from "@/cashier/components/shared/LabelRender";
+import { fetchTemplateForLayout, type BarcodeTemplate } from "@/lib/inventory/barcodeTemplates";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 const PX_PER_MM = 96 / 25.4;
@@ -68,6 +70,23 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
   const barcodeWrapRef = useRef<HTMLDivElement>(null);
 
   /**
+   * A canvas design for this label kind, if one has been drawn. Absent (or
+   * still loading, or empty) the built-in layouts below print unchanged, which
+   * is what keeps this backwards compatible with every existing template.
+   */
+  const [design, setDesign] = useState<BarcodeTemplate | null>(null);
+  // Settled either way, so silent mode knows when it is safe to print.
+  const [designLoaded, setDesignLoaded] = useState(false);
+  useEffect(() => {
+    let active = true;
+    fetchTemplateForLayout(variant)
+      .then(t => { if (active && t && t.elements.length > 0) setDesign(t); })
+      .catch(() => { /* built-in layout applies */ })
+      .finally(() => { if (active) setDesignLoaded(true); });
+    return () => { active = false; };
+  }, [variant]);
+
+  /**
    * The repair tag and part label are each designed for their own dedicated
    * roll and pin themselves to it. Inventory labels still follow Admin ->
    * Barcode, but a job tag or part label that changed shape because someone
@@ -83,7 +102,9 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
 
   const handlePrint = () => {
     if (!labelRef.current) return;
-    printLabelNode(labelRef.current, labelW, labelH);
+    // A canvas design carries its own stock size; the built-in layouts use the
+    // pinned/admin one.
+    printLabelNode(labelRef.current, design?.labelWidthMm ?? labelW, design?.labelHeightMm ?? labelH);
   };
 
   // EAN-13 only encodes a 12-13 digit numeric value; anything else (an IMEI is
@@ -186,23 +207,61 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
   // and hand back control without ever showing anything.
   const firedRef = useRef(false);
   useEffect(() => {
-    if (!silent || firedRef.current) return;
+    // Wait for the design lookup as well as the fit effect. Firing on a timer
+    // alone would race the network call and silently print the built-in layout
+    // whenever the fetch took longer than the delay — the one case nobody sees,
+    // because silent mode shows nothing.
+    if (!silent || firedRef.current || !designLoaded) return;
     const t = setTimeout(() => {
       if (firedRef.current) return;
       firedRef.current = true;
-      if (labelRef.current) printLabelNode(labelRef.current, labelW, labelH);
+      if (labelRef.current) {
+        printLabelNode(labelRef.current, design?.labelWidthMm ?? labelW, design?.labelHeightMm ?? labelH);
+      }
       onClose();
     }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [silent]);
+  }, [silent, designLoaded]);
 
   if (typeof document === "undefined") return null;
 
   // The exact same DOM either way — silent mode just skips the dialog chrome
   // around it and positions it off-screen instead, so printLabelNode still
   // has a real, laid-out node to measure and clone.
-  const labelContent = (
+  const labelContent = design ? (
+    /* A canvas design from Admin -> Barcode -> Label Design. Every element is
+       placed explicitly in mm, so none of the auto-fit shrinking below applies
+       — what was laid out in the editor is what prints. */
+    <div
+      ref={labelRef}
+      style={{
+        width: `${design.labelWidthMm}mm`, height: `${design.labelHeightMm}mm`,
+        background: "#fff", border: silent ? "none" : "1px solid var(--border)",
+        boxSizing: "border-box", overflow: "hidden",
+      }}
+    >
+      <LabelRender
+        elements={design.elements}
+        data={{
+          code,
+          jobId: jobId ?? code,
+          customer: subtitle ?? "",
+          device: title ?? "",
+          title: title ?? "",
+          subtitle: subtitle ?? "",
+          date: new Date().toLocaleDateString("en-GB"),
+          shopName: SHOP_DETAILS.name,
+          shopPhone: SHOP_DETAILS.phone,
+          shopAddress: SHOP_DETAILS.address,
+        }}
+        widthMm={design.labelWidthMm}
+        heightMm={design.labelHeightMm}
+        format={design.format}
+        barWidth={design.width}
+      />
+    </div>
+  ) : (
           <div
             ref={labelRef}
             style={{

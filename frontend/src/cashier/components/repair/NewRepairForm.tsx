@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
-import { useRepair, IN_HOUSE_DEALER, type ConditionGrade, type DeviceConditionMap, type RepairJob, type RepairDealer } from "@/cashier/contexts/RepairContext";
+import { useRepair, IN_HOUSE_DEALER, type ConditionGrade, type DeviceConditionMap, type JobPriority, type RepairJob, type RepairDealer } from "@/cashier/contexts/RepairContext";
 import { useWarranty, effectiveStatus } from "@/cashier/contexts/WarrantyContext";
 import { usePersistentState } from "@/cashier/hooks/usePersistentState";
 import { useRepairDrafts, newDraftId, fmtSaved, type RepairDraft, type RepairFormData as FormData } from "@/cashier/hooks/useRepairDrafts";
@@ -527,8 +527,12 @@ function Step3({ data, onChange, isMobile, errors }: { data: FormData; onChange:
           <div>
             <label style={labelStyle}>Job Priority</label>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {["Normal", "Urgent", "Express", "VIP"].map((p) => {
-                const colors: Record<string, string> = { Normal: "var(--accent)", Urgent: "#f59e0b", Express: "#f97316", VIP: "#a855f7" };
+              {/* These four are the job_priority enum. Anything else is
+                  rejected by the database at save time, after the whole intake
+                  has been filled in — so the picker must not offer it. Colours
+                  match the priority chips in JobsTable. */}
+              {(["Low", "Normal", "High", "Urgent"] as JobPriority[]).map((p) => {
+                const colors: Record<JobPriority, string> = { Low: "#94a3b8", Normal: "#60a5fa", High: "#fbbf24", Urgent: "#f87171" };
                 const isActive = data.jobPriority === p;
                 return (
                   <button
@@ -1056,7 +1060,7 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
       // them rather than self-taken.
       assignmentSource: repairman ? "Assigned" : undefined,
       status: "Non-Issued",
-      priority: (form.jobPriority as "Low" | "Normal" | "High" | "Urgent") || "Normal",
+      priority: form.jobPriority || "Normal",
       estimatedCost: parseFloat(form.estimatedCost) || 0,
       originalEstimate: parseFloat(form.estimatedCost) || 0,
       advancePaid: parseFloat(form.advancePaid) || 0,

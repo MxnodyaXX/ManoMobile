@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { currentWorkRules, DEFAULT_WORK_RULES, type WorkRules } from "@/lib/settings/workRules";
+import { currentWorkRules, useWorkRules, DEFAULT_WORK_RULES, type WorkRules } from "@/lib/settings/workRules";
 
 /**
  * Per-technician repair permissions.
@@ -26,13 +26,34 @@ export interface StaffRuleOverride {
   /** True: this person's part requests skip Admin approval and deduct stock
    *  immediately. False (default): every request needs Admin sign-off. */
   canUsePartsWithoutApproval: boolean;
+  /** How this person's labour is costed against a job. See LABOUR_MODES. */
+  labourCostMode: LabourCostMode;
+  /** Rupees when the mode is "fixed", percent when "percentage". */
+  labourCostValue: number;
 }
+
+/**
+ * The technician enters their charge when they complete a job — only they know
+ * what the work was worth. This rate pre-fills that box, so somebody on a flat
+ * rate is not retyping the same figure a hundred times a day. It is a default,
+ * never a substitute: the entered amount is what gets recorded.
+ */
+export type LabourCostMode = "none" | "fixed" | "percentage" | "custom";
+
+export const LABOUR_MODES: { id: LabourCostMode; label: string; blurb: string }[] = [
+  { id: "none",       label: "No default",    blurb: "The box starts at zero; they type what they are charging." },
+  { id: "fixed",      label: "Fixed per job",  blurb: "Pre-filled with the same amount on every job." },
+  { id: "percentage", label: "Percentage",     blurb: "Pre-filled with a share of what the job was charged." },
+  { id: "custom",     label: "Always ask",     blurb: "The box starts empty — nothing is suggested." },
+];
 
 /** What actually applies to one technician, after merging with the shop rule. */
 export interface EffectiveRules extends WorkRules {
   canClaimUnassigned: boolean;
   canTransferToAgent: boolean;
   canUsePartsWithoutApproval: boolean;
+  labourCostMode: LabourCostMode;
+  labourCostValue: number;
   /** True when this person has at least one explicit override. */
   hasOverrides: boolean;
 }
@@ -45,6 +66,8 @@ export const blankOverride = (profileId: string): StaffRuleOverride => ({
   canClaimUnassigned: true,
   canTransferToAgent: true,
   canUsePartsWithoutApproval: false,
+  labourCostMode: "none",
+  labourCostValue: 0,
 });
 
 interface RuleRow {
@@ -55,6 +78,8 @@ interface RuleRow {
   can_claim_unassigned: boolean;
   can_transfer_to_agent: boolean;
   can_use_parts_without_approval: boolean;
+  labour_cost_mode: LabourCostMode;
+  labour_cost_value: number | string;
 }
 
 const rowToOverride = (r: RuleRow): StaffRuleOverride => ({
@@ -65,12 +90,15 @@ const rowToOverride = (r: RuleRow): StaffRuleOverride => ({
   canClaimUnassigned: r.can_claim_unassigned,
   canTransferToAgent: r.can_transfer_to_agent,
   canUsePartsWithoutApproval: r.can_use_parts_without_approval,
+  labourCostMode: r.labour_cost_mode ?? "none",
+  // numeric(12,2) arrives as a string over PostgREST.
+  labourCostValue: Number(r.labour_cost_value ?? 0),
 });
 
 export async function fetchStaffRules(): Promise<StaffRuleOverride[]> {
   const { data, error } = await getSupabaseBrowserClient()
     .from("staff_work_rules")
-    .select("profile_id, allow_multiple_active_jobs, max_active_jobs, require_start_before_finish, can_claim_unassigned, can_transfer_to_agent, can_use_parts_without_approval");
+    .select("profile_id, allow_multiple_active_jobs, max_active_jobs, require_start_before_finish, can_claim_unassigned, can_transfer_to_agent, can_use_parts_without_approval, labour_cost_mode, labour_cost_value");
 
   if (error) throw new Error(`Could not load technician permissions: ${error.message}`);
   return (data as RuleRow[]).map(rowToOverride);
@@ -88,6 +116,8 @@ export async function saveStaffRule(rule: StaffRuleOverride): Promise<void> {
       can_claim_unassigned: rule.canClaimUnassigned,
       can_transfer_to_agent: rule.canTransferToAgent,
       can_use_parts_without_approval: rule.canUsePartsWithoutApproval,
+      labour_cost_mode: rule.labourCostMode,
+      labour_cost_value: rule.labourCostValue,
       updated_by: user?.id ?? null,
     });
 
@@ -104,7 +134,11 @@ export async function saveStaffRule(rule: StaffRuleOverride): Promise<void> {
 /** Merge one person's overrides over the shop rules. */
 export function mergeRules(shop: WorkRules, override?: StaffRuleOverride | null): EffectiveRules {
   if (!override) {
-    return { ...shop, canClaimUnassigned: true, canTransferToAgent: true, canUsePartsWithoutApproval: false, hasOverrides: false };
+    return {
+      ...shop, canClaimUnassigned: true, canTransferToAgent: true,
+      canUsePartsWithoutApproval: false, labourCostMode: "none", labourCostValue: 0,
+      hasOverrides: false,
+    };
   }
   const hasOverrides =
     override.allowMultipleActiveJobs !== null ||
@@ -112,7 +146,8 @@ export function mergeRules(shop: WorkRules, override?: StaffRuleOverride | null)
     override.requireStartBeforeFinish !== null ||
     !override.canClaimUnassigned ||
     !override.canTransferToAgent ||
-    override.canUsePartsWithoutApproval;
+    override.canUsePartsWithoutApproval ||
+    override.labourCostMode !== "none";
 
   return {
     allowMultipleActiveJobs: override.allowMultipleActiveJobs ?? shop.allowMultipleActiveJobs,
@@ -121,6 +156,8 @@ export function mergeRules(shop: WorkRules, override?: StaffRuleOverride | null)
     canClaimUnassigned: override.canClaimUnassigned,
     canTransferToAgent: override.canTransferToAgent,
     canUsePartsWithoutApproval: override.canUsePartsWithoutApproval,
+    labourCostMode: override.labourCostMode,
+    labourCostValue: override.labourCostValue,
     hasOverrides,
   };
 }
@@ -164,13 +201,24 @@ export async function rulesForTechnician(technicianName: string): Promise<Effect
   // still works fine offline, so there's no reason to silently bypass it
   // just because the permission couldn't be read.
   if (!isSupabaseConfigured()) {
-    return { ...shop, canClaimUnassigned: true, canTransferToAgent: true, canUsePartsWithoutApproval: false, hasOverrides: false };
+    return {
+      ...shop, canClaimUnassigned: true, canTransferToAgent: true,
+      canUsePartsWithoutApproval: false, labourCostMode: "none", labourCostValue: 0,
+      hasOverrides: false,
+    };
   }
   try {
     const byName = await overridesByName();
     return mergeRules(shop, byName.get((technicianName || "").trim().toLowerCase()));
   } catch {
-    return { ...DEFAULT_WORK_RULES, ...shop, canClaimUnassigned: true, canTransferToAgent: true, canUsePartsWithoutApproval: false, hasOverrides: false };
+    return {
+      ...DEFAULT_WORK_RULES, ...shop,
+      canClaimUnassigned: true, canTransferToAgent: true, canUsePartsWithoutApproval: false,
+      // No rate could be read, so nothing is costed — better than guessing an
+      // amount and writing it onto a job as if it were agreed.
+      labourCostMode: "none", labourCostValue: 0,
+      hasOverrides: false,
+    };
   }
 }
 
@@ -211,4 +259,31 @@ export function useStaffRules() {
   }, []);
 
   return { overrides, loading, error, reload, save, configured };
+}
+
+/**
+ * A synchronous rate lookup by technician name, for views that price many jobs
+ * at once. The async rulesForTechnician() is right for one decision at a time;
+ * a dashboard listing fifty jobs cannot await once per row.
+ */
+export function useTechnicianRates(): (technicianName: string) => EffectiveRules | null {
+  const { rules: shop } = useWorkRules();
+  const [byName, setByName] = useState<Map<string, StaffRuleOverride>>(new Map());
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    let active = true;
+    overridesByName()
+      .then(m => { if (active) setByName(new Map(m)); })
+      .catch(() => { /* nothing is costed rather than guessed */ });
+    return () => { active = false; };
+  }, []);
+
+  return useCallback(
+    (technicianName: string) => {
+      const override = byName.get((technicianName || "").trim().toLowerCase());
+      return override ? mergeRules(shop, override) : null;
+    },
+    [byName, shop],
+  );
 }

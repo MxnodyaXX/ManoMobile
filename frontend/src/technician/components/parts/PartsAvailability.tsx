@@ -23,28 +23,38 @@ function RequestModal({ part, onClose }: { part: SparePart; onClose: () => void 
   const [note, setNote]                   = useState("");
   const [done, setDone]                   = useState(false);
   const [autoApproved, setAutoApproved]   = useState(false);
+  const [submitting, setSubmitting]     = useState(false);
+  const [submitError, setSubmitError]   = useState<string | null>(null);
 
   const myJobs = jobs.filter(j =>
     j.technician === technicianName &&
     ["Non-Issued", "Issued", "Pending"].includes(j.status)
   );
 
-  const canSubmit = selectedJobId.length > 0 && qty >= 1 && qty <= part.stock;
+  const canSubmit = selectedJobId.length > 0 && qty >= 1 && qty <= part.stock && !submitting;
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const job = myJobs.find(j => j.id === selectedJobId);
     if (!job) return;
-    const status = requestPart({
-      jobId: selectedJobId,
-      jobDevice: `${job.brand} ${job.model}`,
-      partName: part.name,
-      partSku: part.sku,
-      quantity: qty,
-      note: note || undefined,
-    });
-    setAutoApproved(status === "Approved");
-    setDone(true);
-    setTimeout(onClose, 1400);
+    setSubmitting(true);
+    try {
+      const status = await requestPart({
+        jobId: selectedJobId,
+        jobDevice: `${job.brand} ${job.model}`,
+        partName: part.name,
+        partSku: part.sku,
+        quantity: qty,
+        note: note || undefined,
+      });
+      setAutoApproved(status === "Approved");
+      setDone(true);
+      setTimeout(onClose, 1400);
+    } catch (e) {
+      // Usually the last one went while this form was open. Stay on the form
+      // so the quantity can be changed rather than closing on a false success.
+      setSubmitError(e instanceof Error ? e.message : String(e));
+      setSubmitting(false);
+    }
   };
 
   const inputStyle: React.CSSProperties = {
@@ -126,10 +136,14 @@ function RequestModal({ part, onClose }: { part: SparePart; onClose: () => void 
               <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Why you need this part…" rows={2} style={{ ...inputStyle, resize: "none" as const }} />
             </div>
 
+            {submitError && (
+              <p style={{ fontSize: 12, color: "#f87171", lineHeight: 1.5, fontFamily: ff }}>{submitError}</p>
+            )}
+
             {/* Actions */}
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button onClick={onClose} style={{ padding: "9px 18px", borderRadius: 9, fontSize: 13, background: "none", border: "1px solid var(--border)", color: "var(--text-secondary)", cursor: "pointer", fontFamily: ff }}>Cancel</button>
-              <button onClick={handleSubmit} disabled={!canSubmit} style={{ padding: "9px 20px", borderRadius: 9, fontSize: 13, fontWeight: 600, background: canSubmit ? TA : "var(--bg-secondary)", border: `1px solid ${canSubmit ? TA : "var(--border)"}`, color: canSubmit ? "#000" : "var(--text-muted)", cursor: canSubmit ? "pointer" : "not-allowed", fontFamily: ff }}>Submit Request</button>
+              <button onClick={handleSubmit} disabled={!canSubmit} style={{ padding: "9px 20px", borderRadius: 9, fontSize: 13, fontWeight: 600, background: canSubmit ? TA : "var(--bg-secondary)", border: `1px solid ${canSubmit ? TA : "var(--border)"}`, color: canSubmit ? "#000" : "var(--text-muted)", cursor: canSubmit ? "pointer" : "not-allowed", fontFamily: ff }}>{submitting ? "Sending…" : "Submit Request"}</button>
             </div>
           </>
         )}

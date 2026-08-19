@@ -72,7 +72,7 @@ const priorityColor: Record<string, string> = {
 type ColId =
   | "jobId" | "customer" | "device" | "issue" | "technician" | "status" | "priority"
   | "deviceIssue" | "estCost" | "quotedCost" | "costDue" | "quotedDue" | "finalBill" | "paidAmount" | "advance" | "balance"
-  | "estCompletion" | "created" | "started" | "paused" | "completed" | "issued" | "partsCost";
+  | "estCompletion" | "created" | "started" | "paused" | "completed" | "issued" | "partsCost" | "jobCost";
 
 const fmtDate = (d?: string) => {
   if (!d) return "—";
@@ -212,6 +212,8 @@ const COLUMNS: Record<ColId, ColSpec> = {
   // Rejected ones aren't real cost yet). The info icon opens the line-item
   // breakdown rather than cramming it into the cell.
   partsCost: { label: "Parts Cost", align: "right", render: j => <PartsCostCell job={j} /> },
+  // Parts and labour stacked in one column — see JobCostCell.
+  jobCost: { label: "Parts / Labour", align: "right", render: j => <JobCostCell job={j} /> },
 };
 
 /** Columns per shop-facing view. Anything not listed falls back to DEFAULT_COLS
@@ -223,8 +225,8 @@ const VIEW_COLUMNS: Partial<Record<RepairView, ColId[]>> = {
   "Not Started": ["jobId", "customer", "deviceIssue", "technician", "status", "priority", "costDue", "advance", "balance", "created"],
   "Started":     ["jobId", "customer", "deviceIssue", "technician", "status", "costDue", "created", "started"],
   "Pending":     ["jobId", "customer", "deviceIssue", "technician", "status", "costDue", "created", "started", "paused"],
-  "Non-Issued":  ["jobId", "customer", "deviceIssue", "technician", "status", "quotedDue", "advance", "finalBill", "paidAmount", "balance", "partsCost", "created", "started", "completed"],
-  "Issued":      ["jobId", "customer", "deviceIssue", "technician", "status", "quotedDue", "advance", "finalBill", "paidAmount", "balance", "partsCost", "created", "started", "completed", "issued"],
+  "Non-Issued":  ["jobId", "customer", "deviceIssue", "technician", "status", "quotedDue", "advance", "finalBill", "paidAmount", "balance", "jobCost", "created", "started", "completed"],
+  "Issued":      ["jobId", "customer", "deviceIssue", "technician", "status", "quotedDue", "advance", "finalBill", "paidAmount", "balance", "jobCost", "created", "started", "completed", "issued"],
 };
 
 
@@ -342,6 +344,67 @@ function PartsUsedModal({ job, onClose }: { job: RepairJob; onClose: () => void 
       </div>
     </div>,
     document.body
+  );
+}
+
+/**
+ * What the job cost the shop, both halves in one column.
+ *
+ * Parts and labour are the two things a repair charge has to cover, and they
+ * are only useful next to each other — a Rs. 15,826 parts line means nothing
+ * until you can see the Rs. 1,000 of labour beside it and compare the pair
+ * against the Final Bill a few columns over.
+ */
+function JobCostCell({ job }: { job: RepairJob }) {
+  const { partRequests, parts } = useParts();
+  const [open, setOpen] = useState(false);
+
+  const requests = partRequests.filter(r => r.jobId === job.id);
+  const used = requests.filter(r => r.status === "Approved" || r.status === "Issued");
+  const partsCost = used.reduce((s, r) => s + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+  // Only what the technician actually entered. Jobs finished before labour was
+  // recorded show a dash rather than a zero, which would read as "free".
+  const labour = job.labourCost;
+
+  const row = (label: string, value: React.ReactNode) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, whiteSpace: "nowrap" }}>
+      <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>{label}</span>
+      {value}
+    </div>
+  );
+
+  if (requests.length === 0 && labour === undefined) {
+    return <span style={{ fontSize: 12, color: "var(--text-muted)" }}>—</span>;
+  }
+
+  return (
+    <>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {row("Parts", (
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={plain}>{requests.length === 0 ? "—" : rs(partsCost)}</span>
+            {requests.length > 0 && (
+              <button
+                onClick={() => setOpen(true)}
+                title="View parts used"
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 0, display: "flex", alignItems: "center" }}
+              >
+                <Info size={12} />
+              </button>
+            )}
+          </span>
+        ))}
+        {row("Labour", (
+          <span
+            style={{ ...plain, color: labour === undefined ? "var(--text-muted)" : "var(--text-primary)" }}
+            title={labour === undefined ? "Finished before labour was recorded" : undefined}
+          >
+            {labour === undefined ? "—" : rs(labour)}
+          </span>
+        ))}
+      </div>
+      {open && <PartsUsedModal job={job} onClose={() => setOpen(false)} />}
+    </>
   );
 }
 

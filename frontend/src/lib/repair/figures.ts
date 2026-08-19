@@ -23,9 +23,12 @@ export interface IssuedFigures {
    * of inventing a number.
    */
   issuedJobIds: string[];
+  /** The jobs behind the totals, so a drill-down can show the actual rows
+   *  rather than re-deriving them from a different filter and disagreeing. */
+  issuedJobs: RepairJob[];
 }
 
-const EMPTY: IssuedFigures = { repairIncome: 0, collected: 0, totalJobs: 0, salesRevenue: 0, issuedJobIds: [] };
+const EMPTY: IssuedFigures = { repairIncome: 0, collected: 0, totalJobs: 0, salesRevenue: 0, issuedJobIds: [], issuedJobs: [] };
 
 /** Exported so any other period-filtered view buckets dates the same way. */
 export function periodStart(period: FigurePeriod): Date {
@@ -49,6 +52,7 @@ export function computeIssuedFigures(jobs: RepairJob[], period: FigurePeriod): I
     totalJobs:    issued.length,
     salesRevenue: 0,
     issuedJobIds: issued.map(j => j.id),
+    issuedJobs: issued,
   };
 }
 

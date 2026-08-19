@@ -18,6 +18,8 @@ export default function PartRequestModal({ job, onClose }: { job: RepairJob; onC
   const [note, setNote]         = useState("");
   const [done, setDone]         = useState(false);
   const [autoApproved, setAutoApproved] = useState(false);
+  const [submitting, setSubmitting]     = useState(false);
+  const [submitError, setSubmitError]   = useState<string | null>(null);
 
   const filtered = parts.filter(p => {
     if (!search) return true;
@@ -30,18 +32,24 @@ export default function PartRequestModal({ job, onClose }: { job: RepairJob; onC
     );
   });
 
-  const submit = () => {
+  const submit = async () => {
     if (!selected) return;
-    const status = requestPart({
-      jobId: job.id,
-      jobDevice: `${job.brand} ${job.model}`,
-      partName: selected.name,
-      partSku: selected.sku,
-      quantity: qty,
-      note: note || undefined,
-    });
-    setAutoApproved(status === "Approved");
-    setDone(true);
+    setSubmitting(true);
+    try {
+      const status = await requestPart({
+        jobId: job.id,
+        jobDevice: `${job.brand} ${job.model}`,
+        partName: selected.name,
+        partSku: selected.sku,
+        quantity: qty,
+        note: note || undefined,
+      });
+      setAutoApproved(status === "Approved");
+      setDone(true);
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : String(e));
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -145,11 +153,15 @@ export default function PartRequestModal({ job, onClose }: { job: RepairJob; onC
             </div>
 
             <div style={{ padding: "14px 20px", borderTop: "1px solid var(--border)" }}>
+              {submitError && (
+                <p style={{ fontSize: 12, color: "#f87171", marginBottom: 9, lineHeight: 1.5, fontFamily: ff }}>{submitError}</p>
+              )}
               <button
                 onClick={submit}
-                style={{ width: "100%", padding: "11px", borderRadius: 10, fontSize: 13, fontWeight: 600, background: TA, border: "none", color: "#000", cursor: "pointer", fontFamily: ff }}
+                disabled={submitting}
+                style={{ width: "100%", padding: "11px", borderRadius: 10, fontSize: 13, fontWeight: 600, background: submitting ? "var(--bg-secondary)" : TA, border: "none", color: submitting ? "var(--text-muted)" : "#000", cursor: submitting ? "not-allowed" : "pointer", fontFamily: ff }}
               >
-                Submit Request
+                {submitting ? "Sending…" : "Submit Request"}
               </button>
             </div>
           </>

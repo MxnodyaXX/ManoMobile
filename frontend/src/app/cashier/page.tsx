@@ -4,13 +4,20 @@ import { useState } from "react";
 import Sidebar from "@/cashier/components/sidebar/Sidebar";
 import Navbar from "@/cashier/components/navbar/Navbar";
 import StatCard from "@/cashier/components/dashboard/StatCard";
+import InsightModal from "@/cashier/components/dashboard/InsightModal";
+import {
+  repairIncomeInsight, totalJobsInsight, partsCostInsight, labourInsight,
+  profitInsight, salesInsight, snapshotInsight, type InsightSpec,
+} from "@/cashier/components/dashboard/insightBuilders";
+import { useTechnicianRates } from "@/lib/settings/staffRules";
+import { labourForJob } from "@/lib/repair/labour";
 import StatGroup from "@/cashier/components/dashboard/StatGroup";
 import InfoCard from "@/cashier/components/dashboard/InfoCard";
 import ChartCard from "@/cashier/components/dashboard/ChartCard";
 import FilterBar from "@/cashier/components/dashboard/FilterBar";
 import RepairManagement, { type RepairSection } from "@/cashier/components/repair/RepairManagement";
 import WarrantyCenter from "@/cashier/components/warranty/WarrantyCenter";
-import { useRepair, jobLabel } from "@/cashier/contexts/RepairContext";
+import { useRepair, jobLabel, type RepairJob } from "@/cashier/contexts/RepairContext";
 import SalesManagement from "@/cashier/components/sales/SalesManagement";
 import InventoryManagement from "@/cashier/components/inventory/InventoryManagement";
 import AdminControl from "@/admin/components/AdminControl";
@@ -160,30 +167,77 @@ function ActivityFeed() {
 }
 
 /* ── Today snapshot strip ── */
-function TodaySnapshot() {
+function TodaySnapshot({ onNavigate }: { onNavigate: (section?: RepairSection) => void }) {
   // Counted from live repair jobs. Sales figures are absent rather than zero:
   // there is no sales backend yet, and an invented "Revenue Today" is the most
   // misleading number a shop dashboard could show.
   const { jobs } = useRepair();
   const today = new Date().toISOString().slice(0, 10);
-  const snaps = [
-    { label: "Taken In Today",  value: String(jobs.filter(j => (j.createdAt ?? "").slice(0, 10) === today).length), color: "#4ade80" },
-    { label: "Jobs In Queue",   value: String(jobs.filter(j => j.status === "Non-Issued").length),                  color: "#fbbf24" },
-    { label: "In Progress",     value: String(jobs.filter(j => j.status === "Issued").length),                      color: "#60a5fa" },
-    { label: "Pending Pickups", value: String(jobs.filter(j => j.status === "Completed").length),                   color: "#a78bfa" },
+  const [open, setOpen] = useState<{ spec: InsightSpec; section?: RepairSection } | null>(null);
+
+  // Each tile knows the jobs behind it and where those jobs live, so the count
+  // is never a dead end — you can always get from the number to the rows.
+  const snaps: {
+    label: string; color: string; section: RepairSection;
+    jobs: RepairJob[]; subtitle: string; empty: string;
+  }[] = [
+    {
+      label: "Taken In Today", color: "#4ade80", section: "New",
+      jobs: jobs.filter(j => (j.createdAt ?? "").slice(0, 10) === today),
+      subtitle: "Devices booked in at the counter today",
+      empty: "Nothing has been booked in today yet.",
+    },
+    {
+      label: "Jobs In Queue", color: "#fbbf24", section: "Not Started",
+      jobs: jobs.filter(j => j.status === "Non-Issued"),
+      subtitle: "Accepted but not started by a technician",
+      empty: "Nothing is waiting — every job has been started.",
+    },
+    {
+      label: "In Progress", color: "#60a5fa", section: "Started",
+      jobs: jobs.filter(j => j.status === "Issued"),
+      subtitle: "Currently being worked on",
+      empty: "No repairs are in progress right now.",
+    },
+    {
+      label: "Pending Pickups", color: "#a78bfa", section: "Non-Issued",
+      jobs: jobs.filter(j => j.status === "Completed"),
+      subtitle: "Repaired and waiting for the customer to collect",
+      empty: "Nothing is waiting to be collected.",
+    },
   ];
+
   return (
-    <div className="resp-grid-4">
-      {snaps.map(s => (
-        <div key={s.label} style={{
-          background: "var(--bg-card)", border: "1px solid var(--border)",
-          borderRadius: 10, padding: "12px 14px",
-        }}>
-          <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 5 }}>{s.label}</p>
-          <p style={{ fontSize: 18, fontWeight: 800, color: s.color, letterSpacing: "-0.02em" }}>{s.value}</p>
-        </div>
-      ))}
-    </div>
+    <>
+      <div className="resp-grid-4">
+        {snaps.map(s => (
+          <button
+            key={s.label}
+            onClick={() => setOpen({
+              spec: snapshotInsight(s.label, s.subtitle, s.jobs, s.empty),
+              section: s.section,
+            })}
+            title={`See the ${s.jobs.length} job${s.jobs.length === 1 ? "" : "s"} behind this`}
+            className="stat-card-clickable"
+            style={{
+              background: "var(--bg-card)", border: "1px solid var(--border)",
+              borderRadius: 10, padding: "12px 14px", textAlign: "left",
+              cursor: "pointer", font: "inherit", width: "100%",
+            }}
+          >
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 5 }}>{s.label}</p>
+            <p style={{ fontSize: 18, fontWeight: 800, color: s.color, letterSpacing: "-0.02em" }}>{s.jobs.length}</p>
+          </button>
+        ))}
+      </div>
+      {open && (
+        <InsightModal
+          {...open.spec}
+          onAction={() => onNavigate(open.section)}
+          onClose={() => setOpen(null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -196,21 +250,45 @@ function TodaySnapshot() {
    made it look like "parts cost = revenue" on the dashboard. Real parts
    cost is what it actually costs the shop: quantity × catalog cost price,
    summed over each issued job's approved part requests. */
-function RepairsStatGroup({ fig, dateLabel }: { fig: IssuedFigures; dateLabel: string }) {
+function RepairsStatGroup({ fig, dateLabel, onNavigate }: {
+  fig: IssuedFigures; dateLabel: string; onNavigate: (section?: RepairSection) => void;
+}) {
   const { partRequests, parts } = useParts();
+  const rateFor = useTechnicianRates();
+  const [open, setOpen] = useState<InsightSpec | null>(null);
+
   const partsCost = partRequests
     .filter(r => fig.issuedJobIds.includes(r.jobId) && (r.status === "Approved" || r.status === "Issued"))
     .reduce((sum, r) => sum + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
 
+  // Real labour cost, from each technician's rate — recorded on the job when
+  // it was completed. This used to be charge-minus-parts, which is revenue,
+  // not cost, and made profit unknowable.
+  const labourCost = fig.issuedJobs.reduce(
+    (sum, j) => sum + labourForJob(j, rateFor(j.technician || "")).amount, 0,
+  );
+  const profit = fig.repairIncome - partsCost - labourCost;
+
   return (
-    <StatGroup index={2} title="Repairs" dateLabel={dateLabel}>
-      <StatCard title="Repair Income"   value={fmtRs(fig.repairIncome)}  change=""  icon={Wrench}        size="large" />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-        <StatCard title="Labor Cost"    value={fmtRs(0)}          change=""    icon={Hammer}        size="small" />
-        <StatCard title="Parts Cost"    value={fmtRs(partsCost)}  change=""     icon={Box}           size="small" />
-        <StatCard title="Total Jobs"    value={String(fig.totalJobs)}    change=""     icon={ClipboardList} size="small" isCount />
-      </div>
-    </StatGroup>
+    <>
+      <StatGroup index={2} title="Repairs" dateLabel={dateLabel}>
+        <StatCard title="Repair Income" value={fmtRs(fig.repairIncome)} change="" icon={Wrench} size="large"
+          onClick={() => setOpen(repairIncomeInsight(fig.issuedJobs, dateLabel))} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <StatCard title="Parts Cost" value={fmtRs(partsCost)} change="" icon={Box} size="small"
+            onClick={() => setOpen(partsCostInsight(fig.issuedJobs, partRequests, parts, dateLabel))} />
+          <StatCard title="Labour Cost" value={fmtRs(labourCost)} change="" icon={Hammer} size="small"
+            onClick={() => setOpen(labourInsight(fig.issuedJobs, rateFor, dateLabel))} />
+          <StatCard title="Profit" value={`${profit < 0 ? "−" : ""}${fmtRs(Math.abs(profit))}`} change="" icon={TrendingUp} size="small"
+            onClick={() => setOpen(profitInsight(fig.issuedJobs, partRequests, parts, rateFor, dateLabel))} />
+          <StatCard title="Total Jobs" value={String(fig.totalJobs)} change="" icon={ClipboardList} size="small" isCount
+            onClick={() => setOpen(totalJobsInsight(fig.issuedJobs, dateLabel))} />
+        </div>
+      </StatGroup>
+      {open && (
+        <InsightModal {...open} onAction={() => onNavigate("Issued")} onClose={() => setOpen(null)} />
+      )}
+    </>
   );
 }
 
@@ -219,6 +297,7 @@ export default function CashierPage() {
   const [activePage, setActivePage] = useState<ActivePage>("Home");
   const [repairSection, setRepairSection] = useState<RepairSection | undefined>(undefined);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [insight, setInsight] = useState<InsightSpec | null>(null);
 
   const goToRepair = (section?: RepairSection) => { setRepairSection(section); setActivePage("Repair Management"); };
   const dateLabel = getDateLabel(filter);
@@ -302,7 +381,7 @@ export default function CashierPage() {
                 <PendingAlert onView={() => goToRepair("Pending")} />
 
                 {/* Today snapshot */}
-                <TodaySnapshot />
+                <TodaySnapshot onNavigate={goToRepair} />
 
                 {/* Filter bar */}
                 <FilterBar active={filter} onChange={(f) => setFilter(f as FilterPeriod)} />
@@ -310,23 +389,30 @@ export default function CashierPage() {
                 {/* Stat groups */}
                 <div className="resp-grid-3">
                   <StatGroup index={0} title="Revenue" dateLabel={dateLabel}>
-                    <StatCard title="Total Revenue"   value={fmtRs(fig.repairIncome)}   change=""   icon={DollarSign}  size="large" />
+                    <StatCard title="Total Revenue"   value={fmtRs(fig.repairIncome)}   change=""   icon={DollarSign}  size="large"
+                      onClick={() => setInsight(repairIncomeInsight(fig.issuedJobs, dateLabel))} />
                     <div className="resp-grid-2">
-                      <StatCard title="Sales"         value={fmtRs(fig.salesRevenue)}   change=""   icon={TrendingUp}  size="small" />
-                      <StatCard title="Repairs"       value={fmtRs(fig.repairIncome)}  change=""  icon={Wrench}      size="small" />
+                      <StatCard title="Sales"         value={fmtRs(fig.salesRevenue)}   change=""   icon={TrendingUp}  size="small"
+                        onClick={() => setInsight(salesInsight("Sales Revenue", dateLabel))} />
+                      <StatCard title="Repairs"       value={fmtRs(fig.repairIncome)}  change=""  icon={Wrench}      size="small"
+                        onClick={() => setInsight(repairIncomeInsight(fig.issuedJobs, dateLabel))} />
                     </div>
                   </StatGroup>
 
                   <StatGroup index={1} title="Sales" dateLabel={dateLabel}>
-                    <StatCard title="Total Sales"     value={fmtRs(fig.salesRevenue)}     change=""     icon={ShoppingCart}   size="large" />
+                    <StatCard title="Total Sales"     value={fmtRs(fig.salesRevenue)}     change=""     icon={ShoppingCart}   size="large"
+                      onClick={() => setInsight(salesInsight("Total Sales", dateLabel))} />
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                      <StatCard title="Mobile"        value={fmtRs(0)}    change=""    icon={Smartphone}     size="small" />
-                      <StatCard title="Accessory"     value={fmtRs(0)} change="" icon={Package}        size="small" />
-                      <StatCard title="Other"         value={fmtRs(0)}     change=""     icon={MoreHorizontal} size="small" />
+                      <StatCard title="Mobile"        value={fmtRs(0)}    change=""    icon={Smartphone}     size="small"
+                        onClick={() => setInsight(salesInsight("Mobile Sales", dateLabel))} />
+                      <StatCard title="Accessory"     value={fmtRs(0)} change="" icon={Package}        size="small"
+                        onClick={() => setInsight(salesInsight("Accessory Sales", dateLabel))} />
+                      <StatCard title="Other"         value={fmtRs(0)}     change=""     icon={MoreHorizontal} size="small"
+                        onClick={() => setInsight(salesInsight("Other Sales", dateLabel))} />
                     </div>
                   </StatGroup>
 
-                  <RepairsStatGroup fig={fig} dateLabel={dateLabel} />
+                  <RepairsStatGroup fig={fig} dateLabel={dateLabel} onNavigate={goToRepair} />
                 </div>
 
                 {/* Quick actions + Activity feed */}
@@ -361,6 +447,16 @@ export default function CashierPage() {
         </div>
       </div>
       <JobScanFab />
+      {/* Breakdown behind whichever Revenue/Sales figure was clicked. Mounted
+          here rather than inside the group so it survives the group re-render
+          that opening it causes. */}
+      {insight && (
+        <InsightModal
+          {...insight}
+          onAction={() => goToRepair("Issued")}
+          onClose={() => setInsight(null)}
+        />
+      )}
     </PartsProvider>
     </InventoryProvider>
     </HeldSalesProvider>

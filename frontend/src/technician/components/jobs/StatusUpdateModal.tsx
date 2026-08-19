@@ -8,7 +8,9 @@ import {
 } from "lucide-react";
 import { type RepairJob, type JobStatus, type CompletionType, type EstimateApproval, type ApprovalChannel, useRepair } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
+import { useParts } from "@/cashier/contexts/PartsContext";
 import { rulesForTechnician, type EffectiveRules } from "@/lib/settings/staffRules";
+import { labourFromRate, describeRate } from "@/lib/repair/labour";
 import { useToast } from "@/lib/ui/toast";
 import { useWarranty, type WarrantyScope } from "@/cashier/contexts/WarrantyContext";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
@@ -105,6 +107,7 @@ function StatusBadge({ status }: { status: JobStatus }) {
 export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; onClose: () => void }) {
   const { jobs, updateJob } = useRepair();
   const { technicianName, setJobMeta, getElapsedMinutes, diagnostics, addActivity, saveFunctionalTest, saveWarranty, partRequests } = useTech();
+  const { parts: catalog } = useParts();
   const { issueWarranty } = useWarranty();
 
   const [selectedNext, setSelectedNext] = useState<JobStatus | null>(null);
@@ -135,12 +138,43 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
   }, [technicianName]);
   const [warrantyScope, setWarrantyScope] = useState<WarrantyScope>("Parts & Labour");
 
-  // Parts used (prefilled from installed part requests) + future faults — both printed on the receipt.
-  const installedParts = partRequests
-    .filter(r => r.jobId === job.id && r.installedAt)
-    .map(r => `${r.partName}${r.quantity > 1 ? ` ×${r.quantity}` : ""}`);
+  /**
+   * What this job actually consumed, and what it cost the shop.
+   *
+   * Approved counts, not only Installed: an approved request has already come
+   * off the shelf, so it is a real cost against the job whether or not the
+   * technician remembered to tick it as installed. Unit cost is read from the
+   * catalogue at completion time — the request rows carry no price of their
+   * own, so a part delisted since (part_sku gone) shows as unpriced rather
+   * than being silently counted as free.
+   */
+  const jobPartLines = partRequests
+    .filter(r => r.jobId === job.id && (r.status === "Approved" || r.status === "Issued"))
+    .map(r => {
+      const cat = catalog.find(p => p.sku === r.partSku);
+      const unitCost = cat?.costPrice ?? 0;
+      return {
+        id: r.id,
+        name: r.partName,
+        qty: r.quantity,
+        unitCost,
+        lineTotal: unitCost * r.quantity,
+        priced: !!cat,
+        installed: !!r.installedAt,
+      };
+    });
+
+  const partsCost    = jobPartLines.reduce((sum, l) => sum + l.lineTotal, 0);
+  const unpricedPart = jobPartLines.some(l => !l.priced);
+
+  // Parts used (prefilled from those same requests) + future faults — both printed on the receipt.
+  const installedParts = jobPartLines.map(l => `${l.name}${l.qty > 1 ? ` ×${l.qty}` : ""}`);
   const [partsUsedText, setPartsUsedText] = useState(installedParts.join("\n"));
   const [futureFaults, setFutureFaults]   = useState("");
+  // Charging less than the parts cost is a real loss on the job, and should be
+  // a deliberate decision here rather than something discovered in a report at
+  // the end of the month.
+  const [lossAccepted, setLossAccepted]   = useState(false);
 
   // ── Estimate approval gate ──
   const originalEstimate = job.originalEstimate ?? job.estimatedCost;
@@ -155,6 +189,43 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
   // A device that was not repaired cannot carry a repair warranty.
   const canWarrant   = completionType !== "Return";
   const needsApproval = revisedNum > originalEstimate + 0.001 && !job.approval;
+  // Margin on this job. A Return charges nothing but the parts are usually
+  // still gone, and an FOC is a loss by definition — so the shortfall is shown
+  // for all three, and only a *chargeable* job asks for an acknowledgement,
+  // since choosing FOC is already the acknowledgement.
+  /**
+   * What the technician is charging for this job.
+   *
+   * Always entered here, because only they know what the job was worth. The
+   * per-person rate in Admin -> Permissions pre-fills it — a technician on a
+   * flat Rs. 500 shouldn't retype it every time — but it is a suggestion, not
+   * a formula, and can always be overwritten.
+   *
+   * Written onto the job at completion rather than derived later from whatever
+   * the rate happens to be then: a renegotiated rate must not rewrite the
+   * profit on jobs already finished.
+   */
+  const labourMode = rules?.labourCostMode ?? "none";
+  const labourRate = rules?.labourCostValue ?? 0;
+  const suggestedLabour = labourMode === "custom"
+    ? null
+    : labourFromRate(labourMode, labourRate, revisedNum);
+
+  const [labourInput, setLabourInput] = useState("");
+  const [labourTouched, setLabourTouched] = useState(false);
+  // Derived, not synced through an effect: while untouched the field simply
+  // shows the suggestion, so a percentage rate follows the final cost as it is
+  // edited instead of going stale at whatever it was when the modal opened.
+  const labourValue = labourTouched
+    ? labourInput
+    : suggestedLabour === null ? "" : String(suggestedLabour);
+  const labourCost = Math.max(0, parseFloat(labourValue) || 0);
+
+  // Parts and labour together are what the job actually cost.
+  const jobCost   = partsCost + labourCost;
+  const jobMargin = revisedNum - jobCost;
+  const atALoss   = jobCost > 0 && jobMargin < -0.001;
+  const needsLossAck = atALoss && chargeable;
   const approvalCaptured = apprChannel === "In-store" ? apprSig.trim() !== "" : apprRef.trim().length > 2;
 
   const conflictJob = selectedNext === "Issued"
@@ -183,13 +254,21 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
     if (!selectedNext) return "Choose the new status above.";
     if (selectedNext === "Pending" && pauseReason.trim().length <= 3) return "Give a reason for putting the job on hold.";
     if (selectedNext === "Completed") {
-      if (completionNotes.trim().length <= 5) {
-        return completionType === "Return"
-          ? "Explain why the repair could not be completed (at least 6 characters)."
-          : "Add a work summary (at least 6 characters).";
+      // Optional on a normal or free-of-charge repair — the device works, and
+      // forcing a sentence out of a busy bench just produces "done". A Return
+      // is different: nothing was repaired, and that explanation is printed on
+      // the customer's receipt, so it stays required.
+      if (completionType === "Return" && completionNotes.trim().length <= 5) {
+        return "Explain why the repair could not be completed (at least 6 characters).";
       }
       if (needsApproval && !approvalCaptured) {
         return "The final cost is above the quote — capture the customer's approval first.";
+      }
+      if (labourValue.trim() === "") {
+        return "Enter what you are charging for this job.";
+      }
+      if (needsLossAck && !lossAccepted) {
+        return `This job costs Rs. ${jobCost.toLocaleString()} but you are charging Rs. ${revisedNum.toLocaleString()} — confirm the loss or raise the final cost.`;
       }
     }
     if (selectedNext === "Cancelled" && cancelReason.trim().length <= 3) return "Give a reason for cancelling.";
@@ -199,7 +278,12 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
   const canSubmit = (() => {
     if (!selectedNext) return false;
     if (selectedNext === "Pending")   return pauseReason.trim().length > 3;
-    if (selectedNext === "Completed") return completionNotes.trim().length > 5 && (!needsApproval || approvalCaptured);
+    if (selectedNext === "Completed") {
+      return (completionType !== "Return" || completionNotes.trim().length > 5)
+        && (!needsApproval || approvalCaptured)
+        && labourValue.trim() !== ""
+        && (!needsLossAck || lossAccepted);
+    }
     if (selectedNext === "Cancelled") return cancelReason.trim().length > 3;
     return true;
   })();
@@ -233,6 +317,10 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
       const partsList = partsUsedText.split("\n").map(s => s.trim()).filter(Boolean);
       if (partsList.length) completedPatch.partsUsed = partsList;
       if (futureFaults.trim()) completedPatch.futureFaults = futureFaults.trim();
+      // What the technician charged. Written unconditionally — including zero,
+      // which is a real answer — so a job that cost nothing is distinguishable
+      // from one finished before this field existed (those stay null).
+      completedPatch.labourCost = labourCost;
       // Save functional test
       const overallPass = testsFailed === 0;
       saveFunctionalTest({ jobId: job.id, completedAt: now, results: testResults, overallPass, notes: testNotes || undefined });
@@ -515,18 +603,125 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
 
                 {/* Work summary (technician remarks → printed on the Non-Issued receipt) */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {sec(completionType === "Return" ? "Reason Not Repaired * (required)" : "Job Remarks / Work Summary * (required)")}
+                  {sec(completionType === "Return" ? "Reason Not Repaired * (required)" : "Job Remarks / Work Summary (optional)")}
                   <textarea placeholder={completionType === "Return"
                     ? "Why the repair could not be completed — what was tried, what failed…"
                     : "Describe all work performed — parts replaced, tests done, issues found…"} value={completionNotes} onChange={e => setCompletionNotes(e.target.value)} rows={3} style={inputStyle} />
                   <p style={{ fontSize: 11, color: completionNotes.trim().length > 5 ? TA : "var(--text-muted)", fontFamily: ff }}>
-                    {completionNotes.trim().length} chars {completionNotes.trim().length > 5 ? "✓" : "(min 6)"}
+                    {completionType === "Return"
+                      ? <>{completionNotes.trim().length} chars {completionNotes.trim().length > 5 ? "✓" : "(min 6)"}</>
+                      : <>Printed on the customer&apos;s receipt if you fill it in.</>}
                   </p>
                 </div>
 
-                {/* Parts used (prefilled from installed part requests) */}
+                {/* Parts used, with what they cost the shop */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {sec("Parts Used (one per line)")}
+                  {sec("Parts Used & Cost")}
+
+                  {(jobPartLines.length > 0 || labourCost > 0) && (
+                    <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", fontFamily: ff }}>
+                      {jobPartLines.map(l => (
+                        <div key={l.id} style={{
+                          display: "flex", alignItems: "center", gap: 8, padding: "8px 11px",
+                          borderBottom: "1px solid var(--border)", fontSize: 12,
+                        }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ color: "var(--text-primary)", fontWeight: 600 }}>
+                              {l.name}{l.qty > 1 ? ` ×${l.qty}` : ""}
+                            </p>
+                            <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 1 }}>
+                              {l.priced ? `Rs. ${l.unitCost.toLocaleString()} each` : "No catalogue price"}
+                              {!l.installed && " · not marked installed"}
+                            </p>
+                          </div>
+                          <span style={{ fontSize: 12.5, fontWeight: 700, color: l.priced ? "var(--text-primary)" : "var(--text-muted)" }}>
+                            {l.priced ? `Rs. ${l.lineTotal.toLocaleString()}` : "—"}
+                          </span>
+                        </div>
+                      ))}
+
+                      {/* Parts and labour against what is being charged */}
+                      <div style={{ padding: "9px 11px", background: "var(--bg-secondary)", display: "flex", flexDirection: "column", gap: 5, fontSize: 12 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ color: "var(--text-secondary)" }}>Parts cost</span>
+                          <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>Rs. {partsCost.toLocaleString()}</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ color: "var(--text-secondary)" }}>Technician&apos;s charge</span>
+                          <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>Rs. {labourCost.toLocaleString()}</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ color: "var(--text-secondary)" }}>
+                            {chargeable ? "Charging" : `Charging (${completionType})`}
+                          </span>
+                          <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>Rs. {revisedNum.toLocaleString()}</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 5, borderTop: "1px solid var(--border)" }}>
+                          <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
+                            {jobMargin < 0 ? "Loss on this job" : "Margin"}
+                          </span>
+                          <span style={{ fontWeight: 800, color: jobMargin < 0 ? "#f87171" : TA }}>
+                            {jobMargin < 0 ? "−" : ""}Rs. {Math.abs(jobMargin).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {unpricedPart && (
+                    <p style={{ fontSize: 11, color: "#fbbf24", fontFamily: ff, lineHeight: 1.5 }}>
+                      One or more parts are no longer in the catalogue, so their cost is not included in the total above.
+                    </p>
+                  )}
+
+                  {/* Only the technician knows what the job was worth to them */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {sec("Your Charge For This Job * (required)")}
+                    <input
+                      type="number"
+                      min={0}
+                      value={labourValue}
+                      onChange={e => { setLabourTouched(true); setLabourInput(e.target.value); }}
+                      placeholder="What you are charging for this repair"
+                      style={inputStyle}
+                    />
+                    <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                      {!labourTouched && labourMode !== "none" && labourMode !== "custom"
+                        ? `Suggested from your rate (${describeRate(labourMode, labourRate)}) — change it if this job was worth more or less.`
+                        : labourMode === "custom"
+                          ? "Your work is priced job by job, so this cannot be worked out later."
+                          : "Recorded against the repair. It is what the shop pays out, and what profit is measured after."}
+                    </p>
+                  </div>
+
+                  {/* The loss gate. Deliberately not a block: sometimes the shop
+                      eats it. But it must be chosen, not stumbled into. */}
+                  {needsLossAck && (
+                    <div style={{
+                      padding: "11px 13px", borderRadius: 10,
+                      background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.4)",
+                      fontFamily: ff, display: "flex", flexDirection: "column", gap: 8,
+                    }}>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <AlertTriangle size={15} color="#f87171" style={{ flexShrink: 0, marginTop: 1 }} />
+                        <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+                          This job costs <strong style={{ color: "#f87171" }}>Rs. {jobCost.toLocaleString()}</strong>
+                          {labourCost > 0 ? ` (Rs. ${partsCost.toLocaleString()} parts + Rs. ${labourCost.toLocaleString()} labour)` : ""} but
+                          you are charging <strong>Rs. {revisedNum.toLocaleString()}</strong> — the shop loses{" "}
+                          <strong style={{ color: "#f87171" }}>Rs. {Math.abs(jobMargin).toLocaleString()}</strong> on this
+                          repair. Raise the final cost above, or confirm the loss is intended.
+                        </p>
+                      </div>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12 }}>
+                        <input type="checkbox" checked={lossAccepted} onChange={e => setLossAccepted(e.target.checked)} style={{ cursor: "pointer" }} />
+                        <span style={{ color: "var(--text-secondary)" }}>Complete anyway at a loss</span>
+                      </label>
+                    </div>
+                  )}
+
+                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginTop: 2 }}>
+                    Parts used (one per line) — printed on the receipt
+                  </p>
                   <textarea placeholder="e.g. iPhone 13 Rear Camera Module" value={partsUsedText} onChange={e => setPartsUsedText(e.target.value)} rows={2} style={inputStyle} />
                 </div>
 
