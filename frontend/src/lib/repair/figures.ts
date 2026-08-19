@@ -15,11 +15,20 @@ export interface IssuedFigures {
   totalJobs: number;
   /** No sales backend yet, so this is honestly zero rather than invented. */
   salesRevenue: number;
+  /**
+   * IDs of the jobs counted above. This hook is deliberately independent of
+   * RepairProvider/PartsContext (see below), so it can't compute a real
+   * parts-cost figure itself — callers that ARE inside <PartsProvider> use
+   * these ids to look up each job's actual approved part requests instead
+   * of inventing a number.
+   */
+  issuedJobIds: string[];
 }
 
-const EMPTY: IssuedFigures = { repairIncome: 0, collected: 0, totalJobs: 0, salesRevenue: 0 };
+const EMPTY: IssuedFigures = { repairIncome: 0, collected: 0, totalJobs: 0, salesRevenue: 0, issuedJobIds: [] };
 
-function periodStart(period: FigurePeriod): Date {
+/** Exported so any other period-filtered view buckets dates the same way. */
+export function periodStart(period: FigurePeriod): Date {
   const d = new Date();
   if (period === "Daily")   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
   if (period === "Weekly")  { const w = new Date(d); w.setDate(d.getDate() - 6); w.setHours(0, 0, 0, 0); return w; }
@@ -29,7 +38,7 @@ function periodStart(period: FigurePeriod): Date {
 }
 
 /** When the customer took the device away — the moment the money is earned. */
-const issuedOn = (j: RepairJob) => j.handover?.handedOverAt ?? j.completedAt ?? j.createdAt;
+export const issuedOn = (j: RepairJob) => j.handover?.handedOverAt ?? j.completedAt ?? j.createdAt;
 
 export function computeIssuedFigures(jobs: RepairJob[], period: FigurePeriod): IssuedFigures {
   const from = periodStart(period);
@@ -39,6 +48,7 @@ export function computeIssuedFigures(jobs: RepairJob[], period: FigurePeriod): I
     collected:    issued.reduce((sum, j) => sum + j.advancePaid, 0),
     totalJobs:    issued.length,
     salesRevenue: 0,
+    issuedJobIds: issued.map(j => j.id),
   };
 }
 

@@ -13,6 +13,7 @@ import { uploadIntakePhotos } from "@/lib/repair/api";
 import { useToast } from "@/lib/ui/toast";
 import { useTechnicians, type Technician } from "@/lib/repair/technicians";
 import Combobox from "@/cashier/components/shared/Combobox";
+import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import { lookupModelNumber } from "@/cashier/data/modelNumbers";
 import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2, AlertCircle, FileClock } from "lucide-react";
 
@@ -162,7 +163,7 @@ type RequiredField =
 // Terms acceptance is the one thing step 5 blocks on.
 const REQUIRED_BY_STEP: Record<number, RequiredField[]> = {
   1: ["customerName", "customerContact"],
-  2: ["deviceModel"],
+  2: [],
   3: ["estimatedCost"],
   5: ["termsAccepted"],
 };
@@ -356,7 +357,7 @@ function Step2({ data, onChange, isMobile, models, onAddModel, errors }: { data:
             )}
           </div>
           <div data-field="deviceModel" className={bad("deviceModel") ? "field-shake" : undefined}>
-            <label style={labelStyle}>Device Model *</label>
+            <label style={labelStyle}>Device Model</label>
             <Combobox
               value={data.deviceModel}
               options={models}
@@ -924,6 +925,11 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
     initialDraft ? { ...INITIAL, ...initialDraft.form, intakePhotos: [] } : INITIAL,
   );
   const [createdJob, setCreatedJob] = useState<RepairJob | null>(null);
+  // Set the instant a job is created, cleared once the silent print fires —
+  // see BarcodeLabelModal's `silent` mode. Separate from createdJob so the
+  // receipt popup and the tag print are independent: closing one doesn't
+  // touch the other.
+  const [autoPrintJob, setAutoPrintJob] = useState<RepairJob | null>(null);
   const [errors, setErrors] = useState<RequiredField[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -1080,6 +1086,11 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
 
       toast.dialog("success", `Job ${job.id} created`, `${job.customerName} — ${job.brand} ${job.model}. Print the receipt or hand over the job number.`);
       setCreatedJob(job);
+      // The device tag prints itself — no click needed. True zero-dialog
+      // silence depends on the browser being launched with silent/kiosk
+      // printing to the label printer; this just removes every step on our
+      // side of that regardless.
+      setAutoPrintJob(job);
       // The intake is now a real job — its draft has served its purpose.
       removeDraft(draftId);
     } catch (e) {
@@ -1247,6 +1258,17 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
       </div>
 
       {createdJob && <JobReceiptPopup job={createdJob} onNew={startNewRepair} onClose={onClose} />}
+      {autoPrintJob && (
+        <BarcodeLabelModal
+          silent
+          variant="repair"
+          jobId={autoPrintJob.id}
+          code={autoPrintJob.id}
+          title={`${autoPrintJob.brand} ${autoPrintJob.model}`.trim()}
+          subtitle={autoPrintJob.customerName}
+          onClose={() => setAutoPrintJob(null)}
+        />
+      )}
     </div>
   );
 }

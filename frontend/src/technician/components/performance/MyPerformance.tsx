@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { TrendingUp, CheckCircle, Clock, Package, AlertTriangle, FileText, ClipboardCheck, Star } from "lucide-react";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
-import { SPARE_PARTS } from "@/technician/data/partsData";
+import { useParts } from "@/cashier/contexts/PartsContext";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -46,6 +46,7 @@ function BarRow({ label, value, max, color }: { label: string; value: number; ma
 export default function MyPerformance() {
   const { jobs } = useRepair();
   const { technicianName, jobMeta, partRequests, diagnostics, activityLog, notes, escalations, functionalTests } = useTech();
+  const { parts } = useParts();
 
   const myJobs = useMemo(() => jobs.filter(j => j.technician === technicianName), [jobs, technicianName]);
 
@@ -75,7 +76,7 @@ export default function MyPerformance() {
 
     // Parts cost
     const myRequests = partRequests.filter(r => myJobs.some(j => j.id === r.jobId));
-    const totalPartsCost = myRequests.reduce((s, r) => s + (SPARE_PARTS.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+    const totalPartsCost = myRequests.reduce((s, r) => s + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
 
     // Escalations
     const myEsc = escalations.filter(e => myJobs.some(j => j.id === e.jobId));
@@ -119,7 +120,7 @@ export default function MyPerformance() {
       onTimeRate, avgMinutes, totalPartsCost, openEsc, diagDone, testsDone,
       totalActivity, totalNotes, completedThisWeek, breakdownCounts, myRequests,
     };
-  }, [myJobs, jobMeta, partRequests, diagnostics, activityLog, notes, escalations, functionalTests]);
+  }, [myJobs, jobMeta, partRequests, diagnostics, activityLog, notes, escalations, functionalTests, parts]);
 
   const avgTimeStr = stats.avgMinutes > 0
     ? `${Math.floor(stats.avgMinutes / 60)}h ${stats.avgMinutes % 60}m avg`
@@ -194,7 +195,7 @@ export default function MyPerformance() {
               </thead>
               <tbody>
                 {stats.myRequests.slice(-10).reverse().map((r, i) => {
-                  const part = SPARE_PARTS.find(p => p.sku === r.partSku);
+                  const part = parts.find(p => p.sku === r.partSku);
                   const STATUS_COLOR: Record<string, string> = { Pending: "#fbbf24", Approved: TA, Issued: "#60a5fa", Rejected: "#f87171" };
                   return (
                     <tr key={r.id} style={{ borderBottom: "1px solid var(--border)", background: i % 2 === 0 ? "transparent" : "var(--bg-secondary)" }}>

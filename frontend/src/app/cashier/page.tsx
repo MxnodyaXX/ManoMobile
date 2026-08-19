@@ -21,6 +21,7 @@ import InvoiceHistory from "@/cashier/components/invoicehistory/InvoiceHistory";
 import AuditLog from "@/cashier/components/audit/AuditLog";
 import JobScanFab from "@/cashier/components/shared/JobScanFab";
 import { InventoryProvider } from "@/cashier/contexts/InventoryContext";
+import { PartsProvider, useParts } from "@/cashier/contexts/PartsContext";
 import { CashRegisterProvider } from "@/cashier/contexts/CashRegisterContext";
 import { RepairProvider } from "@/cashier/contexts/RepairContext";
 import { WarrantyProvider } from "@/cashier/contexts/WarrantyContext";
@@ -39,7 +40,7 @@ import {
   Hammer, Box, ClipboardList,
   AlertTriangle, CheckCircle, Clock, ArrowRight,
 } from "lucide-react";
-import { useIssuedFigures } from "@/lib/repair/figures";
+import { useIssuedFigures, type IssuedFigures } from "@/lib/repair/figures";
 
 export type ActivePage =
   | "Home"
@@ -186,6 +187,33 @@ function TodaySnapshot() {
   );
 }
 
+/* ── Repairs stat group ──
+   A separate component (not inline in CashierPage) because it needs
+   useParts() — that only works inside <PartsProvider>'s children, and
+   CashierPage's own body runs before that provider exists. Parts Cost used
+   to read fig.collected (money paid on issued jobs) by mistake; it's the
+   same number as Repair Income whenever a job is fully paid, which is what
+   made it look like "parts cost = revenue" on the dashboard. Real parts
+   cost is what it actually costs the shop: quantity × catalog cost price,
+   summed over each issued job's approved part requests. */
+function RepairsStatGroup({ fig, dateLabel }: { fig: IssuedFigures; dateLabel: string }) {
+  const { partRequests, parts } = useParts();
+  const partsCost = partRequests
+    .filter(r => fig.issuedJobIds.includes(r.jobId) && (r.status === "Approved" || r.status === "Issued"))
+    .reduce((sum, r) => sum + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+
+  return (
+    <StatGroup index={2} title="Repairs" dateLabel={dateLabel}>
+      <StatCard title="Repair Income"   value={fmtRs(fig.repairIncome)}  change=""  icon={Wrench}        size="large" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <StatCard title="Labor Cost"    value={fmtRs(0)}          change=""    icon={Hammer}        size="small" />
+        <StatCard title="Parts Cost"    value={fmtRs(partsCost)}  change=""     icon={Box}           size="small" />
+        <StatCard title="Total Jobs"    value={String(fig.totalJobs)}    change=""     icon={ClipboardList} size="small" isCount />
+      </div>
+    </StatGroup>
+  );
+}
+
 export default function CashierPage() {
   const [filter, setFilter] = useState<FilterPeriod>("Daily");
   const [activePage, setActivePage] = useState<ActivePage>("Home");
@@ -208,6 +236,7 @@ export default function CashierPage() {
     <SalesProvider>
     <HeldSalesProvider>
     <InventoryProvider>
+    <PartsProvider>
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
         <Sidebar
           activePage={activePage}
@@ -297,14 +326,7 @@ export default function CashierPage() {
                     </div>
                   </StatGroup>
 
-                  <StatGroup index={2} title="Repairs" dateLabel={dateLabel}>
-                    <StatCard title="Repair Income"   value={fmtRs(fig.repairIncome)}  change=""  icon={Wrench}        size="large" />
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                      <StatCard title="Labor Cost"    value={fmtRs(0)}    change=""    icon={Hammer}        size="small" />
-                      <StatCard title="Parts Cost"    value={fmtRs(fig.collected)}     change=""     icon={Box}           size="small" />
-                      <StatCard title="Total Jobs"    value={String(fig.totalJobs)}    change=""     icon={ClipboardList} size="small" isCount />
-                    </div>
-                  </StatGroup>
+                  <RepairsStatGroup fig={fig} dateLabel={dateLabel} />
                 </div>
 
                 {/* Quick actions + Activity feed */}
@@ -339,6 +361,7 @@ export default function CashierPage() {
         </div>
       </div>
       <JobScanFab />
+    </PartsProvider>
     </InventoryProvider>
     </HeldSalesProvider>
     </SalesProvider>

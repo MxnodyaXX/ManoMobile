@@ -6,6 +6,7 @@ import { AdminProvider } from "@/admin/contexts/AdminContext";
 import AdminSidebar, { type AdminPage } from "@/admin/components/layout/AdminSidebar";
 import AdminNavbar    from "@/admin/components/layout/AdminNavbar";
 import AdminDashboard from "@/admin/components/dashboard/AdminDashboard";
+import BusinessInsights from "@/admin/components/insights/BusinessInsights";
 import StaffManagement from "@/admin/components/staff/StaffManagement";
 import Permissions    from "@/admin/components/permissions/Permissions";
 import Suppliers      from "@/admin/components/suppliers/Suppliers";
@@ -14,6 +15,10 @@ import DeviceRegistry from "@/admin/components/devices/DeviceRegistry";
 import Notifications  from "@/admin/components/notifications/Notifications";
 import SystemSettings from "@/admin/components/settings/SystemSettings";
 import { useStaffByRole } from "@/lib/staff/roster";
+import { RepairProvider } from "@/cashier/contexts/RepairContext";
+import { WarrantyProvider } from "@/cashier/contexts/WarrantyContext";
+import { InventoryProvider } from "@/cashier/contexts/InventoryContext";
+import { PartsProvider } from "@/cashier/contexts/PartsContext";
 
 const AA = "#a78bfa";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -79,6 +84,12 @@ function AdminPageInner() {
 
   return (
     <AdminProvider>
+    {/* Business Insights needs live jobs/parts/inventory data — the rest of
+        Admin Control didn't need these before, so they weren't wrapped here. */}
+    <RepairProvider>
+    <WarrantyProvider>
+    <InventoryProvider>
+    <PartsProvider>
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
 
         <AdminSidebar
@@ -94,17 +105,22 @@ function AdminPageInner() {
           <AdminNavbar activePage={activePage} onMenuClick={() => setSidebarOpen(true)} />
 
           <main className="resp-main" style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
-            {activePage === "Dashboard"       && <AdminDashboard />}
-            {activePage === "Staff Management"&& <StaffManagement />}
-            {activePage === "Permissions"     && <Permissions />}
-            {activePage === "Suppliers"       && <Suppliers />}
-            {activePage === "Purchase Orders" && <PurchaseOrders />}
-            {activePage === "Device Registry" && <DeviceRegistry />}
-            {activePage === "Notifications"   && <Notifications />}
-            {activePage === "System Settings" && <SystemSettings />}
+            {activePage === "Dashboard"        && <AdminDashboard />}
+            {activePage === "Business Insights"&& <BusinessInsights />}
+            {activePage === "Staff Management" && <StaffManagement />}
+            {activePage === "Permissions"      && <Permissions />}
+            {activePage === "Suppliers"        && <Suppliers />}
+            {activePage === "Purchase Orders"  && <PurchaseOrders />}
+            {activePage === "Device Registry"  && <DeviceRegistry />}
+            {activePage === "Notifications"    && <Notifications />}
+            {activePage === "System Settings"  && <SystemSettings />}
           </main>
         </div>
       </div>
+    </PartsProvider>
+    </InventoryProvider>
+    </WarrantyProvider>
+    </RepairProvider>
     </AdminProvider>
   );
 }

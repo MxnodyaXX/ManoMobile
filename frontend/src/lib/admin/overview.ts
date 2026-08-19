@@ -89,9 +89,12 @@ export async function fetchAdminOverview(): Promise<AdminOverview> {
 
     for (const r of rows) out.jobsByStatus[r.status] = (out.jobsByStatus[r.status] ?? 0) + 1;
 
-    // Money still owed on work that has not been collected.
+    // Money still owed, full stop — including a job already handed to the
+    // customer with a balance left on it. Delivery isn't the same event as
+    // getting paid, so it can't be what drops a job out of this figure; only
+    // Cancelled (no service rendered, nothing owed) does.
     out.outstandingValue = rows
-      .filter(r => !["Delivered", "Cancelled"].includes(r.status))
+      .filter(r => r.status !== "Cancelled")
       .reduce((sum, r) => sum + Math.max(0, Number(r.estimated_cost) - Number(r.advance_paid)), 0);
 
     out.recentJobs = rows.slice(0, 6).map(r => ({

@@ -1,10 +1,11 @@
 "use client";
 
-import { LayoutDashboard, Users, ShieldCheck, Truck, ShoppingCart, Smartphone, Bell, Settings, LogOut, Shield } from "lucide-react";
+import { LayoutDashboard, Users, ShieldCheck, Truck, ShoppingCart, Smartphone, Bell, Settings, LogOut, Shield, BarChart3 } from "lucide-react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 
 export type AdminPage =
   | "Dashboard"
+  | "Business Insights"
   | "Staff Management"
   | "Permissions"
   | "Suppliers"
@@ -14,14 +15,15 @@ export type AdminPage =
   | "System Settings";
 
 const NAV: { id: AdminPage; icon: any; label: string }[] = [
-  { id: "Dashboard",       icon: LayoutDashboard, label: "Dashboard"       },
-  { id: "Staff Management",icon: Users,           label: "Staff"           },
-  { id: "Permissions",     icon: ShieldCheck,     label: "Permissions"     },
-  { id: "Suppliers",       icon: Truck,           label: "Suppliers"       },
-  { id: "Purchase Orders", icon: ShoppingCart,    label: "Purchase Orders" },
-  { id: "Device Registry", icon: Smartphone,      label: "Device Registry" },
-  { id: "Notifications",   icon: Bell,            label: "Notifications"   },
-  { id: "System Settings", icon: Settings,        label: "Settings"        },
+  { id: "Dashboard",        icon: LayoutDashboard, label: "Dashboard"         },
+  { id: "Business Insights",icon: BarChart3,       label: "Business Insights" },
+  { id: "Staff Management", icon: Users,           label: "Staff"             },
+  { id: "Permissions",      icon: ShieldCheck,     label: "Permissions"       },
+  { id: "Suppliers",        icon: Truck,           label: "Suppliers"         },
+  { id: "Purchase Orders",  icon: ShoppingCart,    label: "Purchase Orders"   },
+  { id: "Device Registry",  icon: Smartphone,      label: "Device Registry"   },
+  { id: "Notifications",    icon: Bell,            label: "Notifications"     },
+  { id: "System Settings",  icon: Settings,        label: "Settings"          },
 ];
 
 const AA = "#a78bfa";

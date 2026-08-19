@@ -1,24 +1,13 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { useParts, type PartRequest, type PartRequestStatus } from "@/cashier/contexts/PartsContext";
+import { rulesForTechnician } from "@/lib/settings/staffRules";
 
-// ─── Part Requests ────────────────────────────────────────────────────────────
-
-export type PartRequestStatus = "Pending" | "Approved" | "Issued" | "Rejected";
-
-export interface PartRequest {
-  id: string;
-  jobId: string;
-  jobDevice: string;
-  partName: string;
-  partSku: string;
-  quantity: number;
-  requestedAt: Date;
-  status: PartRequestStatus;
-  note?: string;
-  resolvedAt?: Date;
-  installedAt?: Date;
-}
+// Part-request types/state now live in PartsContext — it's the cross-role
+// shared store (Admin needs to see and approve these from a different route
+// tree). Re-exported here so existing imports from this file keep working.
+export type { PartRequestStatus, PartRequest } from "@/cashier/contexts/PartsContext";
 
 // ─── Job Meta (timer) ─────────────────────────────────────────────────────────
 
@@ -129,10 +118,12 @@ export interface ShiftRecord {
 interface TechContextValue {
   technicianName: string;
 
-  // Part requests
+  // Part requests. Approving/rejecting a Pending one is an Admin action —
+  // see useParts().resolveRequest — not exposed here.
   partRequests: PartRequest[];
-  requestPart: (req: Omit<PartRequest, "id" | "requestedAt" | "status" | "installedAt">) => void;
-  updateRequestStatus: (id: string, status: PartRequestStatus) => void;
+  /** Returns the resulting status so the caller can tell the technician
+   *  whether it needs Admin approval or was granted immediately. */
+  requestPart: (req: Omit<PartRequest, "id" | "requestedAt" | "status" | "installedAt" | "technicianName">) => PartRequestStatus;
   markPartInstalled: (id: string) => void;
 
   // Job meta / timer
@@ -180,29 +171,14 @@ const TechContext = createContext<TechContextValue>({} as TechContextValue);
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 
-let reqSeq = 2;
 let actSeq = 10;
 let noteSeq = 1;
 let escSeq = 1;
 
-const makeSeedRequests = (): PartRequest[] => [
-  {
-    id: "PR-001", jobId: "RM-001", jobDevice: "iPhone 14 Pro",
-    partName: "iPhone 14 Pro OLED Screen Assembly", partSku: "SCR-IP14P-BLK",
-    quantity: 1, requestedAt: new Date(Date.now() - 3600_000), status: "Approved",
-    resolvedAt: new Date(Date.now() - 1800_000),
-  },
-  {
-    id: "PR-002", jobId: "RM-003", jobDevice: "Redmi Note 12",
-    partName: "USB-C Charging Port Module", partSku: "CHG-USB-RN12",
-    quantity: 1, requestedAt: new Date(Date.now() - 7200_000), status: "Pending",
-  },
-];
-
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function TechProvider({ children, technicianName }: { children: ReactNode; technicianName: string }) {
-  const [partRequests, setPartRequests]   = useState<PartRequest[]>(makeSeedRequests);
+  const { partRequests, requestPart: rawRequestPart, markPartInstalled } = useParts();
   const [jobMetaMap, setJobMetaMap]       = useState<Record<string, JobMeta>>({});
   const [diagnostics, setDiagnostics]     = useState<Record<string, DiagnosticReport>>({});
   const [activityLog, setActivityLog]     = useState<Record<string, ActivityEntry[]>>({});
@@ -214,18 +190,24 @@ export function TechProvider({ children, technicianName }: { children: ReactNode
   const [shiftHistory, setShiftHistory]   = useState<ShiftRecord[]>([]);
 
   // ── Part requests ──
-  const requestPart = useCallback((req: Omit<PartRequest, "id" | "requestedAt" | "status" | "installedAt">) => {
-    const id = `PR-${String(++reqSeq).padStart(3, "0")}`;
-    setPartRequests(prev => [...prev, { ...req, id, requestedAt: new Date(), status: "Pending" }]);
-  }, []);
+  // Whether this technician can pull parts without Admin sign-off. Fetched
+  // once per session and cached here (rulesForTechnician has its own 60s
+  // cache too) — defaults to requiring approval until it resolves, since
+  // skipping the gate before we're sure of the permission would be worse
+  // than a technician waiting a beat for it to load.
+  const [autoApprove, setAutoApprove] = useState(false);
+  useEffect(() => {
+    let active = true;
+    rulesForTechnician(technicianName)
+      .then(r => { if (active) setAutoApprove(r.canUsePartsWithoutApproval); })
+      .catch(() => { /* stays false — approval required until this can be confirmed */ });
+    return () => { active = false; };
+  }, [technicianName]);
 
-  const updateRequestStatus = useCallback((id: string, status: PartRequestStatus) => {
-    setPartRequests(prev => prev.map(r => r.id === id ? { ...r, status, resolvedAt: new Date() } : r));
-  }, []);
-
-  const markPartInstalled = useCallback((id: string) => {
-    setPartRequests(prev => prev.map(r => r.id === id ? { ...r, installedAt: new Date() } : r));
-  }, []);
+  const requestPart = useCallback((req: Omit<PartRequest, "id" | "requestedAt" | "status" | "installedAt" | "technicianName">): PartRequestStatus => {
+    rawRequestPart({ ...req, technicianName }, { autoApprove });
+    return autoApprove ? "Approved" : "Pending";
+  }, [rawRequestPart, technicianName, autoApprove]);
 
   // ── Job meta / timer ──
   const setJobMeta = useCallback((jobId: string, meta: Partial<Omit<JobMeta, "jobId">>) => {
@@ -312,7 +294,7 @@ export function TechProvider({ children, technicianName }: { children: ReactNode
   return (
     <TechContext.Provider value={{
       technicianName,
-      partRequests, requestPart, updateRequestStatus, markPartInstalled,
+      partRequests, requestPart, markPartInstalled,
       jobMeta: jobMetaMap, setJobMeta, getElapsedMinutes,
       diagnostics, saveDiagnostic,
       activityLog, addActivity,

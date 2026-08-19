@@ -11,11 +11,12 @@ export type { JobStatus, RepairJob } from "@/cashier/contexts/RepairContext";
 import { createPortal } from "react-dom";
 import JobReceiptSlip from "./JobReceiptSlip";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
+import { useParts } from "@/cashier/contexts/PartsContext";
 import {
   Search, Filter, ChevronDown, MoreHorizontal,
   CheckCircle, Clock, AlertCircle, XCircle, Wrench,
   X, CheckSquare, Send, Printer, ShieldCheck, CreditCard,
-  Truck, Ban, FileText, Package, Tag,
+  Truck, Ban, FileText, Package, Tag, Info,
 } from "lucide-react";
 
 interface FinishJobData {
@@ -71,7 +72,7 @@ const priorityColor: Record<string, string> = {
 type ColId =
   | "jobId" | "customer" | "device" | "issue" | "technician" | "status" | "priority"
   | "deviceIssue" | "estCost" | "quotedCost" | "costDue" | "quotedDue" | "finalBill" | "paidAmount" | "advance" | "balance"
-  | "estCompletion" | "created" | "started" | "paused" | "completed" | "issued";
+  | "estCompletion" | "created" | "started" | "paused" | "completed" | "issued" | "partsCost";
 
 const fmtDate = (d?: string) => {
   if (!d) return "—";
@@ -206,18 +207,24 @@ const COLUMNS: Record<ColId, ColSpec> = {
   },
   completed: { label: "Completed", render: j => <span style={muted}>{fmtDate(j.completedAt)}</span> },
   issued: { label: "Issued On", render: j => <span style={muted}>{fmtDate(j.handover?.handedOverAt)}</span> },
+  // What the shop actually paid for parts on this job — quantity × catalog
+  // cost price, summed over its approved/issued part requests (Pending and
+  // Rejected ones aren't real cost yet). The info icon opens the line-item
+  // breakdown rather than cramming it into the cell.
+  partsCost: { label: "Parts Cost", align: "right", render: j => <PartsCostCell job={j} /> },
 };
 
-/** Columns per shop-facing view. Anything not listed falls back to DEFAULT_COLS. */
-const DEFAULT_COLS: ColId[] = ["jobId", "customer", "deviceIssue", "technician", "status", "priority", "costDue", "advance", "balance", "created"];
+/** Columns per shop-facing view. Anything not listed falls back to DEFAULT_COLS
+ *  (which is what the "All Jobs" tab uses, since it has no entry of its own). */
+const DEFAULT_COLS: ColId[] = ["jobId", "customer", "deviceIssue", "technician", "status", "priority", "costDue", "advance", "balance", "partsCost", "created"];
 
 const VIEW_COLUMNS: Partial<Record<RepairView, ColId[]>> = {
   "New":         ["jobId", "customer", "deviceIssue", "technician", "status", "priority", "costDue", "advance", "balance", "created"],
   "Not Started": ["jobId", "customer", "deviceIssue", "technician", "status", "priority", "costDue", "advance", "balance", "created"],
   "Started":     ["jobId", "customer", "deviceIssue", "technician", "status", "costDue", "created", "started"],
   "Pending":     ["jobId", "customer", "deviceIssue", "technician", "status", "costDue", "created", "started", "paused"],
-  "Non-Issued":  ["jobId", "customer", "deviceIssue", "technician", "status", "quotedDue", "advance", "finalBill", "paidAmount", "balance", "created", "started", "completed"],
-  "Issued":      ["jobId", "customer", "deviceIssue", "technician", "status", "quotedDue", "advance", "finalBill", "paidAmount", "balance", "created", "started", "completed", "issued"],
+  "Non-Issued":  ["jobId", "customer", "deviceIssue", "technician", "status", "quotedDue", "advance", "finalBill", "paidAmount", "balance", "partsCost", "created", "started", "completed"],
+  "Issued":      ["jobId", "customer", "deviceIssue", "technician", "status", "quotedDue", "advance", "finalBill", "paidAmount", "balance", "partsCost", "created", "started", "completed", "issued"],
 };
 
 
@@ -259,6 +266,108 @@ function InfoBlock({ label, children }: { label: string; children: React.ReactNo
       </div>
       {children}
     </div>
+  );
+}
+
+// ─── Parts Used ───────────────────────────────────────────────────────────────
+
+function PartsUsedModal({ job, onClose }: { job: RepairJob; onClose: () => void }) {
+  const { partRequests, parts } = useParts();
+  const requests = partRequests.filter(r => r.jobId === job.id);
+  const used = requests.filter(r => r.status === "Approved" || r.status === "Issued");
+  const unresolved = requests.filter(r => r.status === "Pending" || r.status === "Rejected");
+  const total = used.reduce((s, r) => s + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 1010, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(440px, calc(100vw - 24px))", maxHeight: "80vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 24px 64px rgba(0,0,0,0.55)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>Parts Used — {job.id}</p>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{[job.brand, job.model].filter(Boolean).join(" ") || "—"}</p>
+          </div>
+          <button onClick={onClose} style={{ width: 26, height: 26, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <X size={13} />
+          </button>
+        </div>
+
+        <div style={{ padding: 16, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
+          {used.length === 0 ? (
+            <p style={{ fontSize: 12.5, color: "var(--text-muted)", textAlign: "center", padding: "16px 0" }}>No parts used on this job yet</p>
+          ) : (
+            <div style={{ borderRadius: 10, border: "1px solid var(--border)", overflow: "hidden" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                <thead>
+                  <tr style={{ background: "var(--bg-secondary)" }}>
+                    <th style={{ textAlign: "left", padding: "7px 10px", fontSize: 10.5, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Part</th>
+                    <th style={{ textAlign: "right", padding: "7px 10px", fontSize: 10.5, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Qty</th>
+                    <th style={{ textAlign: "right", padding: "7px 10px", fontSize: 10.5, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {used.map(r => {
+                    const part = parts.find(p => p.sku === r.partSku);
+                    const lineCost = (part?.costPrice ?? 0) * r.quantity;
+                    return (
+                      <tr key={r.id} style={{ borderTop: "1px solid var(--border)" }}>
+                        <td style={{ padding: "7px 10px", color: "var(--text-primary)" }}>
+                          {r.partName}
+                          <div style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "monospace", marginTop: 1 }}>{r.partSku}</div>
+                        </td>
+                        <td style={{ padding: "7px 10px", textAlign: "right", color: "var(--text-secondary)" }}>{r.quantity}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 600, color: "var(--text-primary)" }}>{rs(lineCost)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ borderTop: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
+                    <td colSpan={2} style={{ padding: "7px 10px", fontWeight: 700, color: "var(--text-primary)" }}>Total</td>
+                    <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 700, color: "var(--text-primary)" }}>{rs(total)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+          {unresolved.length > 0 && (
+            <p style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
+              +{unresolved.length} {unresolved.length === 1 ? "request" : "requests"} not yet resolved (pending/rejected — not counted in cost)
+            </p>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function PartsCostCell({ job }: { job: RepairJob }) {
+  const { partRequests, parts } = useParts();
+  const [open, setOpen] = useState(false);
+  const requests = partRequests.filter(r => r.jobId === job.id);
+  const used = requests.filter(r => r.status === "Approved" || r.status === "Issued");
+  const cost = used.reduce((s, r) => s + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+
+  if (requests.length === 0) return <span style={{ fontSize: 12, color: "var(--text-muted)" }}>—</span>;
+
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 5 }}>
+        <span style={plain}>{rs(cost)}</span>
+        <button
+          onClick={() => setOpen(true)}
+          title="View parts used"
+          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2, display: "flex", alignItems: "center" }}
+        >
+          <Info size={13} />
+        </button>
+      </div>
+      {open && <PartsUsedModal job={job} onClose={() => setOpen(false)} />}
+    </>
   );
 }
 

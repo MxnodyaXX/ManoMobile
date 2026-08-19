@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { useRepair, isClaimable, type RepairJob, type JobStatus } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
-import { SPARE_PARTS } from "@/technician/data/partsData";
+import { useParts } from "@/cashier/contexts/PartsContext";
 import StatusUpdateModal from "@/technician/components/jobs/StatusUpdateModal";
 import PartRequestModal from "@/technician/components/parts/PartRequestModal";
 import DiagnosticModal from "@/technician/components/jobs/DiagnosticModal";
@@ -230,6 +230,7 @@ function JobDetailPanel({ job, onClose, onStatusUpdate, onRequestParts }: { job:
 export default function MyJobs() {
   const { jobs, claimJob, updateJob } = useRepair();
   const { technicianName, partRequests, diagnostics, notes, activityLog, escalations } = useTech();
+  const { parts } = useParts();
   const isMobile = useIsMobile();
 
   const [search, setSearch]             = useState("");
@@ -602,7 +603,7 @@ export default function MyJobs() {
                       {(() => {
                         const jobReqs = partRequests.filter(r => r.jobId === job.id);
                         if (jobReqs.length === 0) return null;
-                        const partsCost = jobReqs.reduce((s, r) => s + (SPARE_PARTS.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+                        const partsCost = jobReqs.reduce((s, r) => s + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
                         return (
                           <p style={{ fontSize: 10.5, color: "#a78bfa", fontFamily: ff, marginTop: 2 }}>
                             +Rs. {partsCost.toLocaleString()} parts
@@ -707,7 +708,7 @@ export default function MyJobs() {
                   {isExpanded && (() => {
                     const meta = jobMeta[job.id];
                     const jobReqs = partRequests.filter(r => r.jobId === job.id);
-                    const partsCost = jobReqs.reduce((s, r) => s + (SPARE_PARTS.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+                    const partsCost = jobReqs.reduce((s, r) => s + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
                     const REQ_COLORS: Record<string, string> = { Pending: "#fbbf24", Approved: TA, Issued: "#60a5fa", Rejected: "#f87171" };
                     return (
                       <tr key={`${job.id}-expanded`} style={{ borderBottom: "1px solid var(--border)", background: job.status === "Issued" ? `${TA}06` : "var(--bg-secondary)" }}>

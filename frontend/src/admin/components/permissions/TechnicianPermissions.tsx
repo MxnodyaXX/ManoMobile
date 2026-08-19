@@ -239,6 +239,11 @@ export default function TechnicianPermissions() {
                 <span style={{ ...label, flex: 1, minWidth: 190 }}>Send devices to an external agent</span>
                 <YesNo value={rule.canTransferToAgent} disabled={saving} onChange={v => apply({ ...rule, canTransferToAgent: v })} />
               </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <span style={{ ...label, flex: 1, minWidth: 190 }}>Use repair parts without approval</span>
+                <YesNo value={rule.canUsePartsWithoutApproval} disabled={saving} onChange={v => apply({ ...rule, canUsePartsWithoutApproval: v })} />
+              </div>
             </div>
 
             {/* What this adds up to, in words */}
@@ -251,8 +256,9 @@ export default function TechnicianPermissions() {
               </strong>{" "}
               at a time,{" "}
               {effective.canClaimUnassigned ? "can take unassigned jobs" : "cannot take unassigned jobs"},{" "}
-              {effective.canTransferToAgent ? "can send devices out" : "cannot send devices out"}, and{" "}
-              {effective.requireStartBeforeFinish ? "must start a job before finishing it" : "can finish a job without starting it"}.
+              {effective.canTransferToAgent ? "can send devices out" : "cannot send devices out"},{" "}
+              {effective.requireStartBeforeFinish ? "must start a job before finishing it" : "can finish a job without starting it"}, and{" "}
+              {effective.canUsePartsWithoutApproval ? "can pull repair parts without approval" : "needs Admin approval to use repair parts"}.
             </p>
           </div>
         );

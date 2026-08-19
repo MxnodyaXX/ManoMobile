@@ -9,7 +9,7 @@ import { useRepair } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
 import StatusUpdateModal from "@/technician/components/jobs/StatusUpdateModal";
 import PartRequestModal from "@/technician/components/parts/PartRequestModal";
-import { SPARE_PARTS } from "@/technician/data/partsData";
+import { useParts } from "@/cashier/contexts/PartsContext";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -38,6 +38,7 @@ const PRIORITY_CFG = {
 export default function TechDashboard() {
   const { jobs } = useRepair();
   const { technicianName, partRequests, jobMeta, getElapsedMinutes } = useTech();
+  const { parts } = useParts();
   const [, tick] = useState(0);
   const [statusModalJob, setStatusModalJob] = useState<string | null>(null);
   const [showPartReq, setShowPartReq] = useState(false);
@@ -155,7 +156,7 @@ export default function TechDashboard() {
                   <Package size={14} />
                   {jobParts.length} Part{jobParts.length > 1 ? "s" : ""}
                   <span style={{ fontSize: 10, fontWeight: 700, background: "rgba(167,139,250,0.2)", borderRadius: 20, padding: "1px 6px" }}>
-                    Rs. {jobParts.reduce((sum, r) => sum + (SPARE_PARTS.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0).toLocaleString()}
+                    Rs. {jobParts.reduce((sum, r) => sum + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0).toLocaleString()}
                   </span>
                 </button>
               )}
@@ -362,7 +363,7 @@ export default function TechDashboard() {
           Issued:   { color: "#60a5fa", bg: "rgba(96,165,250,0.1)",  border: "rgba(96,165,250,0.25)"  },
           Rejected: { color: "#f87171", bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.25)" },
         };
-        const totalCost = jobParts.reduce((sum, r) => sum + (SPARE_PARTS.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+        const totalCost = jobParts.reduce((sum, r) => sum + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
         return (
           <>
             <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 60 }} onClick={() => setShowPartsView(false)} />
@@ -397,7 +398,7 @@ export default function TechDashboard() {
                   </thead>
                   <tbody>
                     {jobParts.map((r, i) => {
-                      const unitCost = SPARE_PARTS.find(p => p.sku === r.partSku)?.costPrice ?? 0;
+                      const unitCost = parts.find(p => p.sku === r.partSku)?.costPrice ?? 0;
                       const rc = RC[r.status] ?? RC.Pending;
                       return (
                         <tr key={r.id} style={{ borderBottom: "1px solid var(--border)", background: i % 2 === 0 ? "transparent" : "var(--bg-secondary)" }}>

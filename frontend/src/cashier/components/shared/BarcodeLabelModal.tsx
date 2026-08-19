@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Barcode from "react-barcode";
 import { Printer, X, Tag, AlertTriangle } from "lucide-react";
@@ -28,11 +28,22 @@ interface BarcodeLabelModalProps {
   /**
    * "repair" prints the job tag that goes on the device: job number and device
    * across the top, barcode in the middle, shop details along the bottom.
-   * "simple" (default) is the stock inventory label.
+   * "part" prints a repair-parts bin/stock label: part name, barcode (SKU),
+   * category — fixed to the 38x25mm parts-label roll, same idea as "repair"
+   * being pinned to 50x25mm. "simple" (default) is the stock inventory label.
    */
-  variant?: "simple" | "repair";
+  variant?: "simple" | "repair" | "part";
   /** Job number for the repair tag — printed large, top-left. */
   jobId?: string;
+  /**
+   * Skip the confirm-and-click dialog entirely: render the label off-screen,
+   * print it the moment the auto-fit sizing settles, then call onClose.
+   * Whether this is truly silent (no OS print dialog either) depends on the
+   * browser being launched with print-to-default-silently enabled (e.g.
+   * Chromium's --kiosk-printing) — window.print() itself can't skip that
+   * dialog on its own, this just removes every step on our side of it.
+   */
+  silent?: boolean;
   onClose: () => void;
 }
 
@@ -50,22 +61,25 @@ interface BarcodeLabelModalProps {
  * until it fits. Runs for both axes since a narrower label (38mm) can
  * overflow sideways even when a wider one (50mm) had enough slack.
  */
-export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, onClose }: BarcodeLabelModalProps) {
+export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, silent = false, onClose }: BarcodeLabelModalProps) {
   const { barcodeSettings: s } = useInventory();
   const labelRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const barcodeWrapRef = useRef<HTMLDivElement>(null);
 
   /**
-   * The repair tag is designed for 50 x 25 mm stock and pins itself to it.
-   * Inventory labels still follow Admin -> Barcode, but a job tag that changed
-   * shape because someone adjusted a product-label setting would stop fitting
-   * the tags on the roll — and that setting currently resets on reload.
+   * The repair tag and part label are each designed for their own dedicated
+   * roll and pin themselves to it. Inventory labels still follow Admin ->
+   * Barcode, but a job tag or part label that changed shape because someone
+   * adjusted a product-label setting would stop fitting its roll — and that
+   * setting currently resets on reload.
    */
   const REPAIR_LABEL = { w: 50, h: 25, margin: 2 };
-  const labelW = variant === "repair" ? REPAIR_LABEL.w : s.labelWidthMm;
-  const labelH = variant === "repair" ? REPAIR_LABEL.h : s.labelHeightMm;
-  const labelMargin = variant === "repair" ? REPAIR_LABEL.margin : s.labelMarginMm;
+  const PART_LABEL   = { w: 38, h: 25, margin: 2 };
+  const FIXED_LABEL = variant === "repair" ? REPAIR_LABEL : variant === "part" ? PART_LABEL : null;
+  const labelW = FIXED_LABEL ? FIXED_LABEL.w : s.labelWidthMm;
+  const labelH = FIXED_LABEL ? FIXED_LABEL.h : s.labelHeightMm;
+  const labelMargin = FIXED_LABEL ? FIXED_LABEL.margin : s.labelMarginMm;
 
   const handlePrint = () => {
     if (!labelRef.current) return;
@@ -87,10 +101,12 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
   const availableWidthPx = Math.max(10, (labelW - 2 * labelMargin) * PX_PER_MM);
   const availableHeightPx = Math.max(10, labelH * PX_PER_MM - VERTICAL_PAD_MM * PX_PER_MM * 2);
 
-  // 50x25 leaves roughly 11mm for bars once the header and footer band have
-  // taken theirs, so the repair tag opens near that instead of at the 60px
-  // inventory default — the loop below still trims from here if it must.
-  const startBarHeight = variant === "repair" ? Math.min(s.height, 42) : s.height;
+  // 50x25 (repair tag) leaves roughly 11mm for bars once the header and
+  // footer band have taken theirs; a 38x25 part label has the same 25mm
+  // height budget with a simpler one-line layout. Both open near that
+  // instead of at the 60px inventory default — the loop below still trims
+  // from here if it must.
+  const startBarHeight = FIXED_LABEL ? Math.min(s.height, 42) : s.height;
 
   const [barWidth, setBarWidth] = useState(s.width);
   const [barHeight, setBarHeight] = useState(startBarHeight);
@@ -164,48 +180,34 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
     }
   });
 
+  // Silent mode: the fit effect above needs a few renders to converge on a
+  // bar size that actually fits (each one synchronous, before paint), so a
+  // short delay after mount is enough for it to have settled — then print
+  // and hand back control without ever showing anything.
+  const firedRef = useRef(false);
+  useEffect(() => {
+    if (!silent || firedRef.current) return;
+    const t = setTimeout(() => {
+      if (firedRef.current) return;
+      firedRef.current = true;
+      if (labelRef.current) printLabelNode(labelRef.current, labelW, labelH);
+      onClose();
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [silent]);
+
   if (typeof document === "undefined") return null;
 
-  return createPortal(
-    <div
-      style={{ position: "fixed", inset: 0, zIndex: 1010, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(380px, calc(100vw - 24px))", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.55)" }}>
-
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Tag size={15} color="var(--accent)" />
-            <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>{variant === "repair" ? "Print Repair Tag" : "Print Barcode Label"}</p>
-          </div>
-          <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <X size={14} />
-          </button>
-        </div>
-
-        <div style={{ padding: 20, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, textAlign: "center" }}>
-            {variant === "repair"
-              ? <>Repair tag: fixed <strong>50 × 25 mm</strong>, 2mm side margin — the size of the job-tag roll.</>
-              : <>Label size {labelW} × {labelH} mm, {labelMargin}mm side margin — adjust in Admin → Barcode if it doesn&apos;t match your label stock.</>}
-            <br />In the print dialog, keep <strong>Scale: Actual size</strong> — never a custom % (it distorts the bar widths).
-          </div>
-
-          {tooTight && (
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "9px 12px", borderRadius: 8, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)", width: "100%", boxSizing: "border-box" }}>
-              <AlertTriangle size={13} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
-              <span style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: ff, lineHeight: 1.5 }}>
-                This doesn&apos;t reliably fit on a {labelW}×{labelH}mm label — content will still overflow slightly. Try a larger label, a shorter code, or turn off &quot;Show Text Below&quot; in Admin → Barcode.
-              </span>
-            </div>
-          )}
-
-          {/* Rendered at its true physical size, so what's previewed here is what prints. */}
+  // The exact same DOM either way — silent mode just skips the dialog chrome
+  // around it and positions it off-screen instead, so printLabelNode still
+  // has a real, laid-out node to measure and clone.
+  const labelContent = (
           <div
             ref={labelRef}
             style={{
               width: `${labelW}mm`, height: `${labelH}mm`,
-              background: "#fff", border: "1px solid var(--border)",
+              background: "#fff", border: silent ? "none" : "1px solid var(--border)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -296,12 +298,64 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
               </div>
             )}
           </div>
+  );
+
+  if (silent) {
+    // Off-screen, not display:none — it still needs real layout for the
+    // fit/measure effects above and for printLabelNode to clone. No backdrop,
+    // no buttons, nothing the cashier has to look at or click.
+    return createPortal(
+      <div style={{ position: "fixed", top: 0, left: "-9999px", pointerEvents: "none" }} aria-hidden>
+        {labelContent}
+      </div>,
+      document.body
+    );
+  }
+
+  return createPortal(
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 1010, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(380px, calc(100vw - 24px))", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.55)" }}>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Tag size={15} color="var(--accent)" />
+            <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>{variant === "repair" ? "Print Repair Tag" : variant === "part" ? "Print Part Label" : "Print Barcode Label"}</p>
+          </div>
+          <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <X size={14} />
+          </button>
+        </div>
+
+        <div style={{ padding: 20, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, textAlign: "center" }}>
+            {variant === "repair"
+              ? <>Repair tag: fixed <strong>50 × 25 mm</strong>, 2mm side margin — the size of the job-tag roll.</>
+              : variant === "part"
+              ? <>Part label: fixed <strong>38 × 25 mm</strong>, 2mm side margin — the size of the parts-label roll.</>
+              : <>Label size {labelW} × {labelH} mm, {labelMargin}mm side margin — adjust in Admin → Barcode if it doesn&apos;t match your label stock.</>}
+            <br />In the print dialog, keep <strong>Scale: Actual size</strong> — never a custom % (it distorts the bar widths).
+          </div>
+
+          {tooTight && (
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "9px 12px", borderRadius: 8, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)", width: "100%", boxSizing: "border-box" }}>
+              <AlertTriangle size={13} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+              <span style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: ff, lineHeight: 1.5 }}>
+                This doesn&apos;t reliably fit on a {labelW}×{labelH}mm label — content will still overflow slightly. Try a larger label, a shorter code, or turn off &quot;Show Text Below&quot; in Admin → Barcode.
+              </span>
+            </div>
+          )}
+
+          {/* Rendered at its true physical size, so what's previewed here is what prints. */}
+          {labelContent}
 
           <button
             onClick={handlePrint}
             style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 20px", borderRadius: 8, fontSize: 13, fontWeight: 600, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--accent-fg)", cursor: "pointer", fontFamily: ff }}
           >
-            <Printer size={14} /> {variant === "repair" ? "Print Repair Tag" : "Print Label"}
+            <Printer size={14} /> {variant === "repair" ? "Print Repair Tag" : variant === "part" ? "Print Part Label" : "Print Label"}
           </button>
         </div>
       </div>

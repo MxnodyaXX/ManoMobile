@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { Search, Package, X, Plus, Minus, CheckCircle } from "lucide-react";
 import { useTech } from "@/technician/contexts/TechContext";
-import { SPARE_PARTS, type SparePart } from "@/technician/data/partsData";
+import { useParts, type SparePart } from "@/cashier/contexts/PartsContext";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 
 const TA = "#34d399";
@@ -11,13 +11,15 @@ const ff = "'Plus Jakarta Sans', sans-serif";
 
 export default function PartRequestModal({ job, onClose }: { job: RepairJob; onClose: () => void }) {
   const { requestPart } = useTech();
+  const { parts } = useParts();
   const [search, setSearch]     = useState("");
   const [selected, setSelected] = useState<SparePart | null>(null);
   const [qty, setQty]           = useState(1);
   const [note, setNote]         = useState("");
   const [done, setDone]         = useState(false);
+  const [autoApproved, setAutoApproved] = useState(false);
 
-  const filtered = SPARE_PARTS.filter(p => {
+  const filtered = parts.filter(p => {
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -30,7 +32,7 @@ export default function PartRequestModal({ job, onClose }: { job: RepairJob; onC
 
   const submit = () => {
     if (!selected) return;
-    requestPart({
+    const status = requestPart({
       jobId: job.id,
       jobDevice: `${job.brand} ${job.model}`,
       partName: selected.name,
@@ -38,6 +40,7 @@ export default function PartRequestModal({ job, onClose }: { job: RepairJob; onC
       quantity: qty,
       note: note || undefined,
     });
+    setAutoApproved(status === "Approved");
     setDone(true);
   };
 
@@ -75,9 +78,9 @@ export default function PartRequestModal({ job, onClose }: { job: RepairJob; onC
             <div style={{ width: 52, height: 52, borderRadius: "50%", background: `${TA}14`, border: `1px solid ${TA}30`, display: "flex", alignItems: "center", justifyContent: "center" }}>
               <CheckCircle size={24} color={TA} />
             </div>
-            <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Request Submitted</p>
+            <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>{autoApproved ? "Part Approved" : "Request Submitted"}</p>
             <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff, textAlign: "center" }}>
-              Your part request has been sent for approval.
+              {autoApproved ? "You're cleared to collect it — no approval needed." : "Your part request has been sent to Admin for approval."}
             </p>
             <button onClick={onClose} style={{ marginTop: 8, padding: "10px 24px", borderRadius: 10, fontSize: 13, fontWeight: 600, background: TA, border: "none", color: "#000", cursor: "pointer", fontFamily: ff }}>
               Done

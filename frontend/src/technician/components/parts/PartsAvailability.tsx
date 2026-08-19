@@ -5,7 +5,7 @@ import {
   Search, Layers, PackageCheck, AlertTriangle, XCircle,
   Plus, X, ChevronDown, Filter, Clock, CheckCircle,
 } from "lucide-react";
-import { SPARE_PARTS, PART_CATEGORIES, type SparePart, type PartCategory } from "@/technician/data/partsData";
+import { useParts, PART_CATEGORIES, type SparePart, type PartCategory } from "@/cashier/contexts/PartsContext";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import { useTech, type PartRequestStatus } from "@/technician/contexts/TechContext";
 
@@ -22,6 +22,7 @@ function RequestModal({ part, onClose }: { part: SparePart; onClose: () => void 
   const [qty, setQty]                     = useState(1);
   const [note, setNote]                   = useState("");
   const [done, setDone]                   = useState(false);
+  const [autoApproved, setAutoApproved]   = useState(false);
 
   const myJobs = jobs.filter(j =>
     j.technician === technicianName &&
@@ -33,7 +34,7 @@ function RequestModal({ part, onClose }: { part: SparePart; onClose: () => void 
   const handleSubmit = () => {
     const job = myJobs.find(j => j.id === selectedJobId);
     if (!job) return;
-    requestPart({
+    const status = requestPart({
       jobId: selectedJobId,
       jobDevice: `${job.brand} ${job.model}`,
       partName: part.name,
@@ -41,6 +42,7 @@ function RequestModal({ part, onClose }: { part: SparePart; onClose: () => void 
       quantity: qty,
       note: note || undefined,
     });
+    setAutoApproved(status === "Approved");
     setDone(true);
     setTimeout(onClose, 1400);
   };
@@ -63,8 +65,8 @@ function RequestModal({ part, onClose }: { part: SparePart; onClose: () => void 
             <div style={{ width: 52, height: 52, borderRadius: "50%", background: `${TA}14`, border: `2px solid ${TA}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
               <CheckCircle size={24} color={TA} />
             </div>
-            <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Request Submitted</p>
-            <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff }}>Your part request is pending approval</p>
+            <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>{autoApproved ? "Part Approved" : "Request Submitted"}</p>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff }}>{autoApproved ? "You're cleared to collect it — no approval needed" : "Your part request is pending Admin approval"}</p>
           </div>
         ) : (
           <>
@@ -159,6 +161,7 @@ type ViewTab = "Browse" | "My Requests";
 
 export default function PartsAvailability() {
   const { technicianName, partRequests } = useTech();
+  const { parts } = useParts();
 
   const [view, setView]               = useState<ViewTab>("Browse");
   const [search, setSearch]           = useState("");
@@ -166,7 +169,7 @@ export default function PartsAvailability() {
   const [requestPart, setRequestPart] = useState<SparePart | null>(null);
   const [statusFilter, setStatusFilter] = useState<PartRequestStatus | "All">("All");
 
-  const filteredParts = SPARE_PARTS.filter(p => {
+  const filteredParts = parts.filter(p => {
     if (catFilter !== "All" && p.category !== catFilter) return false;
     if (search) {
       const q = search.toLowerCase();
@@ -202,8 +205,8 @@ export default function PartsAvailability() {
       {/* Quick stat strip */}
       <div className="fade-up" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
         {[
-          { label: "Total Parts",   value: SPARE_PARTS.length,                                                      color: "var(--text-primary)" },
-          { label: "Out of Stock",  value: SPARE_PARTS.filter(p => p.stock === 0).length,                          color: "#f87171" },
+          { label: "Total Parts",   value: parts.length,                                                      color: "var(--text-primary)" },
+          { label: "Out of Stock",  value: parts.filter(p => p.stock === 0).length,                          color: "#f87171" },
           { label: "My Pending",    value: pendingCount,                                                             color: "#fbbf24" },
           { label: "Ready to Collect", value: approvedCount,                                                         color: TA },
         ].map(s => (

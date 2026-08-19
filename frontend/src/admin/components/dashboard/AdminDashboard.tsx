@@ -115,7 +115,7 @@ export default function AdminDashboard() {
         <KPI icon={PackageCheck} color="#60a5fa" label="Awaiting Collection" value={String(data.jobsAwaitingCollection)}
              sub="Repaired, customer not yet in" />
         <KPI icon={TrendingUp} color="#f97316" label="Outstanding Balance" value={money(data.outstandingValue)}
-             sub="Owed on jobs not yet collected" />
+             sub="Owed across every job, delivered or not" />
         <KPI icon={Users} color={AA} label="Active Staff" value={String(data.staffActive)}
              sub={`${data.staffTotal} total · ${data.staffByRole.Technician ?? 0} technicians`} />
         <KPI icon={Bell} color="#a78bfa" label="SMS Sent Today"
