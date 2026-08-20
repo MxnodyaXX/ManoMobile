@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef, ReactNode, type Dispatch, type SetStateAction } from "react";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { notifyJobEvent } from "@/lib/sms/notify";
+import { notifyJobEmail } from "@/lib/email/notify";
 import { rulesForTechnician } from "@/lib/settings/staffRules";
 import { fetchJobs, fetchDealers, insertJob, patchJob, upsertDealer, deleteDealer, claimJob as claimJobRow, UNASSIGNED_TECHNICIAN } from "@/lib/repair/api";
 
@@ -56,6 +57,9 @@ export interface RepairJob {
   id: string;
   customerName: string;
   phone: string;
+  /** Optional. Most walk-ins give only a phone number, which is fine — no
+   *  address simply means this customer gets SMS and no email. */
+  customerEmail?: string;
   brand: string;
   model: string;
   issue: string;
@@ -369,6 +373,9 @@ export function RepairProvider({ children }: { children: ReactNode }) {
     setJobs(prev => [created, ...prev]);
     // "We have your device, here is the job number."
     notifyJobEvent("created", created);
+    // The same event by email, where the receipt has room to be a receipt.
+    // Only fires when an address was given, and is a no-op otherwise.
+    notifyJobEmail("created", created);
     return created;
   }, [configured, jobs]);
 
@@ -390,8 +397,14 @@ export function RepairProvider({ children }: { children: ReactNode }) {
       else if (changes.status === "Completed") {
         // The "repaired and ready to collect" message is false for a Return —
         // nothing was repaired. Those customers get a call, not a template.
-        if (after.completionType !== "Return") notifyJobEvent("finished", after);
+        if (after.completionType !== "Return") {
+          notifyJobEvent("finished", after);
+          notifyJobEmail("finished", after);
+        }
       }
+      // Delivered is the handover: the device has physically gone back, so the
+      // email is a record of collection rather than a notification.
+      else if (changes.status === "Delivered") notifyJobEmail("issued", after);
     }
 
     setJobs(prev => prev.map(j => (j.id === id ? { ...j, ...changes } : j)));

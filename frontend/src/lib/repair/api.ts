@@ -29,6 +29,7 @@ interface JobRow {
   id: string;
   customer_name: string;
   phone: string;
+  customer_email: string | null;
   brand: string;
   model: string;
   model_number: string | null;
@@ -94,6 +95,7 @@ export function rowToJob(row: JobRow): RepairJob {
     id: row.id,
     customerName: row.customer_name,
     phone: row.phone ?? "",
+    customerEmail: opt(row.customer_email),
     brand: row.brand ?? "",
     model: row.model ?? "",
     modelNumber: opt(row.model_number),
@@ -144,6 +146,7 @@ export function jobToRow(job: Partial<RepairJob>): Record<string, unknown> {
 
   set("customer_name", job.customerName);
   set("phone", job.phone);
+  set("customer_email", job.customerEmail);
   set("brand", job.brand);
   set("model", job.model);
   set("model_number", job.modelNumber);

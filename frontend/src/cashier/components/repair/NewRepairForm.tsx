@@ -1051,6 +1051,9 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
       const job = await addJob({
       customerName: form.customerName || "Walk-in",
       phone: form.customerContact,
+      // Optional: blank stays undefined so the column is NULL rather than an
+      // empty string, which would look like an address the send path could use.
+      customerEmail: form.customerEmail.trim() || undefined,
       brand: detectBrand(form.deviceModel),
       model: form.deviceModel,
       modelNumber: form.deviceModelNumber || undefined,

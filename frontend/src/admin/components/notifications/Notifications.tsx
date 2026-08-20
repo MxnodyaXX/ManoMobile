@@ -7,6 +7,7 @@ import { useAdmin, type NotificationChannel } from "@/admin/contexts/AdminContex
 import { useSmsTemplates, type SmsTemplate } from "@/lib/sms/templatesApi";
 import { JOB_SMS_LABEL, JOB_SMS_PURPOSE, JOB_SMS_VARIABLES, SAMPLE_JOB, renderTemplate } from "@/lib/sms/templates";
 import SmsTemplateEditor from "@/admin/components/notifications/SmsTemplateEditor";
+import EmailSettingsPanel from "@/admin/components/notifications/EmailSettingsPanel";
 import { useToast } from "@/lib/ui/toast";
 
 const AA = "#a78bfa";
@@ -177,6 +178,10 @@ export default function Notifications() {
 
       {tab === "templates" && (
         <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* Email lives beside SMS: an admin rewording what the shop says to a
+              customer should find both channels in one place. */}
+          <EmailSettingsPanel />
+
           {tplLoading && (
             <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff, padding: "8px 2px" }}>Loading templates…</p>
           )}
