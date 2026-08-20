@@ -250,6 +250,40 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
           )}
         </div>
 
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, opacity: dealer ? 1 : 0.4, transition: "opacity 0.2s" }}>
+          <div>
+            <label style={labelStyle}>Address</label>
+            <input readOnly style={{ ...inputStyle, background: "var(--bg-primary)" }} value={dealer?.address ?? ""} placeholder="Select dealer above" />
+          </div>
+          <div>
+            <label style={labelStyle}>Contact Number</label>
+            <input readOnly style={{ ...inputStyle, background: "var(--bg-primary)" }} value={dealer?.contact ?? ""} placeholder="—" />
+          </div>
+          <div>
+            <label style={labelStyle}>Joining Date</label>
+            <input readOnly style={{ ...inputStyle, background: "var(--bg-primary)" }} value={dealer ? fmtJoined(dealer.joinedAt) : ""} placeholder="—" />
+          </div>
+          <div>
+            <label style={labelStyle}>Remarks</label>
+            <textarea
+              readOnly
+              style={{ ...inputStyle, background: "var(--bg-primary)", resize: "none", minHeight: 64 }}
+              value={dealer?.remarks ?? ""}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Right: this job — the numbers it is filed under, then whose it is.
+          The left panel is about the dealer as a business; these two belong to
+          the repair in front of you, which is why they sit together here.
+
+          Below them: our own walk-ins get the full customer form. A device sent
+          by another shop belongs to that shop as far as we are concerned — they
+          booked it, they collect it, they are who we ring — so asking for an end
+          customer we will never meet is a field nobody can fill in. */}
+      <div style={panelStyle}>
+        <div style={sectionHeaderStyle}>📄 Job & Customer Details</div>
         {/* ── Job number ── */}
         <div style={{ marginBottom: 14 }} data-field="jobNumber" className={bad("jobNumber") ? "field-shake" : undefined}>
           <label style={labelStyle}>Job Number</label>
@@ -350,37 +384,7 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
           </div>
         )}
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, opacity: dealer ? 1 : 0.4, transition: "opacity 0.2s" }}>
-          <div>
-            <label style={labelStyle}>Address</label>
-            <input readOnly style={{ ...inputStyle, background: "var(--bg-primary)" }} value={dealer?.address ?? ""} placeholder="Select dealer above" />
-          </div>
-          <div>
-            <label style={labelStyle}>Contact Number</label>
-            <input readOnly style={{ ...inputStyle, background: "var(--bg-primary)" }} value={dealer?.contact ?? ""} placeholder="—" />
-          </div>
-          <div>
-            <label style={labelStyle}>Joining Date</label>
-            <input readOnly style={{ ...inputStyle, background: "var(--bg-primary)" }} value={dealer ? fmtJoined(dealer.joinedAt) : ""} placeholder="—" />
-          </div>
-          <div>
-            <label style={labelStyle}>Remarks</label>
-            <textarea
-              readOnly
-              style={{ ...inputStyle, background: "var(--bg-primary)", resize: "none", minHeight: 64 }}
-              value={dealer?.remarks ?? ""}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Right: Customer — only for our own walk-ins. A device sent by another
-          shop belongs to that shop as far as we are concerned: they booked it,
-          they collect it, and they are who we ring about it. Asking for an end
-          customer we will never meet is a field nobody can fill in. */}
       {(!dealer || dealer.inHouse) ? (
-      <div style={panelStyle}>
-        <div style={sectionHeaderStyle}>👤 Customer Information</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div data-field="customerName" className={bad("customerName") ? "field-shake" : undefined}>
             <label style={labelStyle}>Full Name *</label>
@@ -422,10 +426,8 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
             />
           </div>
         </div>
-      </div>
       ) : (
-        <div style={panelStyle}>
-          <div style={sectionHeaderStyle}>👤 Customer</div>
+        <div>
           <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
             This device was sent in by <strong style={{ color: "var(--text-primary)" }}>{dealer.name}</strong>,
             so they are recorded as the customer on the job — updates and the receipt go to them,
@@ -446,6 +448,7 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
           </p>
         </div>
       )}
+      </div>
     </div>
   );
 }
