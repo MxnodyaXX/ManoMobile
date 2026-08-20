@@ -85,6 +85,10 @@ export interface RepairJob {
   completionType?: CompletionType;
   dealer?: string;               // dealer name as recorded at intake (printed on slips)
   dealerId?: number;             // FK into the managed dealer registry
+  /** The job number on the originating dealer's docket, when the device came
+   *  from another shop. Unique per dealer, not globally — our own `id` stays
+   *  the key everything else points at. */
+  dealerJobNo?: string;
   cancelReason?: string;
   cancelledAt?: string;          // ISO date the job was cancelled
   cancelledBy?: string;          // who requested / actioned the cancellation
@@ -272,7 +276,9 @@ export type ClaimResult = "claimed" | "taken" | "busy" | "not-allowed" | "error"
 interface RepairContextValue {
   jobs: RepairJob[];
   /** Resolves with the saved job — the job number is assigned by the database. */
-  addJob: (partial: Omit<RepairJob, "id">) => Promise<RepairJob>;
+  /** `id` is optional: supply one to record a dealer's own job number, omit it
+   *  and the database assigns the next RM-nnn. */
+  addJob: (partial: Omit<RepairJob, "id"> & { id?: string }) => Promise<RepairJob>;
   /**
    * Apply changes optimistically and persist them. Resolves with the outcome so
    * a caller can report a rejection — a silent revert looks identical to "the
@@ -363,10 +369,10 @@ export function RepairProvider({ children }: { children: ReactNode }) {
     return () => { active = false; };
   }, [configured, load]);
 
-  const addJob = useCallback(async (partial: Omit<RepairJob, "id">): Promise<RepairJob> => {
+  const addJob = useCallback(async (partial: Omit<RepairJob, "id"> & { id?: string }): Promise<RepairJob> => {
     if (!configured) {
-      const created: RepairJob = { id: nextJobId(jobs), ...partial };
-      setJobs(prev => [{ ...created, id: nextJobId(prev) }, ...prev]);
+      const created: RepairJob = { ...partial, id: partial.id?.trim() || nextJobId(jobs) };
+      setJobs(prev => [created, ...prev]);
       return created;
     }
     const created = await insertJob(partial);

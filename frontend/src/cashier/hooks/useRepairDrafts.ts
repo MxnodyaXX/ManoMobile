@@ -8,6 +8,15 @@ import type { ConditionGrade, DeviceConditionMap, JobPriority } from "@/cashier/
 export interface RepairFormData {
   // Step 1
   dealerId: string;
+  /** The job number this repair is filed under. For an in-house job that is
+   *  the auto-generated RM-nnn; for a dealer's device it is THEIR number, so
+   *  staff can find the phone by the number the dealer quotes at them. */
+  jobNumber: string;
+  /** True: let the database assign the next RM-nnn and ignore jobNumber. */
+  autoJobNumber: boolean;
+  /** The originating dealer's own number, when the device came from another
+   *  shop. Stored beside our number, never instead of it. */
+  dealerJobNo: string;
   customerName: string;
   customerNIC: string;
   customerContact: string;

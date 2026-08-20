@@ -44,6 +44,7 @@ interface JobRow {
   revised_estimate: number | string | null;
   dealer: string | null;
   dealer_id: number | null;
+  dealer_job_no: string | null;
   created_at: string;
   estimated_completion: string | null;
   started_at: string | null;
@@ -110,6 +111,7 @@ export function rowToJob(row: JobRow): RepairJob {
     revisedEstimate: optNum(row.revised_estimate),
     dealer: opt(row.dealer),
     dealerId: opt(row.dealer_id),
+    dealerJobNo: opt(row.dealer_job_no),
     createdAt: row.created_at.slice(0, 10),
     estimatedCompletion: dateOnly(row.estimated_completion) ?? "",
     startedAt: dateOnly(row.started_at),
@@ -162,6 +164,7 @@ export function jobToRow(job: Partial<RepairJob>): Record<string, unknown> {
   set("revised_estimate", job.revisedEstimate);
   set("dealer", job.dealer);
   set("dealer_id", job.dealerId);
+  set("dealer_job_no", job.dealerJobNo);
   set("estimated_completion", job.estimatedCompletion || undefined);
   set("started_at", job.startedAt);
   set("paused_at", job.pausedAt);
@@ -313,15 +316,68 @@ export async function fetchDealers(): Promise<RepairDealer[]> {
  * by the client — two cashiers taking devices in at the same moment can no
  * longer be handed the same number.
  */
-export async function insertJob(job: Omit<RepairJob, "id">): Promise<RepairJob> {
+/**
+ * `id` is optional and honoured only here, never on update.
+ *
+ * Jobs taken in for another shop already have that shop's own job number on
+ * the docket, and staff need to find the device by the number the dealer will
+ * quote at them. Omit it and the column default (next_job_no) assigns the
+ * usual RM-nnn, which is also the only collision-proof option since the
+ * sequence, not the browser, picks the number.
+ *
+ * jobToRow deliberately does not emit `id` — letting an update change the
+ * primary key would orphan the job's events, parts and assignment rows.
+ */
+export async function insertJob(job: Omit<RepairJob, "id"> & { id?: string }): Promise<RepairJob> {
+  const row = jobToRow(job);
+  const explicitId = job.id?.trim();
+  if (explicitId) row.id = explicitId;
+
   const { data, error } = await getSupabaseBrowserClient()
     .from("repair_jobs")
-    .insert(jobToRow(job))
+    .insert(row)
     .select("*")
     .single();
 
-  if (error) throw new Error(`Could not create the repair job: ${error.message}`);
+  if (error) {
+    // 23505 is unique_violation, which for an insert here is always the job
+    // number. "duplicate key value violates..." means nothing at a counter.
+    if (error.code === "23505") {
+      // Two different unique constraints can land here, and the fix differs.
+      if (error.message.includes("dealer_job_no")) {
+        throw new Error(`That dealer already has a job numbered "${job.dealerJobNo?.trim()}".`);
+      }
+      if (explicitId) {
+        throw new Error(`Job number "${explicitId}" is already used by another repair.`);
+      }
+    }
+    throw new Error(`Could not create the repair job: ${error.message}`);
+  }
   return rowToJob(data as JobRow);
+}
+
+/**
+ * What the next auto-generated number will most likely be, for showing in the
+ * intake form before the job is saved.
+ *
+ * A preview, not a reservation: the sequence is only advanced by an actual
+ * insert, so two cashiers looking at the form at once see the same number.
+ * That is why the auto-generate tick lets the database assign rather than
+ * sending this value back — only the sequence can guarantee uniqueness.
+ */
+export async function previewNextJobNo(): Promise<string | null> {
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("repair_jobs")
+    .select("id")
+    .like("id", "RM-%")
+    .order("id", { ascending: false })
+    .limit(1);
+
+  if (error) return null;
+  const last = (data as { id: string }[] | null)?.[0]?.id;
+  const n = last ? Number(last.replace(/^RM-/, "")) : 0;
+  if (!Number.isFinite(n)) return null;
+  return `RM-${String(n + 1).padStart(3, "0")}`;
 }
 
 export async function patchJob(id: string, changes: Partial<RepairJob>): Promise<RepairJob> {
@@ -492,4 +548,72 @@ export async function signedPhotoUrls(paths: string[], expiresInSeconds = 3600):
     return [];
   }
   return (data ?? []).map((d: { signedUrl: string }) => d.signedUrl).filter(Boolean);
+}
+
+// ─── Dealer job-number clashes ───────────────────────────────────────────────
+
+export interface DealerJobNoCheck {
+  /** The job already filed under this dealer + number, if any. */
+  existing: { id: string; dealerJobNo: string; customerName: string; device: string; createdAt: string; status: string } | null;
+  /** A free variant of the same number for a device coming back — 1 -> 1A. */
+  suggestion: string | null;
+}
+
+/**
+ * Whether this dealer has already used this number, checked while the cashier
+ * types rather than on save.
+ *
+ * The unique constraint would catch it either way, but only after five steps of
+ * intake have been filled in. Catching it at the box is the difference between
+ * correcting a digit and redoing the form.
+ *
+ * A returning device is a real case, not a mistake: the same phone comes back
+ * under the dealer's same docket number, and the shop needs both jobs on
+ * record. So the clash also carries the next free suffix — 1 becomes 1A, then
+ * 1B — which keeps the two visibly related instead of inventing a number.
+ */
+export async function checkDealerJobNo(dealerId: number, raw: string): Promise<DealerJobNoCheck> {
+  const value = raw.trim();
+  if (!value) return { existing: null, suggestion: null };
+
+  // PostgREST's `like` uses * as the wildcard; strip any the user typed so a
+  // number containing one cannot widen the search.
+  const base = value.replace(/[*%_]/g, "");
+
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("repair_jobs")
+    .select("id, dealer_job_no, customer_name, brand, model, created_at, status")
+    .eq("dealer_id", dealerId)
+    .like("dealer_job_no", `${base}*`);
+
+  if (error) return { existing: null, suggestion: null };
+
+  const rows = (data ?? []) as {
+    id: string; dealer_job_no: string | null; customer_name: string;
+    brand: string | null; model: string | null; created_at: string; status: string;
+  }[];
+
+  const hit = rows.find(r => (r.dealer_job_no ?? "").trim().toLowerCase() === value.toLowerCase());
+  if (!hit) return { existing: null, suggestion: null };
+
+  // Letters already taken on this number, so a third visit becomes 1B not 1A.
+  const taken = new Set(
+    rows
+      .map(r => (r.dealer_job_no ?? "").trim().toUpperCase())
+      .map(n => (n.startsWith(base.toUpperCase()) ? n.slice(base.length) : ""))
+      .filter(sfx => /^[A-Z]$/.test(sfx)),
+  );
+  const free = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").find(c => !taken.has(c)) ?? null;
+
+  return {
+    existing: {
+      id: hit.id,
+      dealerJobNo: hit.dealer_job_no ?? value,
+      customerName: hit.customer_name,
+      device: [hit.brand, hit.model].filter(Boolean).join(" ") || "—",
+      createdAt: hit.created_at,
+      status: hit.status,
+    },
+    suggestion: free ? `${base}${free}` : null,
+  };
 }

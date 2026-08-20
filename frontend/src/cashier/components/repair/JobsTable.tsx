@@ -93,7 +93,19 @@ const plain = { fontSize: 12.5, color: "var(--text-primary)" } as const;
 const COLUMNS: Record<ColId, ColSpec> = {
   jobId: {
     label: "Job ID",
-    render: j => <span style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)" }}>{j.id}</span>,
+    // The dealer's own number sits under ours, the way the phone number sits
+    // under the customer name: a dealer ringing about a device quotes their
+    // number, and staff need to match it without opening the job.
+    render: j => (
+      <>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)" }}>{j.id}</span>
+        {j.dealerJobNo && (
+          <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }} title="The dealer's own job number">
+            #{j.dealerJobNo}
+          </p>
+        )}
+      </>
+    ),
   },
   customer: {
     label: "Customer",
@@ -1459,7 +1471,7 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
   const jobs = useMemo(() => allJobs.filter(j => {
     const q = search.toLowerCase();
     const matchView     = jobMatchesView(j, view);
-    const matchSearch   = !search || j.customerName.toLowerCase().includes(q) || j.id.toLowerCase().includes(q) || j.model.toLowerCase().includes(q) || j.brand.toLowerCase().includes(q) || (findDealer(dealers, j)?.name ?? j.dealer ?? "").toLowerCase().includes(q);
+    const matchSearch   = !search || j.customerName.toLowerCase().includes(q) || j.id.toLowerCase().includes(q) || (j.dealerJobNo ?? "").toLowerCase().includes(q) || j.model.toLowerCase().includes(q) || j.brand.toLowerCase().includes(q) || (findDealer(dealers, j)?.name ?? j.dealer ?? "").toLowerCase().includes(q);
     const matchPriority = priorityFilter === "All" || j.priority === priorityFilter;
     const matchBrand    = brandFilter === "All" || j.brand === brandFilter;
     const matchDealer   = dealerFilter === "All" || dealerKey(dealers, j) === dealerFilter;

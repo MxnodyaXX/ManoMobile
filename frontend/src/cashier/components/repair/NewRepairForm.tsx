@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
+import { previewNextJobNo, checkDealerJobNo, type DealerJobNoCheck } from "@/lib/repair/api";
 import { useRepair, IN_HOUSE_DEALER, type ConditionGrade, type DeviceConditionMap, type JobPriority, type RepairJob, type RepairDealer } from "@/cashier/contexts/RepairContext";
 import { useWarranty, effectiveStatus } from "@/cashier/contexts/WarrantyContext";
 import { usePersistentState } from "@/cashier/hooks/usePersistentState";
@@ -153,6 +154,8 @@ const checkboxItemStyle = (checked: boolean): React.CSSProperties => ({
 
 /** The fields the wizard refuses to move past, per step. */
 type RequiredField =
+  | "jobNumber"                          // step 1, only when not auto-generated
+  | "dealerJobNo"                        // step 1, only for another shop's device
   | "customerName" | "customerContact"   // step 1
   | "deviceModel"                        // step 2
   | "estimatedCost"                      // step 3
@@ -162,13 +165,15 @@ type RequiredField =
 // strongly recommended evidence, but a job can be booked in without them.
 // Terms acceptance is the one thing step 5 blocks on.
 const REQUIRED_BY_STEP: Record<number, RequiredField[]> = {
-  1: ["customerName", "customerContact"],
+  1: ["jobNumber", "dealerJobNo", "customerName", "customerContact"],
   2: [],
   3: ["estimatedCost"],
   5: ["termsAccepted"],
 };
 
 const FIELD_LABELS: Record<RequiredField, string> = {
+  jobNumber: "Job Number",
+  dealerJobNo: "Dealer's Job Number",
   customerName: "Full Name",
   customerContact: "Contact Number",
   deviceModel: "Device Model",
@@ -208,7 +213,7 @@ function fmtJoined(iso: string) {
   return isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function Step1({ data, onChange, isMobile, dealers, errors }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; dealers: RepairDealer[]; errors: RequiredField[] }) {
+function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoCheck, checkingDealerNo }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; dealers: RepairDealer[]; errors: RequiredField[]; nextJobNo: string | null; dealerNoCheck: DealerJobNoCheck | null; checkingDealerNo: boolean }) {
   const dealer = dealers.find((d) => d.id.toString() === data.dealerId);
   const bad = (f: RequiredField) => errors.includes(f);
 
@@ -226,7 +231,16 @@ function Step1({ data, onChange, isMobile, dealers, errors }: { data: FormData; 
             placeholder={dealers.length ? "— Choose a dealer —" : "No dealers — add them in Admin Control"}
             onChange={(name) => {
               const match = dealers.find((d) => d.name === name);
-              onChange({ dealerId: match ? String(match.id) : "" });
+              // Switching dealer resets the job number, because the right
+              // answer differs entirely: our own device gets our next RM
+              // number, another shop's device keeps the number on their docket.
+              // Our number is always ours to assign, whoever the device came
+              // from — it is what the tag encodes and what a scan resolves.
+              // Only the dealer's own reference changes with the dealer.
+              onChange({
+                dealerId: match ? String(match.id) : "",
+                dealerJobNo: "",
+              });
             }}
           />
           {dealers.length === 0 && (
@@ -235,6 +249,106 @@ function Step1({ data, onChange, isMobile, dealers, errors }: { data: FormData; 
             </div>
           )}
         </div>
+
+        {/* ── Job number ── */}
+        <div style={{ marginBottom: 14 }} data-field="jobNumber" className={bad("jobNumber") ? "field-shake" : undefined}>
+          <label style={labelStyle}>Job Number</label>
+          <input
+            style={{
+              ...inputStyle,
+              ...(bad("jobNumber") ? invalidStyle : {}),
+              ...(data.autoJobNumber ? { background: "var(--bg-primary)", color: "var(--text-secondary)" } : {}),
+            }}
+            // While auto-generating, fall back to the preview so the box shows
+            // the number that is coming rather than sitting blank. Derived
+            // rather than written into state: nothing needs saving, and the
+            // real number is still assigned by the sequence on insert.
+            value={data.autoJobNumber ? (data.jobNumber || nextJobNo || "") : data.jobNumber}
+            placeholder={data.autoJobNumber ? "Assigned on save" : "e.g. 54000 — the dealer's own number"}
+            onChange={(e) => {
+              // Typing is itself the decision to supply a number, so the tick
+              // clears rather than the box being locked until it is unticked.
+              onChange({ jobNumber: e.target.value, autoJobNumber: false });
+            }}
+          />
+
+          <label style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={data.autoJobNumber}
+              onChange={(e) => onChange({
+                autoJobNumber: e.target.checked,
+                jobNumber: e.target.checked ? (nextJobNo ?? "") : "",
+              })}
+              style={{ cursor: "pointer" }}
+            />
+            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Generate the job number automatically</span>
+          </label>
+
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5, lineHeight: 1.5 }}>
+            {data.autoJobNumber
+              ? <>The next number in our own sequence{nextJobNo ? <> — likely <strong>{nextJobNo}</strong></> : null}. The database assigns it on save, so two counters can never take the same one.</>
+              : <>Our internal number for this repair. It goes on the tag and must not already be in use.</>}
+          </div>
+          <FieldError show={bad("jobNumber")}>Enter the job number, or tick to generate one</FieldError>
+        </div>
+
+        {/* ── The dealer's own number, when the device came from another shop ── */}
+        {dealer && !dealer.inHouse && (
+          <div style={{ marginBottom: 14 }} data-field="dealerJobNo" className={bad("dealerJobNo") ? "field-shake" : undefined}>
+            <label style={labelStyle}>{dealer.name}&apos;s Job Number</label>
+            <input
+              // Red the moment a clash is known, without waiting for a failed
+              // Next — the number is wrong now, not when the wizard says so.
+              style={{ ...inputStyle, ...(bad("dealerJobNo") || dealerNoCheck?.existing ? invalidStyle : {}) }}
+              value={data.dealerJobNo}
+              placeholder="e.g. 54000 — the number on their docket"
+              onChange={(e) => onChange({ dealerJobNo: e.target.value })}
+            />
+            {/* Caught while typing, not at save: correcting a digit here beats
+                redoing five steps of intake after the constraint rejects it. */}
+            {dealerNoCheck?.existing ? (
+              <div style={{
+                marginTop: 8, padding: "11px 13px", borderRadius: 9,
+                background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.45)",
+              }}>
+                <p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 700, marginBottom: 4 }}>
+                  {dealer.name} already has job {dealerNoCheck.existing.dealerJobNo}
+                </p>
+                <p style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+                  {dealerNoCheck.existing.customerName} · {dealerNoCheck.existing.device} ·
+                  {" "}booked {fmtJoined(dealerNoCheck.existing.createdAt)} · {dealerNoCheck.existing.status}
+                  {" "}(our number {dealerNoCheck.existing.id})
+                </p>
+                {dealerNoCheck.suggestion && (
+                  <div style={{ marginTop: 9, display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+                      Same device back again?
+                    </span>
+                    <button
+                      onClick={() => onChange({ dealerJobNo: dealerNoCheck.suggestion! })}
+                      style={{
+                        padding: "5px 12px", borderRadius: 7, fontSize: 12, fontWeight: 700,
+                        background: "var(--accent)", border: "none", color: "#fff", cursor: "pointer",
+                        fontFamily: "'Plus Jakarta Sans', sans-serif",
+                      }}
+                    >
+                      Book it as {dealerNoCheck.suggestion}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5, lineHeight: 1.5 }}>
+                {checkingDealerNo
+                  ? "Checking…"
+                  : <>Searchable alongside our own number, so the phone can be found by whichever one is quoted.
+                      Two dealers may use the same number; it only has to be unique within {dealer.name}.</>}
+              </div>
+            )}
+            <FieldError show={bad("dealerJobNo") && !dealerNoCheck?.existing}>Enter the number on {dealer.name}&apos;s docket</FieldError>
+          </div>
+        )}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12, opacity: dealer ? 1 : 0.4, transition: "opacity 0.2s" }}>
           <div>
@@ -888,7 +1002,8 @@ function Step5({ data, onChange, isMobile, errors }: { data: FormData; onChange:
 // ─── Main Form Component ──────────────────────────────────────────────────────
 
 const INITIAL: FormData = {
-  dealerId: "", customerName: "", customerNIC: "", customerContact: "", customerEmail: "",
+  dealerId: "", jobNumber: "", autoJobNumber: true, dealerJobNo: "",
+  customerName: "", customerNIC: "", customerContact: "", customerEmail: "",
   deviceModel: "", deviceModelNumber: "", deviceIMEI: "", receivedItems: [], faultCheckboxes: [], faultDescription: "",
   estimatedCost: "", advancePaid: "", paymentMethod: "", jobPriority: "Normal", jobNotes: "",
   assignedRepairman: "", estimatedCompletion: "",
@@ -920,6 +1035,16 @@ function detectBrand(model: string): string {
  */
 export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () => void; initialDraft?: RepairDraft | null }) {
   const { addJob, updateJob, dealers } = useRepair();
+  // Shown in the job-number box so the cashier can see what will be assigned.
+  // Advisory only — the sequence, not this value, decides on save.
+  const [nextJobNo, setNextJobNo] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    previewNextJobNo()
+      .then(v => { if (active) setNextJobNo(v); })
+      .catch(() => { /* the box just shows a placeholder instead */ });
+    return () => { active = false; };
+  }, []);
   const { technicians, loading: techLoading } = useTechnicians();
   const toast = useToast();
   const { warranties } = useWarranty();
@@ -928,6 +1053,32 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
   const [form, setForm] = useState<FormData>(
     initialDraft ? { ...INITIAL, ...initialDraft.form, intakePhotos: [] } : INITIAL,
   );
+
+  /**
+   * Live clash check on the dealer's number, debounced so a four-digit entry
+   * is one query rather than four. `active` guards the response: typing 1 then
+   * 12 must not have the slower answer for "1" arrive last and flag a number
+   * that is no longer in the box.
+   */
+  const [dealerNoCheck, setDealerNoCheck] = useState<DealerJobNoCheck | null>(null);
+  const [checkingDealerNo, setCheckingDealerNo] = useState(false);
+  useEffect(() => {
+    const dealerId = Number(form.dealerId);
+    const value = form.dealerJobNo.trim();
+    if (!dealerId || !value) { setDealerNoCheck(null); setCheckingDealerNo(false); return; }
+
+    let active = true;
+    setCheckingDealerNo(true);
+    const t = setTimeout(() => {
+      checkDealerJobNo(dealerId, value)
+        .then(r => { if (active) setDealerNoCheck(r); })
+        .catch(() => { if (active) setDealerNoCheck(null); })
+        .finally(() => { if (active) setCheckingDealerNo(false); });
+    }, 400);
+
+    return () => { active = false; clearTimeout(t); };
+  }, [form.dealerId, form.dealerJobNo]);
+
   const [createdJob, setCreatedJob] = useState<RepairJob | null>(null);
   // Set the instant a job is created, cleared once the silent print fires —
   // see BarcodeLabelModal's `silent` mode. Separate from createdJob so the
@@ -995,6 +1146,15 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
   })();
 
   const isBlank = (f: RequiredField) => {
+    // The job number is only required when the cashier is supplying it. With
+    // auto-generate ticked the database picks it, so an empty box is correct.
+    if (f === "jobNumber") return !form.autoJobNumber && form.jobNumber.trim() === "";
+    // Only asked for when the device belongs to another shop; our own walk-ins
+    // have no dealer docket to copy a number from.
+    if (f === "dealerJobNo") {
+      const d = dealers.find(x => String(x.id) === form.dealerId);
+      return !!d && !d.inHouse && form.dealerJobNo.trim() === "";
+    }
     const v = form[f];
     if (Array.isArray(v)) return v.length === 0;
     if (typeof v === "boolean") return !v;
@@ -1026,6 +1186,9 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
   const handleNext = () => {
     const missing = missingIn(step);
     if (missing.length) { flagMissing(missing); return; }
+    // A number this dealer has already used is as blocking as an empty one,
+    // and cheaper to fix here than after the constraint rejects the insert.
+    if (step === 1 && dealerNoCheck?.existing) { flagMissing(["dealerJobNo"]); return; }
     setErrors([]);
     setStep((s) => s + 1);
   };
@@ -1033,6 +1196,7 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
   const handleSubmit = async () => {
     const missing = missingIn(5);
     if (missing.length) { flagMissing(missing); return; }
+    if (dealerNoCheck?.existing) { setStep(1); flagMissing(["dealerJobNo"]); return; }
     setErrors([]);
     setSaving(true);
     setSaveError(null);
@@ -1049,6 +1213,9 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
 
     try {
       const job = await addJob({
+        // Omitted when auto-generating, so the column default assigns the next
+        // RM number — the browser must not pick it or two counters could clash.
+        ...(form.autoJobNumber ? {} : { id: form.jobNumber.trim() }),
       customerName: form.customerName || "Walk-in",
       phone: form.customerContact,
       // Optional: blank stays undefined so the column is NULL rather than an
@@ -1072,6 +1239,7 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
       imei: form.deviceIMEI || undefined,
       dealer: dealer?.name ?? IN_HOUSE_DEALER,
       dealerId: dealer?.id,
+      dealerJobNo: form.dealerJobNo.trim() || undefined,
       receivedItems: form.receivedItems.length ? form.receivedItems : undefined,
       cosmeticCondition: form.condition,
       // Photos are uploaded after the insert — the storage path needs the job
@@ -1149,7 +1317,7 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
 
       {/* Step Content */}
       <div ref={contentRef} style={{ flex: isMobile ? "none" : 1, padding: isMobile ? "0 16px" : "0 28px", minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>
-        {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} dealers={dealers} errors={errors} />}
+        {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} dealers={dealers} errors={errors} nextJobNo={nextJobNo} dealerNoCheck={dealerNoCheck} checkingDealerNo={checkingDealerNo} />}
         {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} models={modelOptions} onAddModel={addModel} errors={errors} />}
         {step === 3 && <Step3 data={form} onChange={update} isMobile={isMobile} errors={errors} />}
         {step === 4 && <Step4 data={form} onChange={update} isMobile={isMobile} technicians={technicians} techLoading={techLoading} />}

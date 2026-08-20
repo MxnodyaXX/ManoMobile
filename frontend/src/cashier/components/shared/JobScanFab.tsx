@@ -20,6 +20,13 @@ function findJobByCode(jobs: RepairJob[], raw: string): RepairJob | null {
   if (!code) return null;
   const byId = jobs.find(j => j.id.toLowerCase() === code.toLowerCase());
   if (byId) return byId;
+  // Then the originating dealer's number, which is what a dealer quotes when
+  // they ring about a device. Unique per dealer, so a shared number across two
+  // dealers is resolved to the most recent job rather than an arbitrary one.
+  const byDealerNo = jobs
+    .filter(j => (j.dealerJobNo ?? "").trim().toLowerCase() === code.toLowerCase())
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  if (byDealerNo[0]) return byDealerNo[0];
   const byImei = jobs
     .filter(j => (j.imei ?? "").trim() !== "" && j.imei === code)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
