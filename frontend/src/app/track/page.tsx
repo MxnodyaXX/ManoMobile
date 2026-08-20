@@ -2,17 +2,18 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Smartphone, Search, ShieldCheck, CheckCircle, Clock, Wrench, Truck, AlertTriangle } from "lucide-react";
+import { Smartphone, Search, ShieldCheck, CheckCircle, Clock, Wrench, Truck, AlertTriangle, Loader2 } from "lucide-react";
+import { trackJob, approveJobEstimate, type TrackedJob } from "@/lib/repair/api";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
-// Minimal mirrors of the stored shapes (the tracking page reads localStorage directly,
-// the same store the staff app writes to — in production this would be a public API).
-interface Job {
-  id: string; customerName: string; brand: string; model: string; issue: string;
-  status: string; estimatedCompletion: string; estimatedCost: number; advancePaid: number;
-  originalEstimate?: number; revisedEstimate?: number; approval?: unknown; warrantyId?: string;
-}
+// Warranties aren't in the database yet (WarrantyContext is still
+// localStorage-only — see its own file), so this half of the page can only
+// ever show something on the same browser/device that issued the warranty.
+// Real customers scanning the QR code on their own phone will not see this
+// section; it's read defensively rather than removed, so it still works for
+// whoever's testing on the staff machine.
 interface Warranty {
   id: string; jobId: string; deviceModel: string; partsCovered: string[]; scope: string;
   durationDays: number; startsAt?: string; expiresAt?: string; status: string;
@@ -25,39 +26,61 @@ const STEPS = [
   { key: "Delivered",  label: "Collected", icon: Truck },
 ];
 
-function read<T>(key: string): T[] {
-  try { const r = localStorage.getItem(key); return r ? (JSON.parse(r) as T[]) : []; } catch { return []; }
+function readWarranties(): Warranty[] {
+  try { const r = localStorage.getItem("mano_warranties"); return r ? (JSON.parse(r) as Warranty[]) : []; } catch { return []; }
 }
 
 function TrackInner() {
   const params = useSearchParams();
+  const configured = isSupabaseConfigured();
   const [query, setQuery] = useState(params.get("job") ?? "");
-  const [job, setJob] = useState<Job | null | undefined>(undefined);
+  const [job, setJob] = useState<TrackedJob | null | undefined>(undefined);
+  const [loading, setLoading] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
   const [warranty, setWarranty] = useState<Warranty | null>(null);
   const [approved, setApproved] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [approverName, setApproverName] = useState("");
 
-  const lookup = (id: string) => {
-    const jobs = read<Job>("mano_repair_jobs");
-    const found = jobs.find(j => j.id.toLowerCase() === id.toLowerCase().trim()) ?? null;
-    setJob(found);
-    if (found) {
-      const ws = read<Warranty>("mano_warranties");
-      setWarranty(ws.find(w => w.jobId === found.id) ?? null);
-      setApproved(!!found.approval);
+  const lookup = async (id: string) => {
+    if (!id.trim() || !configured) return;
+    setLoading(true);
+    setLookupError(null);
+    try {
+      const found = await trackJob(id);
+      setJob(found);
+      if (found) {
+        const ws = readWarranties();
+        setWarranty(ws.find(w => w.jobId === found.id) ?? null);
+        setApproved(!!found.approval);
+      } else {
+        setWarranty(null);
+      }
+    } catch (e) {
+      setJob(null);
+      setLookupError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
     }
   };
 
-  useEffect(() => { if (params.get("job")) lookup(params.get("job")!); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    const initial = params.get("job");
+    if (initial) void lookup(initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const approve = () => {
+  const approve = async () => {
     if (!job) return;
-    const jobs = read<Job>("mano_repair_jobs");
-    const updated = jobs.map(j => j.id === job.id ? {
-      ...j,
-      approval: { amount: j.revisedEstimate ?? j.estimatedCost, approvedBy: j.customerName, channel: "Online", approvedAt: new Date().toISOString(), recordedByStaff: "Customer (self-service)" },
-    } : j);
-    try { localStorage.setItem("mano_repair_jobs", JSON.stringify(updated)); } catch {}
-    setApproved(true);
+    setApproving(true);
+    try {
+      await approveJobEstimate(job.id, approverName.trim() || job.customerName);
+      setApproved(true);
+    } catch (e) {
+      setLookupError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setApproving(false);
+    }
   };
 
   const stepIdx = job ? Math.max(0, STEPS.findIndex(s => s.key === (job.status === "Pending" ? "Issued" : job.status))) : 0;
@@ -75,17 +98,31 @@ function TrackInner() {
           <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 5 }}>Mano Mobile · enter your job number</p>
         </div>
 
+        {!configured && (
+          <div style={{ textAlign: "center", padding: "16px 18px", background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", borderRadius: 14, marginBottom: 20 }}>
+            <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>Tracking isn&apos;t connected right now — please call the shop for your repair status.</p>
+          </div>
+        )}
+
         {/* Search */}
         <div style={{ display: "flex", gap: 8, marginBottom: 22 }}>
           <div style={{ position: "relative", flex: 1 }}>
             <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
-            <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && lookup(query)} placeholder="e.g. RM-001"
+            <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && lookup(query)} placeholder="e.g. RM-001" disabled={!configured}
               style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, padding: "11px 12px 11px 34px", fontSize: 14, color: "var(--text-primary)", fontFamily: ff, outline: "none", boxSizing: "border-box" }} />
           </div>
-          <button onClick={() => lookup(query)} style={{ padding: "0 20px", borderRadius: 10, border: "none", background: "var(--accent)", color: "var(--accent-fg)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: ff }}>Track</button>
+          <button onClick={() => lookup(query)} disabled={!configured || loading} style={{ padding: "0 20px", borderRadius: 10, border: "none", background: "var(--accent)", color: "var(--accent-fg)", fontSize: 13.5, fontWeight: 700, cursor: configured && !loading ? "pointer" : "not-allowed", fontFamily: ff, opacity: configured && !loading ? 1 : 0.6, display: "flex", alignItems: "center", gap: 6 }}>
+            {loading && <Loader2 size={14} className="spin-icon" />} Track
+          </button>
         </div>
 
-        {job === null && (
+        {lookupError && (
+          <div style={{ textAlign: "center", padding: "14px 18px", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 14, marginBottom: 16 }}>
+            <p style={{ fontSize: 13, color: "#f87171" }}>{lookupError}</p>
+          </div>
+        )}
+
+        {job === null && !lookupError && (
           <div style={{ textAlign: "center", padding: "40px 20px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14 }}>
             <AlertTriangle size={30} color="var(--text-muted)" style={{ marginBottom: 10 }} />
             <p style={{ fontSize: 14, color: "var(--text-secondary)" }}>No job found with that number.</p>
@@ -129,6 +166,76 @@ function TrackInner() {
               )}
             </div>
 
+            {/* On hold / cancelled context — the progress strip alone doesn't say why */}
+            {job.status === "Pending" && (
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 16px", borderRadius: 12, background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.25)" }}>
+                <Clock size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+                <span style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                  <strong style={{ color: "var(--text-primary)" }}>On hold</strong>{job.pauseReason ? ` — ${job.pauseReason}` : " — we'll update this once work resumes."}
+                </span>
+              </div>
+            )}
+            {job.status === "Cancelled" && (
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 16px", borderRadius: 12, background: "rgba(248,113,113,0.07)", border: "1px solid rgba(248,113,113,0.25)" }}>
+                <AlertTriangle size={15} color="#f87171" style={{ flexShrink: 0, marginTop: 1 }} />
+                <span style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                  <strong style={{ color: "var(--text-primary)" }}>Job cancelled</strong>{job.cancelReason ? ` — ${job.cancelReason}` : ""}{job.cancelledAt ? ` (${job.cancelledAt})` : ""}
+                </span>
+              </div>
+            )}
+
+            {/* Cost */}
+            <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "16px 18px" }}>
+              <p style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>Cost</p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <div>
+                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Estimated</p>
+                  <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>Rs. {job.estimatedCost.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Advance Paid</p>
+                  <p style={{ fontSize: 14, fontWeight: 700, color: "#4ade80" }}>Rs. {job.advancePaid.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Balance Due</p>
+                  <p style={{ fontSize: 14, fontWeight: 700, color: job.estimatedCost - job.advancePaid > 0 ? "#f87171" : "#4ade80" }}>
+                    Rs. {Math.max(0, job.estimatedCost - job.advancePaid).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Job details — hidden entirely rather than shown empty. A blank
+                card here almost always means the database's track_job()
+                function still predates migration 20260819000016 and doesn't
+                return these columns yet (created_at alone should never be
+                missing for a real job otherwise). */}
+            {(job.technician || job.createdAt || job.startedAt || job.completedAt || job.handedOverAt || (job.receivedItems && job.receivedItems.length > 0)) && (
+            <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "16px 18px" }}>
+              <p style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>Job Details</p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                {job.technician && (
+                  <div><p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Technician</p><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 600 }}>{job.technician}</p></div>
+                )}
+                {job.createdAt && (
+                  <div><p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Received</p><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 600 }}>{job.createdAt}</p></div>
+                )}
+                {job.startedAt && (
+                  <div><p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Started</p><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 600 }}>{job.startedAt}</p></div>
+                )}
+                {job.completedAt && (
+                  <div><p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Completed</p><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 600 }}>{job.completedAt}</p></div>
+                )}
+                {job.handedOverAt && (
+                  <div><p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Collected</p><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 600 }}>{job.handedOverAt}</p></div>
+                )}
+                {job.receivedItems && job.receivedItems.length > 0 && (
+                  <div style={{ gridColumn: "1 / -1" }}><p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Items Received</p><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 600 }}>{job.receivedItems.join(", ")}</p></div>
+                )}
+              </div>
+            </div>
+            )}
+
             {/* Approval request */}
             {needsApproval && (
               <div style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.3)", borderRadius: 14, padding: "16px 18px" }}>
@@ -140,7 +247,15 @@ function TrackInner() {
                   After inspection, the repair cost is now <strong>Rs. {(job.revisedEstimate ?? 0).toLocaleString()}</strong> (originally
                   Rs. {(job.originalEstimate ?? job.estimatedCost).toLocaleString()}). Please approve to let us proceed.
                 </p>
-                <button onClick={approve} style={{ width: "100%", padding: "10px", borderRadius: 9, border: "none", background: "#fbbf24", color: "#000", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: ff }}>Approve Rs. {(job.revisedEstimate ?? 0).toLocaleString()}</button>
+                <input
+                  value={approverName}
+                  onChange={e => setApproverName(e.target.value)}
+                  placeholder={`Your name (defaults to ${job.customerName})`}
+                  style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 9, padding: "9px 12px", fontSize: 13, color: "var(--text-primary)", fontFamily: ff, outline: "none", boxSizing: "border-box", marginBottom: 10 }}
+                />
+                <button onClick={approve} disabled={approving} style={{ width: "100%", padding: "10px", borderRadius: 9, border: "none", background: "#fbbf24", color: "#000", fontSize: 13, fontWeight: 700, cursor: approving ? "not-allowed" : "pointer", fontFamily: ff, opacity: approving ? 0.7 : 1 }}>
+                  {approving ? "Recording…" : `Approve Rs. ${(job.revisedEstimate ?? 0).toLocaleString()}`}
+                </button>
               </div>
             )}
             {approved && (job.revisedEstimate ?? 0) > 0 && (

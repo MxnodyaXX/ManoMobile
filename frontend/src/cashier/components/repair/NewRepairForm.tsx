@@ -8,7 +8,7 @@ import { useWarranty, effectiveStatus } from "@/cashier/contexts/WarrantyContext
 import { usePersistentState } from "@/cashier/hooks/usePersistentState";
 import { useRepairDrafts, newDraftId, fmtSaved, type RepairDraft, type RepairFormData as FormData } from "@/cashier/hooks/useRepairDrafts";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
-import JobReceiptSlip from "@/cashier/components/repair/JobReceiptSlip";
+import JobReceiptPrintable from "@/cashier/components/repair/JobReceiptPrintable";
 import { uploadIntakePhotos } from "@/lib/repair/api";
 import { useToast } from "@/lib/ui/toast";
 import { useTechnicians, type Technician } from "@/lib/repair/technicians";
@@ -1319,7 +1319,7 @@ function JobReceiptPopup({ job, onNew, onClose }: { job: RepairJob; onNew: () =>
     const el = document.createElement("div"); el.id = "__jobslip__"; el.innerHTML = slipRef.current.outerHTML;
     document.body.appendChild(el);
     const st = document.createElement("style"); st.id = "__jobslip_style__";
-    st.textContent = `@page{size:A5 landscape;margin:10mm}#__jobslip__{display:none}@media print{body{visibility:hidden}#__jobslip__{display:block!important;visibility:visible;position:fixed;top:0;left:0;width:100%}#__jobslip__ *{visibility:visible}}`;
+    st.textContent = `@page{size:A5 landscape;margin:0}#__jobslip__{display:none}@media print{body{visibility:hidden}#__jobslip__{display:block!important;visibility:visible;position:fixed;top:0;left:0;width:100%}#__jobslip__ *{visibility:visible}}`;
     document.head.appendChild(st); window.print();
     setTimeout(() => { document.getElementById("__jobslip__")?.remove(); document.getElementById("__jobslip_style__")?.remove(); }, 500);
   };
@@ -1367,7 +1367,7 @@ function JobReceiptPopup({ job, onNew, onClose }: { job: RepairJob; onNew: () =>
             width: 718, flexShrink: 0,
             boxShadow: "0 4px 18px rgba(0,0,0,0.25)",
           }}>
-            <JobReceiptSlip ref={slipRef} job={job} />
+            <JobReceiptPrintable ref={slipRef} job={job} />
           </div>
         </div>
 

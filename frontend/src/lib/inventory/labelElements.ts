@@ -1,5 +1,7 @@
 "use client";
 
+import { DEFAULT_FONT_FAMILY } from "@/lib/fonts";
+
 /**
  * Label canvas elements.
  *
@@ -30,6 +32,9 @@ export interface TextElement extends BaseElement {
   bold: boolean;
   align: "left" | "center" | "right";
   color: string;
+  /** A FONT_OPTIONS value (lib/fonts.ts). Absent on elements saved before this
+   *  existed — render with DEFAULT_FONT_FAMILY when so. */
+  fontFamily?: string;
 }
 
 export interface ImageElement extends BaseElement {
@@ -114,7 +119,7 @@ export function blankElement(type: LabelElementType, label: { w: number; h: numb
   const base = { id: newId(), x: 2, y: 2 };
   switch (type) {
     case "text":
-      return { ...base, type, w: Math.min(24, label.w - 4), h: 4, text: "New text", fontSize: 8, bold: false, align: "left", color: "#000000" };
+      return { ...base, type, w: Math.min(24, label.w - 4), h: 4, text: "New text", fontSize: 8, bold: false, align: "left", color: "#000000", fontFamily: DEFAULT_FONT_FAMILY };
     case "image":
       return { ...base, type, w: 10, h: 10, src: "/ManoMobileBlack.png" };
     case "barcode":

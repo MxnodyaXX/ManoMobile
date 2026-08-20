@@ -1,85 +1,67 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
-  Type, Image as ImageIcon, Barcode as BarcodeIcon, Minus,
-  Trash2, Copy, ArrowUp, ArrowDown, Upload, ClipboardCopy, X,
+  Type, Image as ImageIcon, Minus, QrCode, Table2,
+  Trash2, Copy, ArrowUp, ArrowDown, Upload,
 } from "lucide-react";
-import LabelRender from "@/cashier/components/shared/LabelRender";
+import ReceiptRender from "@/cashier/components/shared/ReceiptRender";
 import { SHOP_DETAILS } from "@/lib/shop";
 import {
-  blankElement, clampElement, copyDesign, LABEL_TOKENS,
-  type LabelElement, type LabelElementType, type LabelData,
-} from "@/lib/inventory/labelElements";
+  blankReceiptElement, clampReceiptElement, RECEIPT_TOKENS,
+  type ReceiptElement, type ReceiptElementType, type ReceiptData,
+} from "@/lib/repair/receiptElements";
 import { FONT_OPTIONS, DEFAULT_FONT_FAMILY } from "@/lib/fonts";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
-/** Editor zoom. 8px per mm makes a 50mm label 400px — big enough to drag
- *  small text boxes accurately without needing a scroll container. */
-const PX_PER_MM = 8;
-/** Uploaded images are inlined as data URIs into the template row, so they
- *  have to stay small. A logo well under this is normal; a photo is not. */
-const MAX_IMAGE_BYTES = 200_000;
+/** Editor zoom. A5 landscape's ~190mm content area at 3.5px/mm is ~665px —
+ *  wide enough to drag things accurately without a scroll container. */
+const PX_PER_MM = 3.5;
+// A receipt image is a full logo/decorative graphic on an A5 page, not a tiny
+// label icon, so it gets a much bigger allowance than LabelCanvas's.
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 
 /** Stand-in values so the design can be judged against realistic content
- *  rather than against empty boxes. */
-const SAMPLE: LabelData = {
-  code: "RM-011",
-  jobId: "RM-011",
-  customer: "Wijaya Kumara",
-  device: "Xiaomi Redmi 9C",
-  imei: "356938035643809",
-  date: new Date().toLocaleDateString("en-GB"),
-  shopName: SHOP_DETAILS.name,
-  shopPhone: SHOP_DETAILS.phone,
-  shopAddress: SHOP_DETAILS.address,
+ *  rather than empty boxes — mirrors LabelCanvas's SAMPLE. */
+const SAMPLE: ReceiptData = {
+  jobId: "RM-016", customer: "Sumod Themiya", phone: "0777 53 73 83",
+  address: "255, Horana Rd, Kurusa Junction",
+  device: "Xiaomi Redmi 9C", modelNumber: "M2006C3LMG", imei: "356938035643809",
+  fault: "Screen Cracked", estimate: "8,000", advance: "5,000", remarks: "Handle with care",
+  technician: "Manodya", estCompletion: new Date().toLocaleDateString("en-GB"),
+  priority: "Normal", itemsReceived: "SIM Card, Charger",
+  date: new Date().toLocaleDateString("en-GB"), createdBy: "MANOMOBILE",
+  trackUrl: typeof window === "undefined" ? "" : `${window.location.origin}/track?job=RM-016`,
+  shopName: SHOP_DETAILS.name, shopTagline: SHOP_DETAILS.tagline, shopPhone: SHOP_DETAILS.phone,
+  shopEmail: SHOP_DETAILS.email, shopWebsite: SHOP_DETAILS.website, shopAddress: SHOP_DETAILS.address,
+  bankName: SHOP_DETAILS.bankName, bankAccountNumber: SHOP_DETAILS.bankAccountNumber,
+  bankAccountHolder: SHOP_DETAILS.bankAccountHolder,
 };
 
-/** Another template whose design can be copied onto this one. */
-export interface DesignSource {
-  id: string;
-  name: string;
-  layoutLabel: string;
+interface ReceiptCanvasProps {
+  elements: ReceiptElement[];
+  onChange: (els: ReceiptElement[]) => void;
   widthMm: number;
   heightMm: number;
-  format: "CODE128" | "CODE39" | "EAN13";
-  barWidth: number;
-  elements: LabelElement[];
 }
 
-interface LabelCanvasProps {
-  elements: LabelElement[];
-  onChange: (els: LabelElement[]) => void;
-  widthMm: number;
-  heightMm: number;
-  format: "CODE128" | "CODE39" | "EAN13";
-  barWidth: number;
-  /** Templates that already have a design, for "Copy design from". */
-  sources?: DesignSource[];
-}
-
-export default function LabelCanvas({
-  elements, onChange, widthMm, heightMm, format, barWidth, sources = [],
-}: LabelCanvasProps) {
+export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm }: ReceiptCanvasProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [copyOpen, setCopyOpen] = useState(false);
-  const boardRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   // Drag state lives in a ref: a pointermove firing 60 times a second must not
   // queue 60 renders of the properties panel.
-  const drag = useRef<{ id: string; mode: "move" | "resize"; startX: number; startY: number; orig: LabelElement } | null>(null);
+  const drag = useRef<{ id: string; mode: "move" | "resize"; startX: number; startY: number; orig: ReceiptElement } | null>(null);
 
   const selected = elements.find(e => e.id === selectedId) ?? null;
-  const label = { w: widthMm, h: heightMm };
+  const page = { w: widthMm, h: heightMm };
 
-  const update = useCallback((id: string, patch: Partial<LabelElement>) => {
-    onChange(elements.map(e => (e.id === id ? clampElement({ ...e, ...patch } as LabelElement, label) : e)));
-  }, [elements, onChange, label]);
+  const update = useCallback((id: string, patch: Partial<ReceiptElement>) => {
+    onChange(elements.map(e => (e.id === id ? clampReceiptElement({ ...e, ...patch } as ReceiptElement, page) : e)));
+  }, [elements, onChange, page]);
 
-  const add = (type: LabelElementType) => {
-    const el = clampElement(blankElement(type, label), label);
+  const add = (type: ReceiptElementType) => {
+    const el = clampReceiptElement(blankReceiptElement(type, page), page);
     onChange([...elements, el]);
     setSelectedId(el.id);
   };
@@ -89,14 +71,12 @@ export default function LabelCanvas({
     setSelectedId(null);
   };
 
-  const duplicate = (el: LabelElement) => {
-    const copy = clampElement({ ...el, id: `${el.id}-c${Date.now().toString(36)}`, x: el.x + 2, y: el.y + 2 }, label);
+  const duplicate = (el: ReceiptElement) => {
+    const copy = clampReceiptElement({ ...el, id: `${el.id}-c${Date.now().toString(36)}`, x: el.x + 3, y: el.y + 3 }, page);
     onChange([...elements, copy]);
     setSelectedId(copy.id);
   };
 
-  /** Order in the array is paint order, so this is what puts the logo behind
-   *  the text rather than on top of it. */
   const reorder = (id: string, dir: -1 | 1) => {
     const i = elements.findIndex(e => e.id === id);
     const j = i + dir;
@@ -107,7 +87,7 @@ export default function LabelCanvas({
   };
 
   // ── Dragging ──
-  const onPointerDown = (e: React.PointerEvent, el: LabelElement, mode: "move" | "resize") => {
+  const onPointerDown = (e: React.PointerEvent, el: ReceiptElement, mode: "move" | "resize") => {
     e.preventDefault();
     e.stopPropagation();
     setSelectedId(el.id);
@@ -121,9 +101,8 @@ export default function LabelCanvas({
       if (!d) return;
       const dxMm = (e.clientX - d.startX) / PX_PER_MM;
       const dyMm = (e.clientY - d.startY) / PX_PER_MM;
-      // Snapped to 0.5mm: free-floating decimals make it impossible to line
-      // two boxes up by eye, and 0.5mm is finer than a thermal head resolves.
-      const snap = (v: number) => Math.round(v * 2) / 2;
+      // Snapped to 1mm: fine enough to line boxes up by eye on a page this size.
+      const snap = (v: number) => Math.round(v);
       if (d.mode === "move") {
         update(d.id, { x: snap(d.orig.x + dxMm), y: snap(d.orig.y + dyMm) });
       } else {
@@ -139,13 +118,13 @@ export default function LabelCanvas({
     };
   }, [update]);
 
-  // Nudge with the arrow keys, since 0.5mm is hard to hit with a mouse.
+  // Nudge with the arrow keys.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!selected) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      const step = e.shiftKey ? 1 : 0.5;
+      const step = e.shiftKey ? 5 : 1;
       const moves: Record<string, [number, number]> = {
         ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step],
       };
@@ -166,7 +145,7 @@ export default function LabelCanvas({
     setUploadError(null);
     if (!file.type.startsWith("image/")) { setUploadError("That file isn't an image."); return; }
     if (file.size > MAX_IMAGE_BYTES) {
-      setUploadError(`Image is ${Math.round(file.size / 1024)}KB — keep it under ${MAX_IMAGE_BYTES / 1000}KB. A logo should be a small PNG.`);
+      setUploadError(`Image is ${(file.size / (1024 * 1024)).toFixed(1)}MB — keep it under ${MAX_IMAGE_BYTES / (1024 * 1024)}MB.`);
       return;
     }
     const reader = new FileReader();
@@ -174,7 +153,7 @@ export default function LabelCanvas({
       const src = String(reader.result);
       if (selected?.type === "image") update(selected.id, { src });
       else {
-        const el = clampElement({ ...blankElement("image", label), src } as LabelElement, label);
+        const el = clampReceiptElement({ ...blankReceiptElement("image", page), src } as ReceiptElement, page);
         onChange([...elements, el]);
         setSelectedId(el.id);
       }
@@ -195,58 +174,35 @@ export default function LabelCanvas({
       {/* ── Add ── */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <button onClick={() => add("text")} style={btn}><Type size={13} /> Text</button>
-        <button onClick={() => add("barcode")} style={btn}><BarcodeIcon size={13} /> Barcode</button>
-        <button onClick={() => add("image")} style={btn}><ImageIcon size={13} /> Logo</button>
-        <button onClick={() => add("line")} style={btn}><Minus size={13} /> Line</button>
+        <button onClick={() => add("image")} style={btn}><ImageIcon size={13} /> Logo/Image</button>
+        <button onClick={() => add("line")} style={btn}><Minus size={13} /> Line / Fill</button>
+        <button onClick={() => add("qr")} style={btn}><QrCode size={13} /> QR Code</button>
+        <button onClick={() => add("table")} style={btn}><Table2 size={13} /> Job Details Table</button>
         <button onClick={() => fileRef.current?.click()} style={btn}><Upload size={13} /> Upload Image</button>
         <input
           ref={fileRef} type="file" accept="image/*" hidden
           onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = ""; }}
         />
-        {sources.length > 0 && (
-          <button
-            onClick={() => setCopyOpen(true)}
-            style={{ ...btn, borderColor: "var(--accent-glow)", color: "var(--accent)" }}
-          >
-            <ClipboardCopy size={13} /> Copy Design From…
-          </button>
-        )}
         <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: "auto" }}>
-          Drag to move · corner to resize · arrows to nudge · Delete to remove
+          Drag to move · corner to resize · arrows to nudge (Shift = 5mm) · Delete to remove
         </span>
       </div>
-
-      {copyOpen && (
-        <CopyDesignDialog
-          sources={sources}
-          target={{ w: widthMm, h: heightMm }}
-          replacing={elements.length > 0}
-          onClose={() => setCopyOpen(false)}
-          onCopy={(src, scaleToFit) => {
-            onChange(copyDesign(src.elements, { w: src.widthMm, h: src.heightMm }, { w: widthMm, h: heightMm }, scaleToFit));
-            setSelectedId(null);
-            setCopyOpen(false);
-          }}
-        />
-      )}
 
       {uploadError && (
         <p style={{ fontSize: 12, color: "#f87171", lineHeight: 1.5 }}>{uploadError}</p>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 250px", gap: 16, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 260px", gap: 16, alignItems: "start" }}>
 
         {/* ── The board ── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, overflowX: "auto" }}>
           <div
-            ref={boardRef}
             onPointerDown={() => setSelectedId(null)}
             style={{
               position: "relative",
               width: widthMm * PX_PER_MM,
               height: heightMm * PX_PER_MM,
-              // A chequerboard reads as "canvas" and makes the white label and
-              // its edges obvious against the page background in both themes.
+              flexShrink: 0,
               backgroundColor: "#fff",
               backgroundImage:
                 "linear-gradient(45deg, #eef1f4 25%, transparent 25%), linear-gradient(-45deg, #eef1f4 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #eef1f4 75%), linear-gradient(-45deg, transparent 75%, #eef1f4 75%)",
@@ -255,25 +211,21 @@ export default function LabelCanvas({
               border: "1px solid var(--border)",
               borderRadius: 4,
               overflow: "hidden",
-              maxWidth: "100%",
               touchAction: "none",
             }}
           >
             {/* What actually prints, at editor zoom */}
             <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-              <LabelRender
+              <ReceiptRender
                 elements={elements}
                 data={SAMPLE}
                 widthMm={widthMm}
                 heightMm={heightMm}
-                format={format}
-                barWidth={barWidth}
                 scale={PX_PER_MM / (96 / 25.4)}
               />
             </div>
 
-            {/* Interaction layer: hit boxes over the rendered output, so the
-                handles never end up printed. */}
+            {/* Interaction layer: hit boxes over the rendered output. */}
             {elements.map(el => {
               const active = el.id === selectedId;
               return (
@@ -304,7 +256,7 @@ export default function LabelCanvas({
             })}
           </div>
           <p style={{ fontSize: 11, color: "var(--text-muted)" }}>
-            {widthMm} × {heightMm} mm at {PX_PER_MM}× zoom · sample data shown
+            {widthMm} × {heightMm} mm content area at {PX_PER_MM}px/mm · sample job shown
           </p>
         </div>
 
@@ -315,7 +267,7 @@ export default function LabelCanvas({
               <p style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)" }}>Elements</p>
               {elements.length === 0 ? (
                 <p style={{ fontSize: 11.5, color: "var(--text-muted)", lineHeight: 1.55 }}>
-                  Nothing on the label yet. Add a barcode, some text and your logo, then drag them into place.
+                  Nothing on the receipt yet. Add your logo, some text, the QR code and the job details table, then drag them into place.
                 </p>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -337,7 +289,7 @@ export default function LabelCanvas({
           ) : (
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <p style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", flex: 1, textTransform: "capitalize" }}>{selected.type}</p>
+                <p style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", flex: 1, textTransform: "capitalize" }}>{selected.type === "table" ? "Job Details Table" : selected.type}</p>
                 <button onClick={() => reorder(selected.id, -1)} title="Send back" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}><ArrowDown size={13} /></button>
                 <button onClick={() => reorder(selected.id, 1)} title="Bring forward" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}><ArrowUp size={13} /></button>
                 <button onClick={() => duplicate(selected)} title="Duplicate" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}><Copy size={13} /></button>
@@ -365,7 +317,7 @@ export default function LabelCanvas({
                   </Field>
                   <Field label="Insert a field">
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                      {LABEL_TOKENS.map(t => (
+                      {RECEIPT_TOKENS.map(t => (
                         <button
                           key={t.token}
                           title={t.label}
@@ -410,6 +362,14 @@ export default function LabelCanvas({
                       ))}
                     </div>
                   </Field>
+                  <Field label="Colour">
+                    <input
+                      type="color"
+                      value={selected.color}
+                      onChange={e => update(selected.id, { color: e.target.value })}
+                      style={{ width: "100%", height: 30, background: "none", border: "1px solid var(--border)", borderRadius: 7, cursor: "pointer" }}
+                    />
+                  </Field>
                 </>
               )}
 
@@ -426,23 +386,6 @@ export default function LabelCanvas({
                 </>
               )}
 
-              {selected.type === "barcode" && (
-                <>
-                  <Row label="Code text">
-                    <button
-                      onClick={() => update(selected.id, { showText: !selected.showText })}
-                      style={{ flex: 1, padding: "6px", borderRadius: 7, fontSize: 11, cursor: "pointer", fontFamily: ff, background: selected.showText ? "var(--accent-dim)" : "var(--bg-card)", border: `1px solid ${selected.showText ? "var(--accent-glow)" : "var(--border)"}`, color: selected.showText ? "var(--accent)" : "var(--text-secondary)" }}
-                    >
-                      {selected.showText ? "Shown" : "Hidden"}
-                    </button>
-                    <NumIn value={selected.fontSize} onChange={v => update(selected.id, { fontSize: Math.max(4, v) })} />
-                  </Row>
-                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5 }}>
-                    Prints the job or product code. Format and bar width come from the template settings above.
-                  </p>
-                </>
-              )}
-
               {selected.type === "line" && (
                 <Field label="Colour">
                   <input
@@ -451,7 +394,55 @@ export default function LabelCanvas({
                     onChange={e => update(selected.id, { color: e.target.value })}
                     style={{ width: "100%", height: 30, background: "none", border: "1px solid var(--border)", borderRadius: 7, cursor: "pointer" }}
                   />
+                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5, marginTop: 6 }}>
+                    A thin box is a rule; a tall one is a filled band — this is how the header/footer colour bars are built.
+                  </p>
                 </Field>
+              )}
+
+              {selected.type === "qr" && (
+                <>
+                  <Field label="Encoded value">
+                    <input
+                      type="text"
+                      value={selected.value}
+                      onChange={e => update(selected.id, { value: e.target.value })}
+                      style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 7, padding: "7px 9px", fontSize: 12, color: "var(--text-primary)", fontFamily: "monospace", outline: "none", boxSizing: "border-box" }}
+                    />
+                  </Field>
+                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                    Usually {"{{trackUrl}}"} — the customer's job-status tracking link. Kept square automatically.
+                  </p>
+                </>
+              )}
+
+              {selected.type === "table" && (
+                <>
+                  <Field label="Header background">
+                    <input type="color" value={selected.headerBg} onChange={e => update(selected.id, { headerBg: e.target.value })} style={{ width: "100%", height: 30, background: "none", border: "1px solid var(--border)", borderRadius: 7, cursor: "pointer" }} />
+                  </Field>
+                  <Field label="Header text colour">
+                    <input type="color" value={selected.headerColor} onChange={e => update(selected.id, { headerColor: e.target.value })} style={{ width: "100%", height: 30, background: "none", border: "1px solid var(--border)", borderRadius: 7, cursor: "pointer" }} />
+                  </Field>
+                  <Field label="Border colour">
+                    <input type="color" value={selected.borderColor} onChange={e => update(selected.id, { borderColor: e.target.value })} style={{ width: "100%", height: 30, background: "none", border: "1px solid var(--border)", borderRadius: 7, cursor: "pointer" }} />
+                  </Field>
+                  <Row label="Font (pt)">
+                    <NumIn value={selected.fontSize} onChange={v => update(selected.id, { fontSize: Math.max(4, v) })} />
+                  </Row>
+                  <Field label="Remarks text">
+                    <input
+                      type="text"
+                      value={selected.remarks}
+                      onChange={e => update(selected.id, { remarks: e.target.value })}
+                      placeholder="e.g. Handle with care"
+                      style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 7, padding: "7px 9px", fontSize: 12, color: "var(--text-primary)", fontFamily: ff, outline: "none", boxSizing: "border-box" }}
+                    />
+                  </Field>
+                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                    Device, IMEI, fault, estimate and advance always come from the job — only the Remarks column and the styling are set here.
+                  </p>
+                </>
               )}
             </>
           )}
@@ -461,7 +452,7 @@ export default function LabelCanvas({
   );
 }
 
-/* ── Small building blocks ── */
+/* ── Small building blocks — identical to LabelCanvas's ── */
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -484,138 +475,10 @@ function NumIn({ value, onChange }: { value: number; onChange: (v: number) => vo
   return (
     <input
       type="number"
-      step={0.5}
+      step={1}
       value={value}
       onChange={e => onChange(Number(e.target.value))}
       style={{ flex: 1, minWidth: 0, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 7, padding: "6px 8px", fontSize: 12, color: "var(--text-primary)", fontFamily: ff, outline: "none" }}
     />
-  );
-}
-
-/* ── Copy design from another label ── */
-
-/**
- * Picking a design to copy is a visual decision, so each option is shown as
- * the label it produces rather than as a name in a list — "Design 1" tells you
- * nothing about which arrangement it is.
- */
-function CopyDesignDialog({ sources, target, replacing, onClose, onCopy }: {
-  sources: DesignSource[];
-  target: { w: number; h: number };
-  replacing: boolean;
-  onClose: () => void;
-  onCopy: (src: DesignSource, scaleToFit: boolean) => void;
-}) {
-  const [pickedId, setPickedId] = useState<string | null>(sources[0]?.id ?? null);
-  const picked = sources.find(s => s.id === pickedId) ?? null;
-  const sizeDiffers = !!picked && (picked.widthMm !== target.w || picked.heightMm !== target.h);
-  // Only meaningful when the stock differs; defaulted on there, because an
-  // unscaled copy onto smaller stock loses whatever falls off the edge.
-  const [scaleToFit, setScaleToFit] = useState(true);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  if (typeof document === "undefined") return null;
-
-  return createPortal(
-    <div
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-      style={{ position: "fixed", inset: 0, zIndex: 3200, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
-    >
-      <div style={{ width: "min(620px, 100%)", maxHeight: "85vh", overflowY: "auto", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, fontFamily: ff }}>
-        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
-          <ClipboardCopy size={15} color="var(--accent)" />
-          <div style={{ flex: 1 }}>
-            <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>Copy Design From</p>
-            <p style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
-              Reuse another label&apos;s arrangement on this one. Only the design is copied — this template keeps its own name, size and settings.
-            </p>
-          </div>
-          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><X size={16} /></button>
-        </div>
-
-        <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {sources.map(src => {
-              const active = src.id === pickedId;
-              // Shown small: enough to recognise the arrangement, not to read.
-              const previewScale = Math.min(220 / src.widthMm, 96 / src.heightMm) / (96 / 25.4);
-              return (
-                <button
-                  key={src.id}
-                  onClick={() => setPickedId(src.id)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 14, padding: 12, borderRadius: 12,
-                    cursor: "pointer", textAlign: "left", fontFamily: ff,
-                    border: active ? "1px solid var(--accent-glow)" : "1px solid var(--border)",
-                    background: active ? "var(--accent-dim)" : "var(--bg-surface)",
-                  }}
-                >
-                  <div style={{
-                    width: src.widthMm * previewScale * (96 / 25.4),
-                    height: src.heightMm * previewScale * (96 / 25.4),
-                    flexShrink: 0, border: "1px solid var(--border)", borderRadius: 3, overflow: "hidden", background: "#fff",
-                  }}>
-                    <LabelRender
-                      elements={src.elements}
-                      data={SAMPLE}
-                      widthMm={src.widthMm}
-                      heightMm={src.heightMm}
-                      format={src.format}
-                      barWidth={src.barWidth}
-                      scale={previewScale}
-                    />
-                  </div>
-                  <div style={{ minWidth: 0 }}>
-                    <p style={{ fontSize: 13.5, fontWeight: 700, color: active ? "var(--accent)" : "var(--text-primary)" }}>{src.name}</p>
-                    <p style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{src.layoutLabel}</p>
-                    <p style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
-                      {src.widthMm} × {src.heightMm} mm · {src.elements.length} element{src.elements.length === 1 ? "" : "s"}
-                    </p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          {sizeDiffers && picked && (
-            <div style={{ padding: "11px 13px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", display: "flex", flexDirection: "column", gap: 8 }}>
-              <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.55 }}>
-                That design is laid out for <strong>{picked.widthMm} × {picked.heightMm} mm</strong> and this label is{" "}
-                <strong>{target.w} × {target.h} mm</strong>.
-              </p>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12 }}>
-                <input type="checkbox" checked={scaleToFit} onChange={e => setScaleToFit(e.target.checked)} style={{ cursor: "pointer" }} />
-                <span style={{ color: "var(--text-secondary)" }}>
-                  Scale it to fit — otherwise sizes stay exact and anything past the edge is pulled back inside.
-                </span>
-              </label>
-            </div>
-          )}
-
-          {replacing && (
-            <p style={{ fontSize: 12, color: "#f87171", lineHeight: 1.5 }}>
-              This replaces the design currently on this label.
-            </p>
-          )}
-
-          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-            <button onClick={onClose} style={{ padding: "9px 18px", borderRadius: 9, fontSize: 13, background: "none", border: "1px solid var(--border)", color: "var(--text-secondary)", cursor: "pointer", fontFamily: ff }}>Cancel</button>
-            <button
-              onClick={() => picked && onCopy(picked, sizeDiffers ? scaleToFit : false)}
-              disabled={!picked}
-              style={{ padding: "9px 20px", borderRadius: 9, fontSize: 13, fontWeight: 700, background: picked ? "var(--accent)" : "var(--bg-secondary)", border: "none", color: picked ? "#fff" : "var(--text-muted)", cursor: picked ? "pointer" : "not-allowed", fontFamily: ff }}
-            >
-              Copy Design
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body,
   );
 }

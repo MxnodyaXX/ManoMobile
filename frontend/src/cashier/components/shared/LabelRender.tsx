@@ -6,6 +6,7 @@ import {
   type LabelElement,
   type LabelData,
 } from "@/lib/inventory/labelElements";
+import { DEFAULT_FONT_FAMILY } from "@/lib/fonts";
 
 /**
  * Draws a canvas-designed label.
@@ -86,7 +87,7 @@ function ElementBody({ el, data, format, barWidth }: {
           fontSize: `${el.fontSize}pt`,
           fontWeight: el.bold ? 800 : 500,
           color: el.color,
-          fontFamily: "'Plus Jakarta Sans', Arial, sans-serif",
+          fontFamily: el.fontFamily ?? DEFAULT_FONT_FAMILY,
           lineHeight: 1.15,
           textAlign: el.align,
           // Long customer names must not push the box wider and shove the

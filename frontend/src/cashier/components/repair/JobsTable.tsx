@@ -9,7 +9,7 @@ import { useRepair, jobLabel, jobMatchesView, VIEW_META, findDealer, isInHouseDe
 import type { JobStatus, RepairJob, RepairView } from "@/cashier/contexts/RepairContext";
 export type { JobStatus, RepairJob } from "@/cashier/contexts/RepairContext";
 import { createPortal } from "react-dom";
-import JobReceiptSlip from "./JobReceiptSlip";
+import JobReceiptPrintable from "./JobReceiptPrintable";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import { useParts } from "@/cashier/contexts/PartsContext";
 import {
@@ -453,7 +453,7 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
     const st = document.createElement("style");
     st.id = "__slip_style__";
     st.textContent = `
-      @page { size: ${useInvoiceFormat ? "A4 landscape" : "A5 landscape"}; margin: ${useInvoiceFormat ? "12mm" : "10mm"}; }
+      @page { size: ${useInvoiceFormat ? "A4 landscape" : "A5 landscape"}; margin: ${useInvoiceFormat ? "12mm" : "0"}; }
       #__slip__ { display: none; }
       @media print {
         body { visibility: hidden; }
@@ -499,7 +499,7 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
           {useInvoiceFormat ? (
             <SalesInvoiceSlip ref={slipRef} job={job} fmtSlipDate={fmtSlipDate} />
           ) : (
-            <JobReceiptSlip ref={slipRef} job={job} title={receiptTitle} />
+            <JobReceiptPrintable ref={slipRef} job={job} title={receiptTitle} />
           )}
         </div>
       </div>

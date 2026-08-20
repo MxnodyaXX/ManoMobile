@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
-import JobReceiptSlip from "@/cashier/components/repair/JobReceiptSlip";
+import JobReceiptPrintable from "@/cashier/components/repair/JobReceiptPrintable";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
 import { useRepair, findDealer, isInHouseDealer, dealerKey } from "@/cashier/contexts/RepairContext";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
@@ -210,7 +210,7 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
     const styleEl = document.createElement("style");
     styleEl.id = "__rp_inv_style__";
     styleEl.textContent = `
-      @page { size: ${isManoMobile ? "A5 landscape" : "A4 landscape"}; margin: ${isManoMobile ? "10mm" : "12mm"}; }
+      @page { size: ${isManoMobile ? "A5 landscape" : "A4 landscape"}; margin: ${isManoMobile ? "0" : "12mm"}; }
       #__rp_inv__ { display: none; }
       @media print {
         body { visibility: hidden; }
@@ -251,7 +251,7 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
           <div ref={invoiceRef} style={{ background: "#ffffff" }}>
             {repairs.map((r, i) => (
               <div key={r.id} style={{ pageBreakAfter: i < repairs.length - 1 ? "always" : "auto", borderBottom: i < repairs.length - 1 ? "2px dashed #bbb" : "none" }}>
-                <JobReceiptSlip job={mapToJob(r)} signatureOverride={signatureImage} title="Job Completion Invoice" hideStatusNote />
+                <JobReceiptPrintable job={mapToJob(r)} signatureOverride={signatureImage} title="Job Completion Invoice" hideStatusNote />
               </div>
             ))}
           </div>

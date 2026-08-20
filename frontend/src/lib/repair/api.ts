@@ -208,6 +208,92 @@ export async function fetchJobs(): Promise<RepairJob[]> {
   return (data as JobRow[]).map(rowToJob);
 }
 
+/** The narrow shape track_job() returns — see migrations
+ *  20260819000015 / 20260819000016_public_job_tracking for why this isn't
+ *  the full RepairJob (no phone, address, IMEI, passcode, signature, or
+ *  internal staff notes reach a public, unauthenticated endpoint). */
+export interface TrackedJob {
+  id: string; customerName: string; brand: string; model: string; issue: string;
+  status: RepairJob["status"]; estimatedCompletion: string;
+  estimatedCost: number; advancePaid: number;
+  originalEstimate?: number; revisedEstimate?: number;
+  approval?: EstimateApproval; warrantyId?: string;
+  technician?: string;
+  createdAt?: string;
+  startedAt?: string;
+  completedAt?: string;
+  receivedItems?: string[];
+  pauseReason?: string;
+  cancelReason?: string;
+  cancelledAt?: string;
+  handedOverAt?: string;
+}
+
+interface TrackJobRow {
+  id: string; customer_name: string; brand: string; model: string; issue: string;
+  status: RepairJob["status"]; estimated_completion: string | null;
+  estimated_cost: number | string; advance_paid: number | string;
+  original_estimate: number | string | null; revised_estimate: number | string | null;
+  approval: EstimateApproval | null; warranty_id: string | null;
+  technician: string | null;
+  created_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  received_items: string[] | null;
+  pause_reason: string | null;
+  cancel_reason: string | null;
+  cancelled_at: string | null;
+  handed_over_at: string | null;
+}
+
+/**
+ * Public job lookup for the /track page — the only thing an unauthenticated
+ * customer's browser can read. Goes through track_job() rather than the
+ * table directly: repair_jobs' own RLS is staff-only, on purpose, so a
+ * scanned QR code must not be able to list or read arbitrary columns.
+ */
+export async function trackJob(jobId: string): Promise<TrackedJob | null> {
+  const { data, error } = await getSupabaseBrowserClient()
+    .rpc("track_job", { p_job_id: jobId.trim() });
+
+  if (error) throw new Error(`Could not look up that job: ${error.message}`);
+  const row = (data as TrackJobRow[] | null)?.[0];
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    customerName: row.customer_name,
+    brand: row.brand,
+    model: row.model,
+    issue: row.issue,
+    status: row.status,
+    estimatedCompletion: dateOnly(row.estimated_completion) ?? "",
+    estimatedCost: num(row.estimated_cost),
+    advancePaid: num(row.advance_paid),
+    originalEstimate: optNum(row.original_estimate),
+    revisedEstimate: optNum(row.revised_estimate),
+    approval: opt(row.approval),
+    warrantyId: opt(row.warranty_id),
+    technician: opt(row.technician),
+    createdAt: dateOnly(row.created_at),
+    startedAt: dateOnly(row.started_at),
+    completedAt: dateOnly(row.completed_at),
+    receivedItems: row.received_items?.length ? row.received_items : undefined,
+    pauseReason: opt(row.pause_reason),
+    cancelReason: opt(row.cancel_reason),
+    cancelledAt: dateOnly(row.cancelled_at),
+    handedOverAt: dateOnly(row.handed_over_at),
+  };
+}
+
+/** The customer approving a revised estimate from the tracking page. See
+ *  approve_job_estimate() — writes only the job's `approval` column. */
+export async function approveJobEstimate(jobId: string, approvedBy: string): Promise<void> {
+  const { error } = await getSupabaseBrowserClient()
+    .rpc("approve_job_estimate", { p_job_id: jobId.trim(), p_approved_by: approvedBy });
+  if (error) throw new Error(`Could not record your approval: ${error.message}`);
+}
+
 export async function fetchDealers(): Promise<RepairDealer[]> {
   const { data, error } = await getSupabaseBrowserClient()
     .from("repair_dealers")

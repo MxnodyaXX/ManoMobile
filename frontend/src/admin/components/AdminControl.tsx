@@ -23,6 +23,7 @@ import {
   LAYOUT_LABELS, type BarcodeTemplate, type BarcodeLayout,
 } from "@/lib/inventory/barcodeTemplates";
 import LabelCanvas from "@/admin/components/barcode/LabelCanvas";
+import ReceiptTemplateManager from "@/admin/components/barcode/ReceiptTemplateManager";
 import type { LabelElement } from "@/lib/inventory/labelElements";
 
 /** A template being edited. Identity and default-ness are not editable here —
@@ -968,6 +969,11 @@ const LABEL_PRESETS: { width: number; height: number; label: string }[] = [
  * is what the app loads at startup.
  */
 function BarcodeManager() {
+  // Two different printables share this page: small barcode labels and the
+  // full-page job receipt. Same idea, same canvas building blocks, wildly
+  // different scale — kept as a toggle rather than merged into one picker.
+  const [section, setSection] = useState<"labels" | "receipt">("labels");
+
   const { setBarcodeSettings } = useInventory();
   const { templates, loading, error, configured, reload } = useBarcodeTemplates();
   const toast = useToast();
@@ -1089,6 +1095,24 @@ function BarcodeManager() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
 
+      {/* Barcode labels vs. the printed job receipt — same canvas idea, two
+          very differently-sized printables, so they get their own section
+          rather than one picker trying to hold both. */}
+      <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, width: "fit-content" }}>
+        {([["labels", "Barcode Labels"], ["receipt", "Job Receipt"]] as const).map(([sec, lbl]) => {
+          const active = section === sec;
+          return (
+            <button key={sec} onClick={() => setSection(sec)} style={{ padding: "7px 15px", borderRadius: 7, fontSize: 12.5, cursor: "pointer", fontFamily: ff, background: active ? "var(--bg-secondary)" : "transparent", border: active ? "1px solid var(--border-active)" : "1px solid transparent", color: active ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: active ? 600 : 400 }}>
+              {lbl}
+            </button>
+          );
+        })}
+      </div>
+
+      {section === "receipt" ? (
+        <ReceiptTemplateManager />
+      ) : (
+      <>
       {(!configured || error) && (
         <div style={{ display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", fontFamily: ff }}>
           <AlertCircle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
@@ -1369,6 +1393,8 @@ function BarcodeManager() {
             )}
           </div>
         </>
+      )}
+      </>
       )}
     </div>
   );
