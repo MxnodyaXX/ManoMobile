@@ -374,7 +374,11 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
         </div>
       </div>
 
-      {/* Right: Customer */}
+      {/* Right: Customer — only for our own walk-ins. A device sent by another
+          shop belongs to that shop as far as we are concerned: they booked it,
+          they collect it, and they are who we ring about it. Asking for an end
+          customer we will never meet is a field nobody can fill in. */}
+      {(!dealer || dealer.inHouse) ? (
       <div style={panelStyle}>
         <div style={sectionHeaderStyle}>👤 Customer Information</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -419,6 +423,29 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
           </div>
         </div>
       </div>
+      ) : (
+        <div style={panelStyle}>
+          <div style={sectionHeaderStyle}>👤 Customer</div>
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+            This device was sent in by <strong style={{ color: "var(--text-primary)" }}>{dealer.name}</strong>,
+            so they are recorded as the customer on the job — updates and the receipt go to them,
+            not to whoever owns the phone.
+          </p>
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <span style={{ color: "var(--text-muted)", minWidth: 62 }}>Contact</span>
+              <span style={{ color: "var(--text-primary)" }}>{dealer.contact || "— none on file"}</span>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <span style={{ color: "var(--text-muted)", minWidth: 62 }}>Address</span>
+              <span style={{ color: "var(--text-primary)" }}>{dealer.address || "— none on file"}</span>
+            </div>
+          </div>
+          <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 12, lineHeight: 1.55 }}>
+            Edit these under Admin Control → Repair Dealers.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1151,9 +1178,13 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
     if (f === "jobNumber") return !form.autoJobNumber && form.jobNumber.trim() === "";
     // Only asked for when the device belongs to another shop; our own walk-ins
     // have no dealer docket to copy a number from.
-    if (f === "dealerJobNo") {
-      const d = dealers.find(x => String(x.id) === form.dealerId);
-      return !!d && !d.inHouse && form.dealerJobNo.trim() === "";
+    const picked = dealers.find(x => String(x.id) === form.dealerId);
+    const fromAnotherShop = !!picked && !picked.inHouse;
+    if (f === "dealerJobNo") return fromAnotherShop && form.dealerJobNo.trim() === "";
+    // The customer panel is hidden for another shop's device, so requiring
+    // fields nobody can see would trap the wizard on a step with nothing to fix.
+    if (f === "customerName" || f === "customerContact") {
+      if (fromAnotherShop) return false;
     }
     const v = form[f];
     if (Array.isArray(v)) return v.length === 0;
@@ -1216,8 +1247,14 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
         // Omitted when auto-generating, so the column default assigns the next
         // RM number — the browser must not pick it or two counters could clash.
         ...(form.autoJobNumber ? {} : { id: form.jobNumber.trim() }),
-      customerName: form.customerName || "Walk-in",
-      phone: form.customerContact,
+      // A device from another shop has no end customer on file: the dealer
+      // booked it, collects it, and is who we ring about it. Their details go
+      // on the job so the receipt, the jobs list and every SMS still have a
+      // real name and number rather than an empty column.
+      customerName: form.customerName.trim()
+        || (dealer && !dealer.inHouse ? dealer.name : "")
+        || "Walk-in",
+      phone: form.customerContact.trim() || (dealer && !dealer.inHouse ? dealer.contact : "") || "",
       // Optional: blank stays undefined so the column is NULL rather than an
       // empty string, which would look like an address the send path could use.
       customerEmail: form.customerEmail.trim() || undefined,
