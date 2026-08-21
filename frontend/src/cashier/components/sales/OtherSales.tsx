@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useRef } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import { useSales } from "@/cashier/contexts/SalesContext";
 import { createPortal } from "react-dom";
 import { Plus, Trash2, X, Printer } from "lucide-react";
 import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
+import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 import { QRCodeSVG } from "qrcode.react";
 import Barcode from "react-barcode";
 
@@ -462,13 +463,11 @@ export default function OtherSales() {
   const [confirmedCardRef, setConfirmedCardRef] = useState("");
   const [completed,        setCompleted]        = useState(false);
 
-  const invoiceNo = useMemo(() => {
-    const now = new Date();
-    const yy  = String(now.getFullYear()).slice(2);
-    const mm  = String(now.getMonth() + 1).padStart(2, "0");
-    const dd  = String(now.getDate()).padStart(2, "0");
-    return `OTH-${yy}${mm}${dd}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
-  }, []);
+  // Assigned for real (from the shared invoice_no_seq sequence) only once the
+  // sale is actually completed — see fetchNextInvoiceNo's own comment for why
+  // this can't just run on mount.
+  const [invoiceNo, setInvoiceNo] = useState<string | null>(null);
+  const [invoicing, setInvoicing] = useState(false);
 
   // ── Item handlers ──────────────────────────────────────────────────────────
   const addItem = () => {
@@ -503,6 +502,7 @@ export default function OtherSales() {
     setOverallDiscount(""); setPaymentMethod(""); setSelectedCreditCustomer(null);
     setShowCardModal(false);
     setShowPrintPreview(false); setConfirmedCardRef(""); setCompleted(false);
+    setInvoiceNo(null);
   };
 
   if (completed) {
@@ -524,7 +524,7 @@ export default function OtherSales() {
     <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", flex: 1, minHeight: 0, overflowY: isMobile ? "auto" : undefined }}>
 
       {/* Modals */}
-      {showCardModal && (
+      {showCardModal && invoiceNo && (
         <CardPaymentModal
           invoiceNo={invoiceNo} items={items} customer={customer}
           subtotal={subtotal} overallDiscount={overallAmt} total={total}
@@ -532,7 +532,7 @@ export default function OtherSales() {
           onCancel={() => setShowCardModal(false)}
         />
       )}
-      {showPrintPreview && (
+      {showPrintPreview && invoiceNo && (
         <OthersPrintPreviewModal
           invoiceNo={invoiceNo} items={items} customer={customer}
           paymentMethod={paymentMethod} cardRef={confirmedCardRef || undefined}
@@ -751,15 +751,21 @@ export default function OtherSales() {
         )}
 
         <button
-          onClick={() => {
-            if (!canComplete) return;
+          onClick={async () => {
+            if (!canComplete || invoicing) return;
+            setInvoicing(true);
+            const no = await fetchNextInvoiceNo();
+            setInvoiceNo(no);
+            setInvoicing(false);
             if (paymentMethod === "Card") { setShowCardModal(true); return; }
             setShowPrintPreview(true);
           }}
-          disabled={!canComplete}
-          style={{ width: "100%", padding: "11px", borderRadius: 9, border: "none", background: canComplete ? "var(--accent)" : "var(--border)", color: canComplete ? "var(--accent-fg)" : "var(--text-muted)", fontWeight: 700, fontSize: 13, cursor: canComplete ? "pointer" : "not-allowed", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s" }}
+          disabled={!canComplete || invoicing}
+          style={{ width: "100%", padding: "11px", borderRadius: 9, border: "none", background: canComplete && !invoicing ? "var(--accent)" : "var(--border)", color: canComplete && !invoicing ? "var(--accent-fg)" : "var(--text-muted)", fontWeight: 700, fontSize: 13, cursor: canComplete && !invoicing ? "pointer" : "not-allowed", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s" }}
         >
-          {items.length === 0
+          {invoicing
+            ? "Generating invoice…"
+            : items.length === 0
             ? "Add items first"
             : !paymentMethod
             ? "Select payment method"

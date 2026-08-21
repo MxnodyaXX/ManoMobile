@@ -9,6 +9,7 @@ import { Search, Grid3X3, List, Plus, Minus, Trash2, Eye, EyeOff, Tag, X } from 
 import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
 import { QRCodeSVG } from "qrcode.react";
 import Barcode from "react-barcode";
+import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1877,6 +1878,7 @@ export default function AccessorySales() {
   const [payMethod, setPayMethod] = useState("Cash");
   const [discount, setDiscount] = useState("");
   const [completed, setCompleted] = useState(false);
+  const [invoicing, setInvoicing] = useState(false);
   const [showSearchPopup, setShowSearchPopup] = useState(false);
 
   const adjustStock = (id: number, delta: number) =>
@@ -2038,13 +2040,15 @@ export default function AccessorySales() {
           </button>
         ) : (
           <button
-            onClick={() => {
+            onClick={async () => {
+              if (invoicing) return;
+              setInvoicing(true);
+              const invoiceNo = await fetchNextInvoiceNo();
               const subtotal = cart.reduce((s, c) => s + c.product.sellingPrice * c.qty, 0);
               const total = Math.max(0, subtotal - (parseFloat(discount) || 0));
               if (payMethod === "Cash") {
                 addEntry("in", `Cash Sale — Accessories`, total);
               }
-              const invoiceNo = `ACC-${Date.now().toString().slice(-6)}`;
               addSale({
                 invoiceNo,
                 date: new Date().toISOString().slice(0, 10),
@@ -2054,16 +2058,18 @@ export default function AccessorySales() {
                 total,
                 status: "Paid",
               });
+              setInvoicing(false);
               setCompleted(true);
             }}
+            disabled={invoicing}
             style={{
               padding: "9px 24px", borderRadius: 8, border: "none",
               background: "var(--accent)", color: "var(--accent-fg)",
-              cursor: "pointer", fontSize: 13,
+              cursor: invoicing ? "not-allowed" : "pointer", fontSize: 13, opacity: invoicing ? 0.6 : 1,
               fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 700,
             }}
           >
-            ✓ Complete Sale
+            {invoicing ? "Generating invoice…" : "✓ Complete Sale"}
           </button>
         )}
       </div>

@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, FileText, Plus, Check, Star } from "lucide-react";
 import { useToast } from "@/lib/ui/toast";
-import ReceiptCanvas from "@/admin/components/barcode/ReceiptCanvas";
+import ReceiptCanvas, { type ReceiptDesignSource } from "@/admin/components/barcode/ReceiptCanvas";
 import {
   useReceiptTemplates, createReceiptTemplate, updateReceiptTemplate,
-  deleteReceiptTemplate, setDefaultReceiptTemplate, type ReceiptTemplate,
+  deleteReceiptTemplate, setDefaultReceiptTemplate, fetchAllReceiptTemplates, type ReceiptTemplate,
 } from "@/lib/repair/receiptTemplates";
 import { scaleReceiptElements, type ReceiptElement, type TemplateKind } from "@/lib/repair/receiptElements";
 
@@ -77,6 +77,24 @@ export default function ReceiptTemplateManager({ kind }: { kind: TemplateKind })
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Every saved design, receipt and invoice alike, for "Copy Design From" —
+  // reusing one document's arrangement on the other is exactly the point, so
+  // this isn't scoped to just this manager's own kind. Refetched whenever the
+  // kind-scoped list changes (save/delete/switching tabs), which is a fine
+  // proxy for "something might have changed" here.
+  const [allTemplates, setAllTemplates] = useState<ReceiptTemplate[]>([]);
+  useEffect(() => {
+    let active = true;
+    fetchAllReceiptTemplates().then(t => { if (active) setAllTemplates(t); }).catch(() => {});
+    return () => { active = false; };
+  }, [templates]);
+  const copySources: ReceiptDesignSource[] = allTemplates
+    .filter(t => t.elements.length > 0 && t.id !== selectedId)
+    .map(t => ({
+      id: t.id, name: t.name, kindLabel: COPY[t.kind].title,
+      widthMm: t.pageWidthMm, heightMm: t.pageHeightMm, elements: t.elements,
+    }));
 
   const asDraft = (t: ReceiptTemplate): Draft => ({
     name: t.name, kind: t.kind, pageWidthMm: t.pageWidthMm, pageHeightMm: t.pageHeightMm, elements: t.elements,
@@ -291,6 +309,7 @@ export default function ReceiptTemplateManager({ kind }: { kind: TemplateKind })
                 widthMm={s.pageWidthMm}
                 heightMm={s.pageHeightMm}
                 kind={kind}
+                sources={copySources}
               />
             </div>
           </div>

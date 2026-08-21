@@ -1,14 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Type, Image as ImageIcon, Minus, QrCode, Table2,
-  Trash2, Copy, ArrowUp, ArrowDown, Upload,
+  Trash2, Copy, ArrowUp, ArrowDown, Upload, ClipboardCopy, X,
 } from "lucide-react";
 import ReceiptRender from "@/cashier/components/shared/ReceiptRender";
 import { SHOP_DETAILS } from "@/lib/shop";
 import {
-  blankReceiptElement, clampReceiptElement, RECEIPT_TOKENS,
+  blankReceiptElement, clampReceiptElement, copyReceiptElements, RECEIPT_TOKENS,
   type ReceiptElement, type ReceiptElementType, type ReceiptData, type TemplateKind,
 } from "@/lib/repair/receiptElements";
 import { FONT_OPTIONS, DEFAULT_FONT_FAMILY } from "@/lib/fonts";
@@ -30,6 +31,9 @@ const SAMPLE: ReceiptData = {
   fault: "Screen Cracked", estimate: "8,000", advance: "5,000", remarks: "Handle with care",
   technician: "Manodya", estCompletion: new Date().toLocaleDateString("en-GB"),
   priority: "Normal", itemsReceived: "SIM Card, Charger",
+  completionDate: new Date().toLocaleDateString("en-GB"), finalAmount: "8,000",
+  technicianRemarks: "Screen replaced, tested OK", warrantyPeriod: "3 Months — Parts & Labour",
+  balanceDue: "3,000", amountToBePaid: "3,000", dueAfterPayment: "3,000",
   date: new Date().toLocaleDateString("en-GB"), createdBy: "MANOMOBILE",
   trackUrl: typeof window === "undefined" ? "" : `${window.location.origin}/track?job=RM-016`,
   shopName: SHOP_DETAILS.name, shopTagline: SHOP_DETAILS.tagline, shopPhone: SHOP_DETAILS.phone,
@@ -41,17 +45,32 @@ const SAMPLE: ReceiptData = {
   paidAmount: "8,000", dueAmount: "0", paymentType: "CASH / FULL", adminApprover: "",
 };
 
+/** Another template whose design can be copied onto this one — receipt and
+ *  invoice alike, since reusing one document's logo/header arrangement on
+ *  the other is exactly the point. */
+export interface ReceiptDesignSource {
+  id: string;
+  name: string;
+  kindLabel: string;
+  widthMm: number;
+  heightMm: number;
+  elements: ReceiptElement[];
+}
+
 interface ReceiptCanvasProps {
   elements: ReceiptElement[];
   onChange: (els: ReceiptElement[]) => void;
   widthMm: number;
   heightMm: number;
   kind: TemplateKind;
+  /** Templates that already have a design, for "Copy Design From". */
+  sources?: ReceiptDesignSource[];
 }
 
-export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, kind }: ReceiptCanvasProps) {
+export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, kind, sources = [] }: ReceiptCanvasProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [copyOpen, setCopyOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   // Drag state lives in a ref: a pointermove firing 60 times a second must not
   // queue 60 renders of the properties panel.
@@ -191,10 +210,32 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
           ref={fileRef} type="file" accept="image/*" hidden
           onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = ""; }}
         />
+        {sources.length > 0 && (
+          <button
+            onClick={() => setCopyOpen(true)}
+            style={{ ...btn, borderColor: "var(--accent-glow)", color: "var(--accent)" }}
+          >
+            <ClipboardCopy size={13} /> Copy Design From…
+          </button>
+        )}
         <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: "auto" }}>
           Drag to move · corner to resize · arrows to nudge (Shift = 5mm) · Delete to remove
         </span>
       </div>
+
+      {copyOpen && (
+        <CopyReceiptDesignDialog
+          sources={sources}
+          target={{ w: widthMm, h: heightMm }}
+          replacing={elements.length > 0}
+          onClose={() => setCopyOpen(false)}
+          onCopy={(src, scaleToFit) => {
+            onChange(copyReceiptElements(src.elements, { w: src.widthMm, h: src.heightMm }, { w: widthMm, h: heightMm }, scaleToFit));
+            setSelectedId(null);
+            setCopyOpen(false);
+          }}
+        />
+      )}
 
       {uploadError && (
         <p style={{ fontSize: 12, color: "#f87171", lineHeight: 1.5 }}>{uploadError}</p>
@@ -479,6 +520,132 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
         </div>
       </div>
     </div>
+  );
+}
+
+/* ── Copy design from another template ── */
+
+/**
+ * Picking a design to copy is a visual decision, so each option is shown as
+ * the page it produces rather than as a name in a list. Mirrors LabelCanvas's
+ * CopyDesignDialog — see that one for the reasoning behind scaleToFit.
+ */
+function CopyReceiptDesignDialog({ sources, target, replacing, onClose, onCopy }: {
+  sources: ReceiptDesignSource[];
+  target: { w: number; h: number };
+  replacing: boolean;
+  onClose: () => void;
+  onCopy: (src: ReceiptDesignSource, scaleToFit: boolean) => void;
+}) {
+  const [pickedId, setPickedId] = useState<string | null>(sources[0]?.id ?? null);
+  const picked = sources.find(s => s.id === pickedId) ?? null;
+  const sizeDiffers = !!picked && (picked.widthMm !== target.w || picked.heightMm !== target.h);
+  // Only meaningful when the page size differs; defaulted on there, because
+  // an unscaled copy onto a smaller page loses whatever falls off the edge.
+  const [scaleToFit, setScaleToFit] = useState(true);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: "fixed", inset: 0, zIndex: 3200, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+    >
+      <div style={{ width: "min(620px, 100%)", maxHeight: "85vh", overflowY: "auto", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, fontFamily: ff }}>
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
+          <ClipboardCopy size={15} color="var(--accent)" />
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>Copy Design From</p>
+            <p style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
+              Reuse another receipt or invoice&apos;s arrangement on this one. Only the design is copied — this template keeps its own name, size and settings.
+            </p>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><X size={16} /></button>
+        </div>
+
+        <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {sources.map(src => {
+              const active = src.id === pickedId;
+              // Shown small: enough to recognise the arrangement, not to read.
+              const previewScale = Math.min(220 / src.widthMm, 140 / src.heightMm) / (96 / 25.4);
+              return (
+                <button
+                  key={src.id}
+                  onClick={() => setPickedId(src.id)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 14, padding: 12, borderRadius: 12,
+                    cursor: "pointer", textAlign: "left", fontFamily: ff,
+                    border: active ? "1px solid var(--accent-glow)" : "1px solid var(--border)",
+                    background: active ? "var(--accent-dim)" : "var(--bg-surface)",
+                  }}
+                >
+                  <div style={{
+                    width: src.widthMm * previewScale * (96 / 25.4),
+                    height: src.heightMm * previewScale * (96 / 25.4),
+                    flexShrink: 0, border: "1px solid var(--border)", borderRadius: 3, overflow: "hidden", background: "#fff",
+                  }}>
+                    <ReceiptRender
+                      elements={src.elements}
+                      data={SAMPLE}
+                      widthMm={src.widthMm}
+                      heightMm={src.heightMm}
+                      scale={previewScale}
+                    />
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontSize: 13.5, fontWeight: 700, color: active ? "var(--accent)" : "var(--text-primary)" }}>{src.name}</p>
+                    <p style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{src.kindLabel}</p>
+                    <p style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
+                      {src.widthMm} × {src.heightMm} mm · {src.elements.length} element{src.elements.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {sizeDiffers && picked && (
+            <div style={{ padding: "11px 13px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", display: "flex", flexDirection: "column", gap: 8 }}>
+              <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+                That design is laid out for <strong>{picked.widthMm} × {picked.heightMm} mm</strong> and this page is{" "}
+                <strong>{target.w} × {target.h} mm</strong>.
+              </p>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12 }}>
+                <input type="checkbox" checked={scaleToFit} onChange={e => setScaleToFit(e.target.checked)} style={{ cursor: "pointer" }} />
+                <span style={{ color: "var(--text-secondary)" }}>
+                  Scale it to fit — otherwise sizes stay exact and anything past the edge is pulled back inside.
+                </span>
+              </label>
+            </div>
+          )}
+
+          {replacing && (
+            <p style={{ fontSize: 12, color: "#f87171", lineHeight: 1.5 }}>
+              This replaces the design currently on this template.
+            </p>
+          )}
+
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <button onClick={onClose} style={{ padding: "9px 18px", borderRadius: 9, fontSize: 13, background: "none", border: "1px solid var(--border)", color: "var(--text-secondary)", cursor: "pointer", fontFamily: ff }}>Cancel</button>
+            <button
+              onClick={() => picked && onCopy(picked, sizeDiffers ? scaleToFit : false)}
+              disabled={!picked}
+              style={{ padding: "9px 20px", borderRadius: 9, fontSize: 13, fontWeight: 700, background: picked ? "var(--accent)" : "var(--bg-secondary)", border: "none", color: picked ? "#fff" : "var(--text-muted)", cursor: picked ? "pointer" : "not-allowed", fontFamily: ff }}
+            >
+              Copy Design
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useRef } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import { useSales } from "@/cashier/contexts/SalesContext";
 import { createPortal } from "react-dom";
 import { Search, Trash2, Plus, Minus, X, Printer } from "lucide-react";
 import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
+import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 import { QRCodeSVG } from "qrcode.react";
 import Barcode from "react-barcode";
 
@@ -1051,14 +1052,11 @@ export default function MobileSales() {
   const [showPrintPreview,       setShowPrintPreview]       = useState(false);
   const [confirmedCardRef,       setConfirmedCardRef]       = useState("");
 
-  const invoiceNo = useMemo(() => {
-    const now = new Date();
-    const yy  = String(now.getFullYear()).slice(2);
-    const mm  = String(now.getMonth() + 1).padStart(2, "0");
-    const dd  = String(now.getDate()).padStart(2, "0");
-    const seq = String(Math.floor(Math.random() * 9000) + 1000);
-    return `INV-${yy}${mm}${dd}-${seq}`;
-  }, []);
+  // Assigned for real (from the shared invoice_no_seq sequence) only once the
+  // sale is actually completed — see fetchNextInvoiceNo's own comment for why
+  // this can't just run on mount.
+  const [invoiceNo, setInvoiceNo] = useState<string | null>(null);
+  const [invoicing, setInvoicing] = useState(false);
 
   // ── Phone cart handlers ────────────────────────────────────────────────────
   const handleImeiSearch = () => {
@@ -1158,7 +1156,7 @@ export default function MobileSales() {
     setSelectedCreditCustomer(null);
     setShowCardModal(false);
     setShowPrintPreview(false); setConfirmedCardRef("");
-    setCompleted(false);
+    setCompleted(false); setInvoiceNo(null);
   };
 
   if (completed) {
@@ -1197,7 +1195,7 @@ export default function MobileSales() {
         />
       )}
 
-      {showCardModal && (
+      {showCardModal && invoiceNo && (
         <CardPaymentModal
           invoiceNo={invoiceNo}
           phoneCart={phoneCart}
@@ -1211,7 +1209,7 @@ export default function MobileSales() {
         />
       )}
 
-      {showPrintPreview && (
+      {showPrintPreview && invoiceNo && (
         <MobilePrintPreviewModal
           invoiceNo={invoiceNo}
           phoneCart={phoneCart}
@@ -1514,21 +1512,27 @@ export default function MobileSales() {
         )}
 
         <button
-          onClick={() => {
-            if (!canComplete) return;
+          onClick={async () => {
+            if (!canComplete || invoicing) return;
+            setInvoicing(true);
+            const no = await fetchNextInvoiceNo();
+            setInvoiceNo(no);
+            setInvoicing(false);
             if (paymentMethod === "Card") { setShowCardModal(true); return; }
             setShowPrintPreview(true);
           }}
-          disabled={!canComplete}
+          disabled={!canComplete || invoicing}
           style={{
             width: "100%", padding: "11px", borderRadius: 9, border: "none",
-            background: canComplete ? "var(--accent)" : "var(--border)",
-            color: canComplete ? "var(--accent-fg)" : "var(--text-muted)",
-            fontWeight: 700, fontSize: 13, cursor: canComplete ? "pointer" : "not-allowed",
+            background: canComplete && !invoicing ? "var(--accent)" : "var(--border)",
+            color: canComplete && !invoicing ? "var(--accent-fg)" : "var(--text-muted)",
+            fontWeight: 700, fontSize: 13, cursor: canComplete && !invoicing ? "pointer" : "not-allowed",
             fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s",
           }}
         >
-          {phoneCart.length === 0
+          {invoicing
+            ? "Generating invoice…"
+            : phoneCart.length === 0
             ? "Scan a device first"
             : belowMin
             ? "Price below minimum"

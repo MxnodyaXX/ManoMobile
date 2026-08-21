@@ -74,6 +74,23 @@ export async function fetchReceiptTemplates(kind: TemplateKind): Promise<Receipt
   return (data as TemplateRow[] | null)?.map(toTemplate) ?? [];
 }
 
+/** Every saved design, receipt and invoice alike — used to build the "Copy
+ *  Design From" list in the canvas editor, where reusing a receipt's logo/
+ *  header arrangement on the invoice (or back) is exactly the point. The
+ *  main list views stay kind-scoped via fetchReceiptTemplates; only the
+ *  copy-source picker needs to see across the split. */
+export async function fetchAllReceiptTemplates(): Promise<ReceiptTemplate[]> {
+  if (!isSupabaseConfigured()) return [];
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("receipt_templates")
+    .select(COLUMNS)
+    .order("kind", { ascending: true })
+    .order("name", { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return (data as TemplateRow[] | null)?.map(toTemplate) ?? [];
+}
+
 /** The design the app prints with for this kind unless a call site picks
  *  another. Returns null (not an error) when nothing's configured or nothing
  *  is saved yet — callers fall back to the built-in layout either way. */

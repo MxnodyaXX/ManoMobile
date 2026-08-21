@@ -137,9 +137,28 @@ export interface ReceiptData {
   nic?: string;
   email?: string;
   warranty?: string;
+  /** When the repair itself was finished — set once the job leaves the
+   *  technician's hands. */
+  completionDate?: string;
+  /** The price actually charged, i.e. the job's current cost — kept distinct
+   *  from `estimate` (same underlying figure here, but "estimate" reads oddly
+   *  on a document printed after the job is already done and being billed). */
+  finalAmount?: string;
+  technicianRemarks?: string;
+  /** Duration + coverage together, e.g. "3 Months — Parts & Labour", from the
+   *  canonical warranty record — richer than the plain `warranty` string. */
+  warrantyPeriod?: string;
+  /** finalAmount − advance, i.e. what's owed before the discount below. */
+  balanceDue?: string;
+  /** balanceDue − discount, i.e. what's owed before payment is taken. */
+  amountToBePaid?: string;
   discount?: string;
   lineTotal?: string;
   paidAmount?: string;
+  /** amountToBePaid − paidAmount, same figure `dueAmount` already carries —
+   *  exposed under this name too since it's the label used on the printed
+   *  page's own breakdown. */
+  dueAfterPayment?: string;
   dueAmount?: string;
   paymentType?: string;
   adminApprover?: string;
@@ -174,9 +193,16 @@ export const RECEIPT_TOKENS: { token: string; label: string; kind?: TemplateKind
   { token: "{{nic}}",           label: "Customer NIC", kind: "issue" },
   { token: "{{email}}",         label: "Customer email", kind: "issue" },
   { token: "{{warranty}}",      label: "Warranty terms", kind: "issue" },
+  { token: "{{completionDate}}",    label: "Date of completion", kind: "issue" },
+  { token: "{{finalAmount}}",       label: "Final amount", kind: "issue" },
+  { token: "{{technicianRemarks}}", label: "Technician remarks", kind: "issue" },
+  { token: "{{warrantyPeriod}}",    label: "Warranty period (parts/labour)", kind: "issue" },
+  { token: "{{balanceDue}}",        label: "Due amount (before discount)", kind: "issue" },
+  { token: "{{amountToBePaid}}",    label: "Amount to be paid (after discount)", kind: "issue" },
   { token: "{{discount}}",      label: "Discount", kind: "issue" },
   { token: "{{lineTotal}}",     label: "Line total (after discount)", kind: "issue" },
   { token: "{{paidAmount}}",    label: "Paid amount", kind: "issue" },
+  { token: "{{dueAfterPayment}}",   label: "Due after payment", kind: "issue" },
   { token: "{{dueAmount}}",     label: "Balance due", kind: "issue" },
   { token: "{{paymentType}}",   label: "Payment type (CASH / CREDIT)", kind: "issue" },
   { token: "{{adminApprover}}", label: "Credit approved by", kind: "issue" },
@@ -250,6 +276,46 @@ export function scaleReceiptElements(
     copy.h = round(el.h * sy);
     if (copy.type === "text" || copy.type === "table" || copy.type === "invoiceTable") {
       copy.fontSize = Math.max(4, Math.round(copy.fontSize * sFont * 10) / 10);
+    }
+    return clampReceiptElement(copy, to);
+  });
+}
+
+/**
+ * Copy another template's design onto this one — same idea as copyDesign in
+ * labelElements.ts, and usable across kinds (a receipt's logo/header
+ * arrangement is exactly the sort of thing worth reusing on the invoice, or
+ * back). Fresh ids throughout: editing the copy and the original in the same
+ * session must not end up keyed against the same element.
+ *
+ * `scaleToFit` matters whenever the source and target pages differ — the
+ * receipt's 210x148mm A5 sheet and the invoice's ~180x267mm A4 content area
+ * are nothing alike. Scaling stretches each axis by its own ratio, with font
+ * sizes taking the smaller of the two so text never outgrows its box.
+ * Unscaled, boxes are clamped inside the page instead, which keeps sizes
+ * exact at the cost of moving anything that overhung the edge.
+ */
+export function copyReceiptElements(
+  elements: ReceiptElement[],
+  from: { w: number; h: number },
+  to: { w: number; h: number },
+  scaleToFit: boolean,
+): ReceiptElement[] {
+  const sx = from.w > 0 ? to.w / from.w : 1;
+  const sy = from.h > 0 ? to.h / from.h : 1;
+  const sFont = Math.min(sx, sy);
+  const round = (v: number) => Math.round(v * 2) / 2;
+
+  return elements.map(el => {
+    const copy = { ...el, id: newId() } as ReceiptElement;
+    if (scaleToFit) {
+      copy.x = round(el.x * sx);
+      copy.y = round(el.y * sy);
+      copy.w = round(el.w * sx);
+      copy.h = round(el.h * sy);
+      if (copy.type === "text" || copy.type === "table" || copy.type === "invoiceTable") {
+        copy.fontSize = Math.max(4, Math.round(copy.fontSize * sFont * 10) / 10);
+      }
     }
     return clampReceiptElement(copy, to);
   });

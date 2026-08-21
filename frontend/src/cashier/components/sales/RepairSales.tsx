@@ -10,10 +10,11 @@ import {
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
-import JobReceiptPrintable from "@/cashier/components/repair/JobReceiptPrintable";
+import JobIssuePrintable, { type IssueInvoiceData } from "@/cashier/components/repair/JobIssuePrintable";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
 import { useRepair, findDealer, isInHouseDealer, dealerKey } from "@/cashier/contexts/RepairContext";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
+import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -158,7 +159,7 @@ function CreditRecordConfirmModal({ dealer, dueAmount, onConfirm, onSkip, onCanc
 
 // ─── Invoice View ─────────────────────────────────────────────────────────────
 
-function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountReceivedNow, dueAmount, totalAdvance, creditRecordMade, repairs, signatureImage, onBack }: {
+function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountReceivedNow, dueAmount, totalAdvance, creditRecordMade, repairs, onBack }: {
   invoiceNo: string;
   createdAt: string;
   dealer: string;
@@ -169,7 +170,6 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
   totalAdvance: number;
   creditRecordMade: boolean;
   repairs: CompletedRepair[];
-  signatureImage?: string;
   onBack: () => void;
 }) {
   const { dealers } = useRepair();
@@ -200,6 +200,32 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
     jobWarranty: r.warranty,
     dealer: r.dealer,
   });
+
+  // One IssueInvoiceData per device — this invoice can bundle several repairs
+  // under one invoice number, but the Job Issue Invoice template is a
+  // per-job document, so each device gets its own page under that shared
+  // number. Its own discount/advance are known exactly; the extra cash paid
+  // today (amountReceivedNow) is a whole-invoice figure with no clean per-
+  // device split, so it isn't attributed to any single page here.
+  const mapToIssueData = (r: CompletedRepair): IssueInvoiceData => {
+    const due = Math.max(0, r.unitPrice - r.discount - r.advance);
+    return {
+      job: mapToJob(r),
+      name: customer.name || r.customerName,
+      phone: customer.phone,
+      nic: customer.nic,
+      email: "",
+      imei: r.imei,
+      discount: r.discount,
+      paidAmount: r.advance,
+      dueAmount: due,
+      isCredit: due > 0,
+      adminApprover: "",
+      warranty: r.warranty,
+      invoiceNo,
+      createdAt,
+    };
+  };
 
   const handlePrint = () => {
     if (!invoiceRef.current) return;
@@ -247,11 +273,11 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
 
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
         {isManoMobile ? (
-          /* Mano Mobile → the Repair Management job-receipt template, one per device */
+          /* Mano Mobile → the Job Issue Invoice template, one page per device */
           <div ref={invoiceRef} style={{ background: "#ffffff" }}>
             {repairs.map((r, i) => (
               <div key={r.id} style={{ pageBreakAfter: i < repairs.length - 1 ? "always" : "auto", borderBottom: i < repairs.length - 1 ? "2px dashed #bbb" : "none" }}>
-                <JobReceiptPrintable job={mapToJob(r)} signatureOverride={signatureImage} title="Job Completion Invoice" hideStatusNote />
+                <JobIssuePrintable data={mapToIssueData(r)} />
               </div>
             ))}
           </div>
@@ -432,7 +458,11 @@ export default function RepairSales() {
     finalDue: number;
   } | null>(null);
 
-  const invoiceNo = useMemo(() => Date.now().toString().slice(-10).padStart(10, "0"), []);
+  // Assigned for real (from the shared invoice_no_seq sequence) only once a
+  // sale is actually completed — see fetchNextInvoiceNo's own comment for why
+  // this can't just run on mount.
+  const [invoiceNo, setInvoiceNo] = useState<string | null>(null);
+  const [invoicing, setInvoicing] = useState(false);
   const createdAt = useMemo(() => new Date().toLocaleString("en-US", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: true }), []);
 
   // Dealers managed in Admin Control, plus any legacy dealer still attached to
@@ -545,6 +575,7 @@ export default function RepairSales() {
     setCustName(""); setCustPhone(""); setCustNic(""); setAmountReceived("");
     setSelectedCreditCustomer(null); setShowCreditConfirm(false); setCreditRecordMade(false);
     setTermsAccepted(false); setSignature(""); setInvoiceSnapshot(null); setView("search");
+    setInvoiceNo(null);
   };
 
   const handleDealerChange = (val: string) => {
@@ -552,11 +583,12 @@ export default function RepairSales() {
     setCustName(""); setCustPhone(""); setCustNic(""); setAmountReceived("");
     setSelectedCreditCustomer(null); setShowCreditConfirm(false); setCreditRecordMade(false);
     setTermsAccepted(false); setSignature(""); setInvoiceSnapshot(null);
+    setInvoiceNo(null);
   };
 
-  const recordRepairSale = () => {
+  const recordRepairSale = (no: string) => {
     addSale({
-      invoiceNo,
+      invoiceNo: no,
       date: new Date().toISOString().slice(0, 10),
       customer: custName || selectedRepairs[0]?.customerName || "Walk-in",
       category: "Repair",
@@ -587,7 +619,12 @@ export default function RepairSales() {
     });
   };
 
-  const handleGenerateInvoice = () => {
+  const handleGenerateInvoice = async () => {
+    if (invoicing) return;
+    setInvoicing(true);
+    const no = await fetchNextInvoiceNo();
+    setInvoiceNo(no);
+    setInvoicing(false);
     // Snapshot before markIssued() flips these jobs to "Delivered" — see the
     // comment on invoiceSnapshot's declaration.
     setInvoiceSnapshot({ repairs: selectedRepairs, totalAdvance, effectiveReceived, finalDue });
@@ -596,24 +633,29 @@ export default function RepairSales() {
       setShowCreditConfirm(true);
     } else {
       if (effectiveReceived > 0) {
-        addEntry("in", `Cash — Repair Invoice ${invoiceNo} (${selectedDealer})`, effectiveReceived);
+        addEntry("in", `Cash — Repair Invoice ${no} (${selectedDealer})`, effectiveReceived);
       }
-      recordRepairSale();
+      recordRepairSale(no);
       setView("invoice");
     }
   };
 
-  // Mark as issued only — no print/invoice.
-  const handleMarkIssued = () => {
+  // Mark as issued only — no print/invoice. Still a real completed sale
+  // though, so it still gets a real invoice number for the books.
+  const handleMarkIssued = async () => {
+    if (invoicing) return;
+    setInvoicing(true);
+    const no = await fetchNextInvoiceNo();
+    setInvoicing(false);
     markIssued();
     if (effectiveReceived > 0) {
       addEntry("in", `Cash — Repair Issued ${selectedDealer}`, effectiveReceived);
     }
-    recordRepairSale();
+    recordRepairSale(no);
     setShowIssuedMsg(true);
   };
 
-  if (view === "invoice" && invoiceSnapshot) {
+  if (view === "invoice" && invoiceSnapshot && invoiceNo) {
     return (
       <InvoiceView
         invoiceNo={invoiceNo}
@@ -626,7 +668,6 @@ export default function RepairSales() {
         totalAdvance={invoiceSnapshot.totalAdvance}
         creditRecordMade={creditRecordMade}
         repairs={invoiceSnapshot.repairs}
-        signatureImage={signature}
         onBack={() => setView("search")}
       />
     );
@@ -936,17 +977,17 @@ export default function RepairSales() {
             </button>
             <button
               onClick={handleMarkIssued}
-              disabled={!canGenerate}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 20px", borderRadius: 9, fontSize: 12, fontWeight: 600, border: `1px solid ${canGenerate ? "var(--accent-glow)" : "var(--border)"}`, background: canGenerate ? "var(--accent-dim)" : "transparent", color: canGenerate ? "var(--accent)" : "var(--text-muted)", cursor: canGenerate ? "pointer" : "not-allowed", opacity: canGenerate ? 1 : 0.5, fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s" }}
+              disabled={!canGenerate || invoicing}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 20px", borderRadius: 9, fontSize: 12, fontWeight: 600, border: `1px solid ${canGenerate && !invoicing ? "var(--accent-glow)" : "var(--border)"}`, background: canGenerate && !invoicing ? "var(--accent-dim)" : "transparent", color: canGenerate && !invoicing ? "var(--accent)" : "var(--text-muted)", cursor: canGenerate && !invoicing ? "pointer" : "not-allowed", opacity: canGenerate && !invoicing ? 1 : 0.5, fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s" }}
             >
               <CheckCircle size={13} />Mark As Issued
             </button>
             <button
               onClick={handleGenerateInvoice}
-              disabled={!canGenerate}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 24px", borderRadius: 9, fontSize: 12, fontWeight: 700, border: `1px solid ${canGenerate ? "var(--accent)" : "var(--border)"}`, background: canGenerate ? "var(--accent)" : "var(--border)", color: canGenerate ? "var(--accent-fg)" : "var(--text-muted)", cursor: canGenerate ? "pointer" : "not-allowed", opacity: canGenerate ? 1 : 0.5, fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s" }}
+              disabled={!canGenerate || invoicing}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 24px", borderRadius: 9, fontSize: 12, fontWeight: 700, border: `1px solid ${canGenerate && !invoicing ? "var(--accent)" : "var(--border)"}`, background: canGenerate && !invoicing ? "var(--accent)" : "var(--border)", color: canGenerate && !invoicing ? "var(--accent-fg)" : "var(--text-muted)", cursor: canGenerate && !invoicing ? "pointer" : "not-allowed", opacity: canGenerate && !invoicing ? 1 : 0.5, fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s" }}
             >
-              <Printer size={13} />Issue &amp; Generate Invoice
+              <Printer size={13} />{invoicing ? "Generating invoice…" : "Issue & Generate Invoice"}
             </button>
           </div>
         </div>
@@ -957,8 +998,8 @@ export default function RepairSales() {
         <CreditRecordConfirmModal
           dealer={selectedDealer}
           dueAmount={invoiceSnapshot?.finalDue ?? finalDue}
-          onConfirm={() => { setCreditRecordMade(true); setShowCreditConfirm(false); recordRepairSale(); setView("invoice"); }}
-          onSkip={() => { setCreditRecordMade(false); setShowCreditConfirm(false); recordRepairSale(); setView("invoice"); }}
+          onConfirm={() => { if (!invoiceNo) return; setCreditRecordMade(true); setShowCreditConfirm(false); recordRepairSale(invoiceNo); setView("invoice"); }}
+          onSkip={() => { if (!invoiceNo) return; setCreditRecordMade(false); setShowCreditConfirm(false); recordRepairSale(invoiceNo); setView("invoice"); }}
           onCancel={() => setShowCreditConfirm(false)}
         />
       )}

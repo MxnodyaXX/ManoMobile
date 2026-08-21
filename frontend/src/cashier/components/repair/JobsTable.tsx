@@ -10,12 +10,10 @@ import type { JobStatus, RepairJob, RepairView } from "@/cashier/contexts/Repair
 export type { JobStatus, RepairJob } from "@/cashier/contexts/RepairContext";
 import { createPortal } from "react-dom";
 import JobReceiptPrintable from "./JobReceiptPrintable";
+import JobIssuePrintable, { type IssueInvoiceData } from "./JobIssuePrintable";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import { useParts } from "@/cashier/contexts/PartsContext";
-import ReceiptRender from "@/cashier/components/shared/ReceiptRender";
-import { fetchDefaultReceiptTemplate, type ReceiptTemplate } from "@/lib/repair/receiptTemplates";
-import { type ReceiptData } from "@/lib/repair/receiptElements";
-import { SHOP_DETAILS } from "@/lib/shop";
+import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 import {
   Search, Filter, ChevronDown, MoreHorizontal,
   CheckCircle, Clock, AlertCircle, XCircle, Wrench,
@@ -32,24 +30,6 @@ interface FinishJobData {
   partsCost: number;
   warranty: string;
 }
-
-interface IssueInvoiceData {
-  job: RepairJob;
-  name: string;
-  phone: string;
-  nic: string;
-  email: string;
-  imei: string;
-  discount: number;
-  paidAmount: number;
-  dueAmount: number;
-  isCredit: boolean;
-  adminApprover: string;
-  warranty: string;
-  invoiceNo: string;
-  createdAt: string;
-}
-
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -456,9 +436,12 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
   const slipRef = useRef<HTMLDivElement>(null);
   const { dealers } = useRepair();
   // Mano Mobile's own jobs print as the job-card slip (with signature); external-dealer
-  // jobs print as a SALES INVOICE that bills the dealer.
+  // jobs print as a SALES INVOICE that bills the dealer — but once a job has actually
+  // been handed to whoever collected it, that document is stale: the thing worth
+  // reprinting from here on is the Job Issue Invoice, in-house or dealer alike.
   const isManoMobile = isInHouseDealer(dealers, job);
-  const useInvoiceFormat = !isManoMobile;
+  const isIssued = job.status === "Delivered";
+  const useInvoiceFormat = !isManoMobile && !isIssued;
 
   const handlePrint = () => {
     if (!slipRef.current) return;
@@ -468,8 +451,11 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
     document.body.appendChild(el);
     const st = document.createElement("style");
     st.id = "__slip_style__";
+    const pageRule = isIssued
+      ? "size: A4 portrait; margin: 15mm;"
+      : `size: ${useInvoiceFormat ? "A4 landscape" : "A5 landscape"}; margin: ${useInvoiceFormat ? "12mm" : "0"};`;
     st.textContent = `
-      @page { size: ${useInvoiceFormat ? "A4 landscape" : "A5 landscape"}; margin: ${useInvoiceFormat ? "12mm" : "0"}; }
+      @page { ${pageRule} }
       #__slip__ { display: none; }
       @media print {
         body { visibility: hidden; }
@@ -488,17 +474,39 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
   const receiptTitle = `${jobLabel(job)} Job Receipt`;
   const fmtSlipDate = (s?: string) => s ? new Date(s).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
+  // No invoice number or discount survives on the job itself once it's been
+  // delivered — those only ever existed in the moment IssueJobModal collected
+  // them, and neither is persisted anywhere. This reprint is a best-effort
+  // reconstruction from what the job record actually still has.
+  const paidTotal = job.handover?.balanceSettled ?? job.advancePaid;
+  const issuedInvoiceData: IssueInvoiceData = {
+    job,
+    name: job.customerName,
+    phone: job.phone,
+    nic: "",
+    email: job.customerEmail ?? "",
+    imei: job.imei ?? "",
+    discount: 0,
+    paidAmount: paidTotal,
+    dueAmount: Math.max(0, job.estimatedCost - paidTotal),
+    isCredit: job.estimatedCost > paidTotal,
+    adminApprover: "",
+    warranty: job.jobWarranty ?? "",
+    invoiceNo: job.id,
+    createdAt: fmtSlipDate(job.handover?.handedOverAt ?? job.completedAt ?? job.createdAt),
+  };
+
   if (typeof document === "undefined") return null;
   return createPortal(
     <div style={{ position: "fixed", inset: 0, zIndex: 1010, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(620px, calc(100vw - 24px))", maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.55)" }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(900px, calc(100vw - 24px))", maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.55)" }}>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <FileText size={15} color="var(--accent)" />
             <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-              {useInvoiceFormat ? "Sales Invoice" : receiptTitle} — {job.id}
+              {isIssued ? "Job Issue Invoice" : useInvoiceFormat ? "Sales Invoice" : receiptTitle} — {job.id}
             </p>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -512,7 +520,9 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
         </div>
 
         <div style={{ overflowX: "auto", overflowY: "auto", padding: 20 }}>
-          {useInvoiceFormat ? (
+          {isIssued ? (
+            <JobIssuePrintable ref={slipRef} data={issuedInvoiceData} />
+          ) : useInvoiceFormat ? (
             <SalesInvoiceSlip ref={slipRef} job={job} fmtSlipDate={fmtSlipDate} />
           ) : (
             <JobReceiptPrintable ref={slipRef} job={job} title={receiptTitle} />
@@ -877,7 +887,7 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: isMobile ? "wrap" : undefined, justifyContent: isMobile ? "flex-end" : undefined }}>
             <button onClick={onPrintSlip} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-              <FileText size={11} strokeWidth={2} />Intake Slip
+              <FileText size={11} strokeWidth={2} />{job.status === "Delivered" ? "Issue Invoice" : "Intake Slip"}
             </button>
             {job.status === "Non-Issued" && (
               <button onClick={onIssueJob} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "1px solid #60a5fa", background: "#60a5fa", color: "#fff", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
@@ -1045,7 +1055,7 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
 function IssueJobModal({ job, onClose, onIssued }: {
   job: RepairJob;
   onClose: () => void;
-  onIssued: (data: Omit<IssueInvoiceData, "job" | "invoiceNo" | "createdAt">) => void;
+  onIssued: (data: Omit<IssueInvoiceData, "job" | "invoiceNo" | "createdAt">) => Promise<void>;
 }) {
   const [name,          setName]          = useState(job.customerName);
   const [phone,         setPhone]         = useState(job.phone);
@@ -1056,6 +1066,7 @@ function IssueJobModal({ job, onClose, onIssued }: {
   const [payingNow,     setPayingNow]     = useState("");
   const [adminApprover, setAdminApprover] = useState("");
   const [warranty,      setWarranty]      = useState("NO WARRANTY [NORMAL]");
+  const [submitting,    setSubmitting]    = useState(false);
 
   const discountAmt      = parseFloat(discount) || 0;
   const lineTotal        = Math.max(0, job.estimatedCost - discountAmt);
@@ -1074,8 +1085,13 @@ function IssueJobModal({ job, onClose, onIssued }: {
     { label: "IMEI No.",   value: imei,  set: setImei,  placeholder: "15-digit IMEI" },
   ];
 
-  const handleIssue = () => {
-    onIssued({ name, phone, nic, email, imei, discount: discountAmt, paidAmount: job.advancePaid + effectivePaying, dueAmount: effectiveDue, isCredit: effectiveCredit, adminApprover: adminApprover.trim(), warranty });
+  const handleIssue = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    await onIssued({ name, phone, nic, email, imei, discount: discountAmt, paidAmount: job.advancePaid + effectivePaying, dueAmount: effectiveDue, isCredit: effectiveCredit, adminApprover: adminApprover.trim(), warranty });
+    // On success the parent closes this modal (setIssueJobTarget(null)), so
+    // there's nothing left to reset here — only an unexpected throw would
+    // leave it mounted, and even then the cashier can just try again.
   };
 
   return createPortal(
@@ -1194,10 +1210,10 @@ function IssueJobModal({ job, onClose, onIssued }: {
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "12px 18px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
           <button onClick={onClose} style={{ padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
-          <button onClick={handleIssue} disabled={!canIssue}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: `1px solid ${effectiveCredit ? "#fbbf24" : "#60a5fa"}`, background: effectiveCredit ? "#fbbf24" : "#60a5fa", color: effectiveCredit ? "#000" : "#fff", cursor: canIssue ? "pointer" : "not-allowed", opacity: canIssue ? 1 : 0.45, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          <button onClick={handleIssue} disabled={!canIssue || submitting}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: `1px solid ${effectiveCredit ? "#fbbf24" : "#60a5fa"}`, background: effectiveCredit ? "#fbbf24" : "#60a5fa", color: effectiveCredit ? "#000" : "#fff", cursor: canIssue && !submitting ? "pointer" : "not-allowed", opacity: canIssue && !submitting ? 1 : 0.45, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
             {effectiveCredit ? <ShieldCheck size={12} strokeWidth={2.2} /> : <Send size={12} strokeWidth={2.2} />}
-            {effectiveCredit ? "Approve & Issue" : "Issue Job"}
+            {submitting ? "Generating invoice…" : effectiveCredit ? "Approve & Issue" : "Issue Job"}
           </button>
         </div>
       </div>
@@ -1210,57 +1226,6 @@ function IssueJobModal({ job, onClose, onIssued }: {
 
 function RepairInvoicePreview({ data, onClose }: { data: IssueInvoiceData; onClose: () => void }) {
   const invoiceRef = useRef<HTMLDivElement>(null);
-  const lineTotal = data.job.estimatedCost - data.discount;
-  const paymentType = data.isCredit ? "CREDIT" : "CASH / FULL";
-
-  // Admin -> Barcode -> Job Issue Invoice's default canvas design, if one has
-  // been built (elements.length > 0). Same fallback rule as JobReceiptPrintable:
-  // an empty/absent design changes nothing about what prints.
-  // undefined = still checking, null = no design to use (fall back), object = use it.
-  const [template, setTemplate] = useState<ReceiptTemplate | null | undefined>(undefined);
-  useEffect(() => {
-    let active = true;
-    fetchDefaultReceiptTemplate("issue")
-      .then(t => { if (active) setTemplate(t && t.elements.length > 0 ? t : null); })
-      .catch(() => { if (active) setTemplate(null); });
-    return () => { active = false; };
-  }, []);
-
-  const origin = typeof window === "undefined" ? "" : window.location.origin;
-  const canvasData: ReceiptData = {
-    jobId: data.job.id,
-    customer: data.name || "Walk-in",
-    phone: data.phone,
-    address: "",
-    device: [data.job.brand, data.job.model].filter(Boolean).join(" "),
-    modelNumber: data.job.modelNumber,
-    imei: data.imei,
-    estimate: data.job.estimatedCost.toLocaleString(),
-    advance: data.job.advancePaid.toLocaleString(),
-    remarks: "",
-    date: data.createdAt,
-    createdBy: "MANOMOBILE",
-    trackUrl: `${origin}/track?job=${encodeURIComponent(data.job.id)}`,
-    shopName: SHOP_DETAILS.name,
-    shopTagline: SHOP_DETAILS.tagline,
-    shopPhone: SHOP_DETAILS.phone,
-    shopEmail: SHOP_DETAILS.email,
-    shopWebsite: SHOP_DETAILS.website,
-    shopAddress: SHOP_DETAILS.address,
-    bankName: SHOP_DETAILS.bankName,
-    bankAccountNumber: SHOP_DETAILS.bankAccountNumber,
-    bankAccountHolder: SHOP_DETAILS.bankAccountHolder,
-    invoiceNo: data.invoiceNo,
-    nic: data.nic,
-    email: data.email,
-    warranty: data.warranty,
-    discount: data.discount.toLocaleString(),
-    lineTotal: lineTotal.toLocaleString(),
-    paidAmount: data.paidAmount.toLocaleString(),
-    dueAmount: data.dueAmount.toLocaleString(),
-    paymentType,
-    adminApprover: data.adminApprover,
-  };
 
   const handlePrint = () => {
     if (!invoiceRef.current) return;
@@ -1290,7 +1255,7 @@ function RepairInvoicePreview({ data, onClose }: { data: IssueInvoiceData; onClo
   return createPortal(
     <div style={{ position: "fixed", inset: 0, zIndex: 1002, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(780px, calc(100vw - 24px))", maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.5)" }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(900px, calc(100vw - 24px))", maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.5)" }}>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
@@ -1307,94 +1272,7 @@ function RepairInvoicePreview({ data, onClose }: { data: IssueInvoiceData; onClo
         </div>
 
         <div style={{ overflowX: "auto", overflowY: "auto", padding: 20 }}>
-          {template && template.elements.length > 0 ? (
-            <ReceiptRender
-              ref={invoiceRef}
-              elements={template.elements}
-              data={canvasData}
-              widthMm={template.pageWidthMm}
-              heightMm={template.pageHeightMm}
-            />
-          ) : (
-          <div ref={invoiceRef} style={{ background: "#ffffff", padding: "36px 44px", fontFamily: "Arial, Helvetica, sans-serif", color: "#000000" }}>
-            <h1 style={{ textAlign: "center", fontWeight: 900, textDecoration: "underline", fontSize: 22, margin: 0, letterSpacing: "0.05em" }}>SALES INVOICE</h1>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 22 }}>
-              <table style={{ borderCollapse: "collapse" }}>
-                <tbody>
-                  <tr>
-                    <td style={{ padding: "3px 10px", fontWeight: 700, fontSize: 11, textAlign: "right", whiteSpace: "nowrap" }}>INVOICE NUMBER:</td>
-                    <td style={{ padding: "4px 12px", background: "#e0e0e0", border: "1px solid #aaa", minWidth: 180, fontWeight: 700, fontSize: 13 }}>{data.invoiceNo}</td>
-                  </tr>
-                  <tr>
-                    <td style={{ padding: "3px 10px", fontWeight: 700, fontSize: 11, textAlign: "right", whiteSpace: "nowrap" }}>DATE and CREATED BY:</td>
-                    <td style={{ padding: "4px 12px", background: "#e0e0e0", border: "1px solid #aaa", fontWeight: 700, fontSize: 11 }}>{data.createdAt} | MANOMOBILE</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p style={{ marginTop: 18, fontSize: 13, fontWeight: 700 }}>CUSTOMER NAME: {data.name.toUpperCase()}</p>
-            <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 14, fontSize: 10.5, border: "1px solid #999" }}>
-              <thead>
-                <tr style={{ background: "#f0f0f0" }}>
-                  {["No.", "Item type", "Item name", "IMEI no.", "Warranty", "Quantity", "Advance", "Unit price", "Discount", "Line total"].map(h => (
-                    <th key={h} style={{ padding: "5px 7px", border: "1px solid #999", fontWeight: 700, fontStyle: "italic", textAlign: "left", whiteSpace: "nowrap", fontSize: 10.5 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td style={invTd}>1.</td>
-                  <td style={invTd}>Repair</td>
-                  <td style={invTd}>{data.job.id} | {data.job.brand} | {data.job.model}</td>
-                  <td style={invTd}>{data.imei || "—"}</td>
-                  <td style={invTd}>{data.warranty}</td>
-                  <td style={{ ...invTd, textAlign: "right" }}>1</td>
-                  <td style={{ ...invTd, textAlign: "right" }}>{data.job.advancePaid}</td>
-                  <td style={{ ...invTd, textAlign: "right" }}>{data.job.estimatedCost}</td>
-                  <td style={{ ...invTd, textAlign: "right" }}>{data.discount}</td>
-                  <td style={{ ...invTd, textAlign: "right", fontWeight: 700, fontStyle: "normal" }}>{lineTotal}</td>
-                </tr>
-              </tbody>
-            </table>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-              <div style={{ width: 280, display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ borderTop: "2px solid #000", paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700 }}>
-                  <span>TOTAL</span><span>Rs. {lineTotal.toLocaleString()}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-                  <span style={{ color: "#555" }}>Paid Amount</span>
-                  <span style={{ fontWeight: 600 }}>Rs. {data.paidAmount.toLocaleString()}</span>
-                </div>
-                {data.isCredit ? (
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: "#fff8e1", border: "1px solid #f59e0b", borderRadius: 4, padding: "3px 6px", marginTop: 2 }}>
-                    <span style={{ fontWeight: 700, color: "#b45309" }}>CREDIT DUE</span>
-                    <span style={{ fontWeight: 700, color: "#b45309" }}>Rs. {data.dueAmount.toLocaleString()}</span>
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: "#f0fdf4", border: "1px solid #4ade80", borderRadius: 4, padding: "3px 6px", marginTop: 2 }}>
-                    <span style={{ fontWeight: 700, color: "#166534" }}>SETTLED</span>
-                    <span style={{ fontWeight: 700, color: "#166534" }}>✓</span>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div style={{ marginTop: 18, display: "flex", gap: 32, fontSize: 11 }}>
-              <div>
-                <span style={{ fontWeight: 700 }}>Payment Type: </span>
-                <span style={{ fontWeight: 700, color: data.isCredit ? "#b45309" : "#166534", background: data.isCredit ? "#fff8e1" : "#f0fdf4", border: `1px solid ${data.isCredit ? "#f59e0b" : "#4ade80"}`, borderRadius: 4, padding: "2px 8px" }}>{paymentType}</span>
-              </div>
-              {data.isCredit && data.adminApprover && (
-                <div>
-                  <span style={{ fontWeight: 700 }}>Credit Approved By: </span>
-                  <span style={{ textTransform: "uppercase", fontWeight: 700 }}>{data.adminApprover}</span>
-                </div>
-              )}
-            </div>
-            <p style={{ marginTop: 20, fontSize: 10, color: "#666", textAlign: "center" }}>
-              This is a computer-generated invoice. No signature required.
-            </p>
-          </div>
-          )}
+          <JobIssuePrintable ref={invoiceRef} data={data} />
         </div>
       </div>
     </div>,
@@ -1596,8 +1474,8 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
   const openPickup    = (job: RepairJob) => { setDetailsJob(null); setPickupJob(job); };
   const openIntakeSlip = (job: RepairJob) => { setDetailsJob(null); setIntakeSlipJob(job); };
 
-  const handleIssueComplete = (data: Omit<IssueInvoiceData, "job" | "invoiceNo" | "createdAt">) => {
-    const invoiceNo = Date.now().toString().slice(-10).padStart(10, "0");
+  const handleIssueComplete = async (data: Omit<IssueInvoiceData, "job" | "invoiceNo" | "createdAt">) => {
+    const invoiceNo = await fetchNextInvoiceNo();
     const createdAt = new Date().toLocaleString("en-US", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: true });
     const target = allJobs.find(j => j.id === issueJobTarget!.id);
     const issuedISO = new Date().toISOString();
