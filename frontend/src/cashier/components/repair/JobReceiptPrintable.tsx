@@ -24,7 +24,7 @@ const JobReceiptPrintable = forwardRef<HTMLDivElement, {
 
   useEffect(() => {
     let active = true;
-    fetchDefaultReceiptTemplate()
+    fetchDefaultReceiptTemplate("receipt")
       .then(t => { if (active) setTemplate(t && t.elements.length > 0 ? t : null); })
       .catch(() => { if (active) setTemplate(null); });
     return () => { active = false; };

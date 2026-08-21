@@ -8,7 +8,7 @@ import {
   useReceiptTemplates, createReceiptTemplate, updateReceiptTemplate,
   deleteReceiptTemplate, setDefaultReceiptTemplate, type ReceiptTemplate,
 } from "@/lib/repair/receiptTemplates";
-import { scaleReceiptElements, type ReceiptElement } from "@/lib/repair/receiptElements";
+import { scaleReceiptElements, type ReceiptElement, type TemplateKind } from "@/lib/repair/receiptElements";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
@@ -29,25 +29,57 @@ const btnAccent: React.CSSProperties = {
 
 type Draft = Omit<ReceiptTemplate, "id" | "isDefault">;
 
-// A full A5 landscape sheet — the print CSS sets @page margin:0 for the
-// receipt, so the design itself is what has to fill the physical page now.
-const BLANK: Draft = { name: "", pageWidthMm: 210, pageHeightMm: 148, elements: [] };
+// Receipt: a full A5 landscape sheet — the print CSS sets @page margin:0 for
+// the receipt, so the design itself is what has to fill the physical page.
+// Issue invoice: A4 portrait with its existing 15mm print margin left in
+// place (not reported as broken), so the design only needs to fill the
+// content area inside that margin — 210x297 minus 15mm each side.
+const BLANK_BY_KIND: Record<TemplateKind, Draft> = {
+  receipt: { name: "", kind: "receipt", pageWidthMm: 210, pageHeightMm: 148, elements: [] },
+  issue: { name: "", kind: "issue", pageWidthMm: 180, pageHeightMm: 267, elements: [] },
+};
+
+const COPY: Record<TemplateKind, {
+  title: string; listEmpty: string; description: string; pageNote: string; migrationFile: string;
+}> = {
+  receipt: {
+    title: "Job Receipt Templates",
+    listEmpty: "No receipt templates yet — click New Template to design one.",
+    description: "Design the printed job receipt — logo, invoice header, QR tracking code, customer and job blocks, the priced "
+      + "job details table, and the bank-transfer box. An empty design (no elements added yet) keeps printing the "
+      + "plain built-in receipt, so nothing changes until you build one here.",
+    pageNote: "A5 landscape prints at 210 × 148mm with no page margin — the design has to fill that itself for the receipt to reach the edges of the paper.",
+    migrationFile: "20260819000014_receipt_templates.sql",
+  },
+  issue: {
+    title: "Job Issue Invoice Templates",
+    listEmpty: "No invoice templates yet — click New Template to design one.",
+    description: "Design the sales invoice printed when a repaired device is handed back to the customer — logo, invoice "
+      + "number, customer details, the priced invoice table, totals and payment status. An empty design (no elements "
+      + "added yet) keeps printing the plain built-in invoice, so nothing changes until you build one here.",
+    pageNote: "A4 portrait prints with a 15mm page margin — 180 × 267mm is the content area inside that margin.",
+    migrationFile: "20260819000017_issue_invoice_templates.sql",
+  },
+};
 
 /**
- * The printed job receipt's own canvas designer — same idea as BarcodeManager's
- * Label Templates, one page over. See ReceiptCanvas / ReceiptRender /
- * receiptElements.ts for the shared building blocks.
+ * A canvas designer for either printable this table holds — the job-intake
+ * receipt or the job-issue sales invoice, picked by `kind`. Same idea as
+ * BarcodeManager's Label Templates, one page over. See ReceiptCanvas /
+ * ReceiptRender / receiptElements.ts for the shared building blocks.
  */
-export default function ReceiptTemplateManager() {
-  const { templates, loading, error, configured, reload } = useReceiptTemplates();
+export default function ReceiptTemplateManager({ kind }: { kind: TemplateKind }) {
+  const { templates, loading, error, configured, reload } = useReceiptTemplates(kind);
   const toast = useToast();
+  const BLANK = BLANK_BY_KIND[kind];
+  const copy = COPY[kind];
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
 
   const asDraft = (t: ReceiptTemplate): Draft => ({
-    name: t.name, pageWidthMm: t.pageWidthMm, pageHeightMm: t.pageHeightMm, elements: t.elements,
+    name: t.name, kind: t.kind, pageWidthMm: t.pageWidthMm, pageHeightMm: t.pageHeightMm, elements: t.elements,
   });
 
   // Land on the default template once the list arrives, so the panel is never
@@ -102,7 +134,7 @@ export default function ReceiptTemplateManager() {
       await reload();
       setSelectedId(saved.id);
       setDraft(asDraft(saved));
-      toast.dialog("success", selectedId ? "Receipt template saved" : "Receipt template created", saved.name);
+      toast.dialog("success", selectedId ? "Template saved" : "Template created", saved.name);
     } catch (e) {
       toast.dialog("error", "Could not save template", e instanceof Error ? e.message : String(e));
     } finally {
@@ -116,7 +148,7 @@ export default function ReceiptTemplateManager() {
     try {
       await setDefaultReceiptTemplate(selected.id);
       await reload();
-      toast.dialog("success", "Default receipt set", `${selected.name} is now what prints for a job.`);
+      toast.dialog("success", "Default set", `${selected.name} is now what prints ${kind === "receipt" ? "on job intake" : "on job issue"}.`);
     } catch (e) {
       toast.dialog("error", "Could not set default", e instanceof Error ? e.message : String(e));
     } finally {
@@ -130,7 +162,7 @@ export default function ReceiptTemplateManager() {
       toast.dialog("error", "This is the default template", "Make another template the default first, then delete this one.");
       return;
     }
-    if (!confirm(`Delete the receipt template “${selected.name}”?`)) return;
+    if (!confirm(`Delete the template “${selected.name}”?`)) return;
     setBusy(true);
     try {
       await deleteReceiptTemplate(selected.id);
@@ -153,17 +185,15 @@ export default function ReceiptTemplateManager() {
           <AlertCircle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
           <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
             {!configured
-              ? "Connect Supabase to save job receipt templates."
-              : `${error} — run migration 20260819000014_receipt_templates.sql.`}
+              ? "Connect Supabase to save templates."
+              : `${error} — run migration ${copy.migrationFile}.`}
           </p>
         </div>
       )}
 
       {!configured || !error ? (
         <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.6 }}>
-          Design the printed job receipt — logo, invoice header, QR tracking code, customer and job blocks, the priced
-          job details table, and the bank-transfer box. An empty design (no elements added yet) keeps printing the
-          plain built-in receipt, so nothing changes until you build one here.
+          {copy.description}
         </p>
       ) : null}
 
@@ -171,7 +201,7 @@ export default function ReceiptTemplateManager() {
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
         <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
           <FileText size={15} color="var(--accent)" />
-          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Job Receipt Templates</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>{copy.title}</span>
           <span style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff }}>{templates.length} saved</span>
           <button onClick={startNew} style={{ ...btnAccent, marginLeft: "auto" }}><Plus size={13} /> New Template</button>
         </div>
@@ -181,7 +211,7 @@ export default function ReceiptTemplateManager() {
             <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff, padding: "6px 2px" }}>Loading templates…</p>
           ) : templates.length === 0 ? (
             <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff, padding: "6px 2px" }}>
-              No receipt templates yet — click New Template to design one.
+              {copy.listEmpty}
             </p>
           ) : templates.map(t => {
             const active = t.id === selectedId;
@@ -252,8 +282,7 @@ export default function ReceiptTemplateManager() {
               )}
             </div>
             <p style={{ padding: "10px 20px 0", fontSize: 11, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.55 }}>
-              A5 landscape prints at <strong>210 × 148mm</strong> with no page margin — the design has to fill that
-              itself for the receipt to reach the edges of the paper.
+              {copy.pageNote}
             </p>
             <div style={{ padding: 20 }}>
               <ReceiptCanvas
@@ -261,6 +290,7 @@ export default function ReceiptTemplateManager() {
                 onChange={(els: ReceiptElement[]) => setDraft(prev => (prev ? { ...prev, elements: els } : prev))}
                 widthMm={s.pageWidthMm}
                 heightMm={s.pageHeightMm}
+                kind={kind}
               />
             </div>
           </div>

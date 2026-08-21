@@ -25,7 +25,7 @@ interface ReceiptRenderProps {
 }
 
 const mm = (v: number) => `${v}mm`;
-const money = (v: string) => (v.trim() ? `Rs. ${v}` : "—");
+const money = (v: string | undefined) => (v && v.trim() ? `Rs. ${v}` : "—");
 
 const ReceiptRender = forwardRef<HTMLDivElement, ReceiptRenderProps>(function ReceiptRender(
   { elements, data, widthMm, heightMm, scale = 1 }, ref,
@@ -143,6 +143,50 @@ function ElementBody({ el, data }: { el: ReceiptElement; data: ReceiptData }) {
               <td style={td}>{money(data.estimate)}</td>
               <td style={td}>{money(data.advance)}</td>
               <td style={td}>{resolveReceiptTokens(el.remarks, data) || "—"}</td>
+            </tr>
+          </tbody>
+        </table>
+      );
+    }
+
+    case "invoiceTable": {
+      const th: React.CSSProperties = {
+        padding: "1.2mm 1.6mm", border: `0.2mm solid ${el.borderColor}`, fontWeight: 700,
+        textAlign: "left", whiteSpace: "nowrap", fontSize: `${el.fontSize}pt`,
+        background: el.headerBg, color: el.headerColor,
+      };
+      const td: React.CSSProperties = {
+        padding: "1.4mm 1.6mm", border: `0.2mm solid ${el.borderColor}`, fontSize: `${el.fontSize}pt`,
+        color: "#000", verticalAlign: "top",
+      };
+      return (
+        <table style={{ width: "100%", height: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontFamily: "'Plus Jakarta Sans', Arial, sans-serif" }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, width: "6%" }}>No.</th>
+              <th style={th}>Item Type</th>
+              <th style={th}>Item Name</th>
+              <th style={th}>IMEI</th>
+              <th style={th}>Warranty</th>
+              <th style={{ ...th, textAlign: "right", width: "8%" }}>Qty</th>
+              <th style={{ ...th, textAlign: "right" }}>Advance</th>
+              <th style={{ ...th, textAlign: "right" }}>Unit Price</th>
+              <th style={{ ...th, textAlign: "right" }}>Discount</th>
+              <th style={{ ...th, textAlign: "right" }}>Line Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style={td}>1</td>
+              <td style={td}>Repair</td>
+              <td style={td}>{data.jobId} {data.device}</td>
+              <td style={{ ...td, fontFamily: "monospace" }}>{data.imei || "—"}</td>
+              <td style={td}>{data.warranty || "—"}</td>
+              <td style={{ ...td, textAlign: "right" }}>1</td>
+              <td style={{ ...td, textAlign: "right" }}>{money(data.advance)}</td>
+              <td style={{ ...td, textAlign: "right" }}>{money(data.estimate)}</td>
+              <td style={{ ...td, textAlign: "right" }}>{money(data.discount)}</td>
+              <td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{money(data.lineTotal)}</td>
             </tr>
           </tbody>
         </table>

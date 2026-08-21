@@ -9,7 +9,7 @@ import ReceiptRender from "@/cashier/components/shared/ReceiptRender";
 import { SHOP_DETAILS } from "@/lib/shop";
 import {
   blankReceiptElement, clampReceiptElement, RECEIPT_TOKENS,
-  type ReceiptElement, type ReceiptElementType, type ReceiptData,
+  type ReceiptElement, type ReceiptElementType, type ReceiptData, type TemplateKind,
 } from "@/lib/repair/receiptElements";
 import { FONT_OPTIONS, DEFAULT_FONT_FAMILY } from "@/lib/fonts";
 
@@ -36,6 +36,9 @@ const SAMPLE: ReceiptData = {
   shopEmail: SHOP_DETAILS.email, shopWebsite: SHOP_DETAILS.website, shopAddress: SHOP_DETAILS.address,
   bankName: SHOP_DETAILS.bankName, bankAccountNumber: SHOP_DETAILS.bankAccountNumber,
   bankAccountHolder: SHOP_DETAILS.bankAccountHolder,
+  invoiceNo: "RM-016", nic: "912345678V", email: "sumod@example.com",
+  warranty: "3 MONTHS WARRANTY [NORMAL]", discount: "0", lineTotal: "8,000",
+  paidAmount: "8,000", dueAmount: "0", paymentType: "CASH / FULL", adminApprover: "",
 };
 
 interface ReceiptCanvasProps {
@@ -43,9 +46,10 @@ interface ReceiptCanvasProps {
   onChange: (els: ReceiptElement[]) => void;
   widthMm: number;
   heightMm: number;
+  kind: TemplateKind;
 }
 
-export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm }: ReceiptCanvasProps) {
+export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, kind }: ReceiptCanvasProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -177,7 +181,11 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm }:
         <button onClick={() => add("image")} style={btn}><ImageIcon size={13} /> Logo/Image</button>
         <button onClick={() => add("line")} style={btn}><Minus size={13} /> Line / Fill</button>
         <button onClick={() => add("qr")} style={btn}><QrCode size={13} /> QR Code</button>
-        <button onClick={() => add("table")} style={btn}><Table2 size={13} /> Job Details Table</button>
+        {kind === "receipt" ? (
+          <button onClick={() => add("table")} style={btn}><Table2 size={13} /> Job Details Table</button>
+        ) : (
+          <button onClick={() => add("invoiceTable")} style={btn}><Table2 size={13} /> Invoice Table</button>
+        )}
         <button onClick={() => fileRef.current?.click()} style={btn}><Upload size={13} /> Upload Image</button>
         <input
           ref={fileRef} type="file" accept="image/*" hidden
@@ -267,7 +275,9 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm }:
               <p style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)" }}>Elements</p>
               {elements.length === 0 ? (
                 <p style={{ fontSize: 11.5, color: "var(--text-muted)", lineHeight: 1.55 }}>
-                  Nothing on the receipt yet. Add your logo, some text, the QR code and the job details table, then drag them into place.
+                  {kind === "receipt"
+                    ? "Nothing on the receipt yet. Add your logo, some text, the QR code and the job details table, then drag them into place."
+                    : "Nothing on the invoice yet. Add your logo, some text and the invoice table, then drag them into place."}
                 </p>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -277,7 +287,7 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm }:
                       onClick={() => setSelectedId(el.id)}
                       style={{ textAlign: "left", padding: "6px 9px", borderRadius: 7, fontSize: 11.5, fontFamily: ff, cursor: "pointer", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
                     >
-                      {i + 1}. {el.type === "text" ? `“${el.text.slice(0, 18)}”` : el.type}
+                      {i + 1}. {el.type === "text" ? `“${el.text.slice(0, 18)}”` : el.type === "invoiceTable" ? "Invoice Table" : el.type}
                     </button>
                   ))}
                 </div>
@@ -289,7 +299,7 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm }:
           ) : (
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <p style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", flex: 1, textTransform: "capitalize" }}>{selected.type === "table" ? "Job Details Table" : selected.type}</p>
+                <p style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", flex: 1, textTransform: "capitalize" }}>{selected.type === "table" ? "Job Details Table" : selected.type === "invoiceTable" ? "Invoice Table" : selected.type}</p>
                 <button onClick={() => reorder(selected.id, -1)} title="Send back" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}><ArrowDown size={13} /></button>
                 <button onClick={() => reorder(selected.id, 1)} title="Bring forward" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}><ArrowUp size={13} /></button>
                 <button onClick={() => duplicate(selected)} title="Duplicate" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}><Copy size={13} /></button>
@@ -317,7 +327,7 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm }:
                   </Field>
                   <Field label="Insert a field">
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                      {RECEIPT_TOKENS.map(t => (
+                      {RECEIPT_TOKENS.filter(t => !t.kind || t.kind === kind).map(t => (
                         <button
                           key={t.token}
                           title={t.label}
@@ -441,6 +451,26 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm }:
                   </Field>
                   <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5 }}>
                     Device, IMEI, fault, estimate and advance always come from the job — only the Remarks column and the styling are set here.
+                  </p>
+                </>
+              )}
+
+              {selected.type === "invoiceTable" && (
+                <>
+                  <Field label="Header background">
+                    <input type="color" value={selected.headerBg} onChange={e => update(selected.id, { headerBg: e.target.value })} style={{ width: "100%", height: 30, background: "none", border: "1px solid var(--border)", borderRadius: 7, cursor: "pointer" }} />
+                  </Field>
+                  <Field label="Header text colour">
+                    <input type="color" value={selected.headerColor} onChange={e => update(selected.id, { headerColor: e.target.value })} style={{ width: "100%", height: 30, background: "none", border: "1px solid var(--border)", borderRadius: 7, cursor: "pointer" }} />
+                  </Field>
+                  <Field label="Border colour">
+                    <input type="color" value={selected.borderColor} onChange={e => update(selected.id, { borderColor: e.target.value })} style={{ width: "100%", height: 30, background: "none", border: "1px solid var(--border)", borderRadius: 7, cursor: "pointer" }} />
+                  </Field>
+                  <Row label="Font (pt)">
+                    <NumIn value={selected.fontSize} onChange={v => update(selected.id, { fontSize: Math.max(4, v) })} />
+                  </Row>
+                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                    Item, IMEI, warranty, advance, unit price, discount and line total always come from the job — only the styling is set here.
                   </p>
                 </>
               )}

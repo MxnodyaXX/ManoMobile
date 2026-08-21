@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo, forwardRef } from "react";
+import { useState, useRef, useMemo, useEffect, forwardRef } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import ExportButtons from "@/cashier/components/shared/ExportButtons";
@@ -12,6 +12,10 @@ import { createPortal } from "react-dom";
 import JobReceiptPrintable from "./JobReceiptPrintable";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import { useParts } from "@/cashier/contexts/PartsContext";
+import ReceiptRender from "@/cashier/components/shared/ReceiptRender";
+import { fetchDefaultReceiptTemplate, type ReceiptTemplate } from "@/lib/repair/receiptTemplates";
+import { type ReceiptData } from "@/lib/repair/receiptElements";
+import { SHOP_DETAILS } from "@/lib/shop";
 import {
   Search, Filter, ChevronDown, MoreHorizontal,
   CheckCircle, Clock, AlertCircle, XCircle, Wrench,
@@ -1209,6 +1213,55 @@ function RepairInvoicePreview({ data, onClose }: { data: IssueInvoiceData; onClo
   const lineTotal = data.job.estimatedCost - data.discount;
   const paymentType = data.isCredit ? "CREDIT" : "CASH / FULL";
 
+  // Admin -> Barcode -> Job Issue Invoice's default canvas design, if one has
+  // been built (elements.length > 0). Same fallback rule as JobReceiptPrintable:
+  // an empty/absent design changes nothing about what prints.
+  // undefined = still checking, null = no design to use (fall back), object = use it.
+  const [template, setTemplate] = useState<ReceiptTemplate | null | undefined>(undefined);
+  useEffect(() => {
+    let active = true;
+    fetchDefaultReceiptTemplate("issue")
+      .then(t => { if (active) setTemplate(t && t.elements.length > 0 ? t : null); })
+      .catch(() => { if (active) setTemplate(null); });
+    return () => { active = false; };
+  }, []);
+
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const canvasData: ReceiptData = {
+    jobId: data.job.id,
+    customer: data.name || "Walk-in",
+    phone: data.phone,
+    address: "",
+    device: [data.job.brand, data.job.model].filter(Boolean).join(" "),
+    modelNumber: data.job.modelNumber,
+    imei: data.imei,
+    estimate: data.job.estimatedCost.toLocaleString(),
+    advance: data.job.advancePaid.toLocaleString(),
+    remarks: "",
+    date: data.createdAt,
+    createdBy: "MANOMOBILE",
+    trackUrl: `${origin}/track?job=${encodeURIComponent(data.job.id)}`,
+    shopName: SHOP_DETAILS.name,
+    shopTagline: SHOP_DETAILS.tagline,
+    shopPhone: SHOP_DETAILS.phone,
+    shopEmail: SHOP_DETAILS.email,
+    shopWebsite: SHOP_DETAILS.website,
+    shopAddress: SHOP_DETAILS.address,
+    bankName: SHOP_DETAILS.bankName,
+    bankAccountNumber: SHOP_DETAILS.bankAccountNumber,
+    bankAccountHolder: SHOP_DETAILS.bankAccountHolder,
+    invoiceNo: data.invoiceNo,
+    nic: data.nic,
+    email: data.email,
+    warranty: data.warranty,
+    discount: data.discount.toLocaleString(),
+    lineTotal: lineTotal.toLocaleString(),
+    paidAmount: data.paidAmount.toLocaleString(),
+    dueAmount: data.dueAmount.toLocaleString(),
+    paymentType,
+    adminApprover: data.adminApprover,
+  };
+
   const handlePrint = () => {
     if (!invoiceRef.current) return;
     const printDiv = document.createElement("div");
@@ -1253,7 +1306,16 @@ function RepairInvoicePreview({ data, onClose }: { data: IssueInvoiceData; onClo
           </div>
         </div>
 
-        <div style={{ overflowY: "auto", padding: 20 }}>
+        <div style={{ overflowX: "auto", overflowY: "auto", padding: 20 }}>
+          {template && template.elements.length > 0 ? (
+            <ReceiptRender
+              ref={invoiceRef}
+              elements={template.elements}
+              data={canvasData}
+              widthMm={template.pageWidthMm}
+              heightMm={template.pageHeightMm}
+            />
+          ) : (
           <div ref={invoiceRef} style={{ background: "#ffffff", padding: "36px 44px", fontFamily: "Arial, Helvetica, sans-serif", color: "#000000" }}>
             <h1 style={{ textAlign: "center", fontWeight: 900, textDecoration: "underline", fontSize: 22, margin: 0, letterSpacing: "0.05em" }}>SALES INVOICE</h1>
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 22 }}>
@@ -1332,6 +1394,7 @@ function RepairInvoicePreview({ data, onClose }: { data: IssueInvoiceData; onClo
               This is a computer-generated invoice. No signature required.
             </p>
           </div>
+          )}
         </div>
       </div>
     </div>,

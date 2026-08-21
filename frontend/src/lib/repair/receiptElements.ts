@@ -3,18 +3,22 @@
 import { DEFAULT_FONT_FAMILY } from "@/lib/fonts";
 
 /**
- * Job-receipt canvas elements — the same idea as labelElements.ts (an ordered
- * list of boxes placed in millimetres, some containing {{tokens}}), scaled up
- * to a full A5 receipt instead of a small label, plus two kinds a label never
- * needed: a QR code and the priced job-details table.
+ * Canvas elements shared by the two printable documents built on this system
+ * — the job-intake receipt and the job-issue sales invoice (see `kind` in
+ * receiptTemplates.ts). Same idea as labelElements.ts (an ordered list of
+ * boxes placed in millimetres, some containing {{tokens}}), scaled up to a
+ * full page instead of a small label, plus kinds a label never needed: a QR
+ * code and two different priced tables (one per document kind).
  */
 
-export type ReceiptElementType = "text" | "image" | "line" | "qr" | "table";
+export type TemplateKind = "receipt" | "issue";
+
+export type ReceiptElementType = "text" | "image" | "line" | "qr" | "table" | "invoiceTable";
 
 interface BaseElement {
   id: string;
   type: ReceiptElementType;
-  /** Millimetres from the receipt content area's top-left corner. */
+  /** Millimetres from the page's content area top-left corner. */
   x: number;
   y: number;
   w: number;
@@ -57,10 +61,11 @@ export interface ReceiptQrElement extends BaseElement {
 }
 
 /**
- * The job as a priced line, same fields JobReceiptSlip has always printed
- * (Device Model / IMEI / Fault Type / Estimate / Advance / Remarks) — kept as
- * one positionable block rather than free-form cells, since its *content* is
- * real per-job data, not something to hand-design.
+ * The job as a priced line on the intake receipt (`kind: "receipt"`), same
+ * fields JobReceiptSlip has always printed (Device Model / IMEI / Fault Type
+ * / Estimate / Advance / Remarks) — kept as one positionable block rather
+ * than free-form cells, since its *content* is real per-job data, not
+ * something to hand-design.
  */
 export interface ReceiptTableElement extends BaseElement {
   type: "table";
@@ -72,13 +77,31 @@ export interface ReceiptTableElement extends BaseElement {
   remarks: string;
 }
 
+/**
+ * The line-item table on the job-issue sales invoice (`kind: "issue"`) —
+ * same fields RepairInvoicePreview has always printed (Item type / Item name
+ * / IMEI / Warranty / Qty / Advance / Unit price / Discount / Line total).
+ * A different, wider set of columns than the receipt's table, hence its own
+ * element type rather than overloading "table" with two shapes.
+ */
+export interface ReceiptInvoiceTableElement extends BaseElement {
+  type: "invoiceTable";
+  headerBg: string;
+  headerColor: string;
+  borderColor: string;
+  fontSize: number;
+}
+
 export type ReceiptElement =
   | ReceiptTextElement | ReceiptImageElement | ReceiptLineElement
-  | ReceiptQrElement | ReceiptTableElement;
+  | ReceiptQrElement | ReceiptTableElement | ReceiptInvoiceTableElement;
 
 /**
  * What {{tokens}} resolve to at print time. One design serves every job, so
  * anything job- or shop-specific has to be a token rather than typed in.
+ * A single shared bag for both document kinds — a receipt design simply
+ * never uses the issue-only tokens (and vice versa), same as a label design
+ * doesn't have to use every LABEL_TOKENS entry either.
  */
 export interface ReceiptData {
   jobId: string;
@@ -88,14 +111,9 @@ export interface ReceiptData {
   device: string;
   modelNumber?: string;
   imei: string;
-  fault: string;
   estimate: string;
   advance: string;
   remarks: string;
-  technician: string;
-  estCompletion: string;
-  priority: string;
-  itemsReceived: string;
   date: string;
   createdBy: string;
   trackUrl: string;
@@ -108,22 +126,39 @@ export interface ReceiptData {
   bankName: string;
   bankAccountNumber: string;
   bankAccountHolder: string;
+  // ── Job-intake receipt only ──
+  fault?: string;
+  technician?: string;
+  estCompletion?: string;
+  priority?: string;
+  itemsReceived?: string;
+  // ── Job-issue invoice only ──
+  invoiceNo?: string;
+  nic?: string;
+  email?: string;
+  warranty?: string;
+  discount?: string;
+  lineTotal?: string;
+  paidAmount?: string;
+  dueAmount?: string;
+  paymentType?: string;
+  adminApprover?: string;
 }
 
-export const RECEIPT_TOKENS: { token: string; label: string }[] = [
+export const RECEIPT_TOKENS: { token: string; label: string; kind?: TemplateKind }[] = [
   { token: "{{jobId}}",         label: "Job number" },
   { token: "{{customer}}",      label: "Customer name" },
   { token: "{{phone}}",         label: "Customer phone" },
   { token: "{{address}}",       label: "Customer address" },
   { token: "{{device}}",        label: "Device brand & model" },
   { token: "{{imei}}",          label: "IMEI" },
-  { token: "{{fault}}",         label: "Fault type" },
+  { token: "{{fault}}",         label: "Fault type", kind: "receipt" },
   { token: "{{estimate}}",      label: "Estimate" },
   { token: "{{advance}}",       label: "Advance paid" },
-  { token: "{{technician}}",    label: "Technician" },
-  { token: "{{estCompletion}}", label: "Est. completion" },
-  { token: "{{priority}}",      label: "Priority" },
-  { token: "{{itemsReceived}}", label: "Items received" },
+  { token: "{{technician}}",    label: "Technician", kind: "receipt" },
+  { token: "{{estCompletion}}", label: "Est. completion", kind: "receipt" },
+  { token: "{{priority}}",      label: "Priority", kind: "receipt" },
+  { token: "{{itemsReceived}}", label: "Items received", kind: "receipt" },
   { token: "{{date}}",          label: "Date created" },
   { token: "{{createdBy}}",     label: "Created by" },
   { token: "{{shopName}}",      label: "Shop name" },
@@ -135,6 +170,16 @@ export const RECEIPT_TOKENS: { token: string; label: string }[] = [
   { token: "{{bankName}}",           label: "Bank name" },
   { token: "{{bankAccountNumber}}",  label: "Bank account number" },
   { token: "{{bankAccountHolder}}",  label: "Bank account holder" },
+  { token: "{{invoiceNo}}",     label: "Invoice number", kind: "issue" },
+  { token: "{{nic}}",           label: "Customer NIC", kind: "issue" },
+  { token: "{{email}}",         label: "Customer email", kind: "issue" },
+  { token: "{{warranty}}",      label: "Warranty terms", kind: "issue" },
+  { token: "{{discount}}",      label: "Discount", kind: "issue" },
+  { token: "{{lineTotal}}",     label: "Line total (after discount)", kind: "issue" },
+  { token: "{{paidAmount}}",    label: "Paid amount", kind: "issue" },
+  { token: "{{dueAmount}}",     label: "Balance due", kind: "issue" },
+  { token: "{{paymentType}}",   label: "Payment type (CASH / CREDIT)", kind: "issue" },
+  { token: "{{adminApprover}}", label: "Credit approved by", kind: "issue" },
 ];
 
 export function resolveReceiptTokens(text: string, data: ReceiptData): string {
@@ -161,10 +206,12 @@ export function blankReceiptElement(type: ReceiptElementType, page: { w: number;
       return { ...base, type, w: 24, h: 24, value: "{{trackUrl}}" };
     case "table":
       return { ...base, type, w: Math.min(180, page.w - 8), h: 24, headerBg: "#dc2626", headerColor: "#ffffff", borderColor: "#999999", fontSize: 9, remarks: "" };
+    case "invoiceTable":
+      return { ...base, type, w: Math.min(180, page.w - 8), h: 24, headerBg: "#e0e0e0", headerColor: "#000000", borderColor: "#999999", fontSize: 9 };
   }
 }
 
-/** Keep a box inside the receipt's content area. Dragging something off the
+/** Keep a box inside the page's content area. Dragging something off the
  *  edge silently loses it at print time, since the page clips. */
 export function clampReceiptElement<T extends ReceiptElement>(el: T, page: { w: number; h: number }): T {
   const w = Math.max(1, Math.min(el.w, page.w));
@@ -201,7 +248,7 @@ export function scaleReceiptElements(
     copy.y = round(el.y * sy);
     copy.w = round(el.w * sx);
     copy.h = round(el.h * sy);
-    if (copy.type === "text" || copy.type === "table") {
+    if (copy.type === "text" || copy.type === "table" || copy.type === "invoiceTable") {
       copy.fontSize = Math.max(4, Math.round(copy.fontSize * sFont * 10) / 10);
     }
     return clampReceiptElement(copy, to);
@@ -212,7 +259,7 @@ export function isReceiptElement(v: unknown): v is ReceiptElement {
   if (typeof v !== "object" || v === null) return false;
   const e = v as Partial<ReceiptElement>;
   return typeof e.id === "string"
-    && (e.type === "text" || e.type === "image" || e.type === "line" || e.type === "qr" || e.type === "table")
+    && (e.type === "text" || e.type === "image" || e.type === "line" || e.type === "qr" || e.type === "table" || e.type === "invoiceTable")
     && typeof e.x === "number" && typeof e.y === "number"
     && typeof e.w === "number" && typeof e.h === "number";
 }

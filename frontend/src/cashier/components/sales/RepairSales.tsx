@@ -419,6 +419,19 @@ export default function RepairSales() {
   const [showCreditConfirm,  setShowCreditConfirm]  = useState(false);
   const [creditRecordMade,   setCreditRecordMade]   = useState(false);
 
+  // A frozen copy of the billing figures at the moment the invoice is
+  // generated. markIssued() flips the selected jobs' status to "Delivered",
+  // which — because `invoiceable` only keeps status === "Completed" — drops
+  // them out of the live `selectedRepairs`/`grandTotal`/etc. the instant
+  // status updates land, leaving InvoiceView with an empty invoice. Snapshot
+  // everything before that flip so the preview keeps showing what was billed.
+  const [invoiceSnapshot, setInvoiceSnapshot] = useState<{
+    repairs: CompletedRepair[];
+    totalAdvance: number;
+    effectiveReceived: number;
+    finalDue: number;
+  } | null>(null);
+
   const invoiceNo = useMemo(() => Date.now().toString().slice(-10).padStart(10, "0"), []);
   const createdAt = useMemo(() => new Date().toLocaleString("en-US", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: true }), []);
 
@@ -531,14 +544,14 @@ export default function RepairSales() {
     setSelectedDealer(""); setCheckedIds(new Set()); setSearch("");
     setCustName(""); setCustPhone(""); setCustNic(""); setAmountReceived("");
     setSelectedCreditCustomer(null); setShowCreditConfirm(false); setCreditRecordMade(false);
-    setTermsAccepted(false); setSignature("");
+    setTermsAccepted(false); setSignature(""); setInvoiceSnapshot(null); setView("search");
   };
 
   const handleDealerChange = (val: string) => {
     setSelectedDealer(val); setCheckedIds(new Set()); setSearch("");
     setCustName(""); setCustPhone(""); setCustNic(""); setAmountReceived("");
     setSelectedCreditCustomer(null); setShowCreditConfirm(false); setCreditRecordMade(false);
-    setTermsAccepted(false); setSignature("");
+    setTermsAccepted(false); setSignature(""); setInvoiceSnapshot(null);
   };
 
   const recordRepairSale = () => {
@@ -575,6 +588,9 @@ export default function RepairSales() {
   };
 
   const handleGenerateInvoice = () => {
+    // Snapshot before markIssued() flips these jobs to "Delivered" — see the
+    // comment on invoiceSnapshot's declaration.
+    setInvoiceSnapshot({ repairs: selectedRepairs, totalAdvance, effectiveReceived, finalDue });
     markIssued();
     if (!isManoMobile && isCredit) {
       setShowCreditConfirm(true);
@@ -597,19 +613,19 @@ export default function RepairSales() {
     setShowIssuedMsg(true);
   };
 
-  if (view === "invoice") {
+  if (view === "invoice" && invoiceSnapshot) {
     return (
       <InvoiceView
         invoiceNo={invoiceNo}
         createdAt={createdAt}
         dealer={selectedDealer}
         customer={invoiceCustomer}
-        isCredit={isCredit}
-        amountReceivedNow={effectiveReceived}
-        dueAmount={finalDue}
-        totalAdvance={totalAdvance}
+        isCredit={invoiceSnapshot.finalDue > 0}
+        amountReceivedNow={invoiceSnapshot.effectiveReceived}
+        dueAmount={invoiceSnapshot.finalDue}
+        totalAdvance={invoiceSnapshot.totalAdvance}
         creditRecordMade={creditRecordMade}
-        repairs={selectedRepairs}
+        repairs={invoiceSnapshot.repairs}
         signatureImage={signature}
         onBack={() => setView("search")}
       />
@@ -940,7 +956,7 @@ export default function RepairSales() {
       {showCreditConfirm && (
         <CreditRecordConfirmModal
           dealer={selectedDealer}
-          dueAmount={finalDue}
+          dueAmount={invoiceSnapshot?.finalDue ?? finalDue}
           onConfirm={() => { setCreditRecordMade(true); setShowCreditConfirm(false); recordRepairSale(); setView("invoice"); }}
           onSkip={() => { setCreditRecordMade(false); setShowCreditConfirm(false); recordRepairSale(); setView("invoice"); }}
           onCancel={() => setShowCreditConfirm(false)}

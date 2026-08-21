@@ -173,6 +173,20 @@ body {
 }
 .live-dot { animation: pulse-dot 2s ease-in-out infinite; }
 
+/* New Repair wizard: every text field sets outline:none inline (its own
+   border is the resting-state look), which also silently swallows the
+   focus ring — so tabbing/auto-focus between fields (and steps) leaves no
+   visible sign of where you landed. Restore a visible one, and extend it to
+   the wizard's custom checkbox/radio rows (div-based, not real inputs). */
+.repair-wizard input:focus,
+.repair-wizard textarea:focus,
+.repair-wizard select:focus,
+.repair-wizard [role="checkbox"]:focus,
+.repair-wizard [role="radio"]:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
 select option { background: var(--bg-card); color: var(--text-primary); }
 

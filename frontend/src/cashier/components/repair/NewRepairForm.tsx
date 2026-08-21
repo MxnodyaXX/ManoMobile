@@ -150,6 +150,16 @@ const checkboxItemStyle = (checked: boolean): React.CSSProperties => ({
   cursor: "pointer", transition: "all 0.15s", userSelect: "none",
 });
 
+/** These checkbox rows are plain divs, not <input>s — without this they're
+ *  invisible to Tab entirely, so it jumps straight from IMEI to the textarea
+ *  below both grids instead of flowing through each checkbox in order. */
+const onCheckboxKeyDown = (toggle: () => void) => (e: React.KeyboardEvent) => {
+  if (e.key === " " || e.key === "Enter") {
+    e.preventDefault();
+    toggle();
+  }
+};
+
 // ─── Validation ───────────────────────────────────────────────────────────────
 
 /** The fields the wizard refuses to move past, per step. */
@@ -528,11 +538,16 @@ function Step2({ data, onChange, isMobile, models, onAddModel, errors }: { data:
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 6 }}>
           {RECEIVED_ITEMS.map((item) => {
             const checked = data.receivedItems.includes(item);
+            const toggle = () => onChange({ receivedItems: toggleItem(data.receivedItems, item) });
             return (
               <div
                 key={item}
+                role="checkbox"
+                aria-checked={checked}
+                tabIndex={0}
                 style={checkboxItemStyle(checked)}
-                onClick={() => onChange({ receivedItems: toggleItem(data.receivedItems, item) })}
+                onClick={toggle}
+                onKeyDown={onCheckboxKeyDown(toggle)}
               >
                 <div style={{
                   width: 16, height: 16, borderRadius: 4, border: `2px solid ${checked ? "var(--accent)" : "var(--border)"}`,
@@ -555,11 +570,16 @@ function Step2({ data, onChange, isMobile, models, onAddModel, errors }: { data:
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 6, marginBottom: 18 }}>
           {COMMON_FAULTS.map((fault) => {
             const checked = data.faultCheckboxes.includes(fault);
+            const toggle = () => onChange({ faultCheckboxes: toggleItem(data.faultCheckboxes, fault) });
             return (
               <div
                 key={fault}
+                role="checkbox"
+                aria-checked={checked}
+                tabIndex={0}
                 style={checkboxItemStyle(checked)}
-                onClick={() => onChange({ faultCheckboxes: toggleItem(data.faultCheckboxes, fault) })}
+                onClick={toggle}
+                onKeyDown={onCheckboxKeyDown(toggle)}
               >
                 <div style={{
                   width: 16, height: 16, borderRadius: 4, border: `2px solid ${checked ? "#ff6b6b" : "var(--border)"}`,
@@ -758,12 +778,18 @@ function Step4({ data, onChange, isMobile, technicians, techLoading }: { data: F
           {technicians.map((r) => {
             const isSelected = data.assignedRepairman === r.id;
             const canSelect = r.available;
+            const toggle = () => canSelect && onChange({ assignedRepairman: isSelected ? "" : r.id });
             return (
               <div
                 key={r.id}
                 // Clicking the assigned repairman again unassigns them, so a
                 // misclick can be undone and the step left as "Skip".
-                onClick={() => canSelect && onChange({ assignedRepairman: isSelected ? "" : r.id })}
+                onClick={toggle}
+                onKeyDown={e => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggle(); } }}
+                role="radio"
+                aria-checked={isSelected}
+                aria-disabled={!canSelect}
+                tabIndex={canSelect ? 0 : -1}
                 title={!canSelect ? `${r.name} is busy` : isSelected ? "Click to unassign" : `Assign to ${r.name}`}
                 style={{
                   display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
@@ -1038,7 +1064,7 @@ const INITIAL: FormData = {
   estimatedCost: "", advancePaid: "", paymentMethod: "", jobPriority: "Normal", jobNotes: "",
   assignedRepairman: "", estimatedCompletion: "",
   condition: { front: "Good", back: "Good", frame: "Good", camera: "Good", ports: "Good", buttons: "Good" },
-  intakePhotos: [], passcodeType: "None", passcode: "", signature: "", termsAccepted: false,
+  intakePhotos: [], passcodeType: "None", passcode: "", signature: "", termsAccepted: true,
 };
 
 /** A blank wizard is never worth saving as a draft. */
@@ -1123,6 +1149,21 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
   const [attempt, setAttempt] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
+
+  // Land keyboard focus on the first field of whichever step just became
+  // active — Next Step / Back otherwise leave focus sitting on the button
+  // that was clicked, so typing (or Tab) does nothing until the cashier
+  // clicks into the form again. Includes custom controls like the technician
+  // rows and Step 2's checkbox grids (real <input>/<textarea>/<select> only
+  // covers text fields — a step whose first control is one of those custom
+  // rows, e.g. Step 4's technician list ahead of the completion-date input,
+  // needs its own tabIndex to be found here in DOM order instead.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      contentRef.current?.querySelector<HTMLElement>('input, textarea, select, [tabindex="0"]')?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [step]);
 
   // ── Draft autosave ──
   const { drafts, saveDraft, removeDraft } = useRepairDrafts();
@@ -1356,7 +1397,7 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
       )}
 
       {/* Step Content */}
-      <div ref={contentRef} style={{ flex: isMobile ? "none" : 1, padding: isMobile ? "0 16px" : "0 28px", minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>
+      <div ref={contentRef} className="repair-wizard" style={{ flex: isMobile ? "none" : 1, padding: isMobile ? "0 16px" : "0 28px", minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>
         {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} dealers={dealers} errors={errors} nextJobNo={nextJobNo} dealerNoCheck={dealerNoCheck} checkingDealerNo={checkingDealerNo} />}
         {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} models={modelOptions} onAddModel={addModel} errors={errors} />}
         {step === 3 && <Step3 data={form} onChange={update} isMobile={isMobile} errors={errors} />}

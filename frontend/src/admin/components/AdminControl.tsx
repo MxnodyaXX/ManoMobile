@@ -972,7 +972,7 @@ function BarcodeManager() {
   // Two different printables share this page: small barcode labels and the
   // full-page job receipt. Same idea, same canvas building blocks, wildly
   // different scale — kept as a toggle rather than merged into one picker.
-  const [section, setSection] = useState<"labels" | "receipt">("labels");
+  const [section, setSection] = useState<"labels" | "receipt" | "issue">("labels");
 
   const { setBarcodeSettings } = useInventory();
   const { templates, loading, error, configured, reload } = useBarcodeTemplates();
@@ -1095,11 +1095,11 @@ function BarcodeManager() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
 
-      {/* Barcode labels vs. the printed job receipt — same canvas idea, two
-          very differently-sized printables, so they get their own section
-          rather than one picker trying to hold both. */}
+      {/* Barcode labels vs. the two printed documents — same canvas idea,
+          differently-sized/shaped printables, so they each get their own
+          section rather than one picker trying to hold all three. */}
       <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, width: "fit-content" }}>
-        {([["labels", "Barcode Labels"], ["receipt", "Job Receipt"]] as const).map(([sec, lbl]) => {
+        {([["labels", "Barcode Labels"], ["receipt", "Job Receipt"], ["issue", "Job Issue Invoice"]] as const).map(([sec, lbl]) => {
           const active = section === sec;
           return (
             <button key={sec} onClick={() => setSection(sec)} style={{ padding: "7px 15px", borderRadius: 7, fontSize: 12.5, cursor: "pointer", fontFamily: ff, background: active ? "var(--bg-secondary)" : "transparent", border: active ? "1px solid var(--border-active)" : "1px solid transparent", color: active ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: active ? 600 : 400 }}>
@@ -1110,7 +1110,9 @@ function BarcodeManager() {
       </div>
 
       {section === "receipt" ? (
-        <ReceiptTemplateManager />
+        <ReceiptTemplateManager kind="receipt" />
+      ) : section === "issue" ? (
+        <ReceiptTemplateManager kind="issue" />
       ) : (
       <>
       {(!configured || error) && (
