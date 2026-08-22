@@ -257,7 +257,7 @@ export default function WarrantyCenter() {
               </select>
             </div>
 
-            <div style={{ borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden", overflowX: "auto" }}>
+            <div style={{ borderRadius: 12, border: "1px solid var(--border)", overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                 <thead>
                   <tr style={{ background: "var(--bg-secondary)", borderBottom: "1px solid var(--border)" }}>

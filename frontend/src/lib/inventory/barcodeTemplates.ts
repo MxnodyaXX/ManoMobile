@@ -203,3 +203,23 @@ export async function fetchTemplateForLayout(layout: BarcodeLayout): Promise<Bar
   const row = (data as TemplateRow[] | null)?.[0];
   return row ? toTemplate(row) : null;
 }
+
+/**
+ * A specific template picked by name rather than by layout+default — for a
+ * call site that needs a particular design regardless of what's marked
+ * default (e.g. an outside-dealer repair tag using a different layout than
+ * Mano Mobile's own jobs). Returns null on no match, same as
+ * fetchTemplateForLayout, so callers can fall back to the normal default.
+ */
+export async function fetchTemplateByName(name: string): Promise<BarcodeTemplate | null> {
+  if (!isSupabaseConfigured()) return null;
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("barcode_templates")
+    .select(COLUMNS)
+    .ilike("name", name)
+    .limit(1);
+
+  if (error) throw new Error(error.message);
+  const row = (data as TemplateRow[] | null)?.[0];
+  return row ? toTemplate(row) : null;
+}

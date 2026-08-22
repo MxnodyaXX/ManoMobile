@@ -190,8 +190,15 @@ body {
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
 select option { background: var(--bg-card); color: var(--text-primary); }
 
+/* Horizontal scroll for wide tables. Deliberately not "overflow: hidden" +
+   overflow-x — that forces overflow-y: hidden too, silently clipping any
+   rows a bounded-height container can't fit instead of letting them scroll.
+   Per the CSS overflow spec, leaving overflow-y at its initial "visible"
+   while overflow-x is "auto" makes the browser treat the visible axis as
+   "auto" too — so vertical scrolling activates on its own wherever a
+   container actually bounds this element's height, with no separate rule
+   needed for it. */
 .table-scroll {
-  overflow: hidden;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;

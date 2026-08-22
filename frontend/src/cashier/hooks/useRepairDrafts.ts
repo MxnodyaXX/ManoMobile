@@ -23,6 +23,12 @@ export interface RepairFormData {
   customerEmail: string;
 
   // Step 2
+  /** Explicit, not guessed — see detectBrand's comment in NewRepairForm.tsx
+   *  for why relying on keywords inside deviceModel alone was unreliable
+   *  (a bare model like "A10" carries no brand hint at all). Left blank,
+   *  the guess is still tried as a fallback so nothing regresses for a
+   *  model name that already spells its brand out, e.g. "iPhone 13". */
+  deviceBrand: string;
   deviceModel: string;
   deviceModelNumber: string;
   deviceIMEI: string;

@@ -22,6 +22,9 @@ import {
   useBarcodeTemplates, createTemplate, updateTemplate, deleteTemplate, setDefaultTemplate,
   LAYOUT_LABELS, type BarcodeTemplate, type BarcodeLayout,
 } from "@/lib/inventory/barcodeTemplates";
+import {
+  useDeviceFaults, createDeviceFault, updateDeviceFault, deleteDeviceFault, type DeviceFault,
+} from "@/lib/repair/deviceFaults";
 import LabelCanvas from "@/admin/components/barcode/LabelCanvas";
 import ReceiptTemplateManager from "@/admin/components/barcode/ReceiptTemplateManager";
 import type { LabelElement } from "@/lib/inventory/labelElements";
@@ -90,7 +93,7 @@ function ChipGroup({ items, selected, onToggle, hint }: {
 
 // ─── Delete Confirm ───────────────────────────────────────────────────────────
 
-function DeleteConfirm({ name, onConfirm, onClose }: { name: string; onConfirm: () => void; onClose: () => void }) {
+function DeleteConfirm({ name, message, onConfirm, onClose }: { name: string; message?: string; onConfirm: () => void; onClose: () => void }) {
   return createPortal(
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: 28, width: 360, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
@@ -104,7 +107,7 @@ function DeleteConfirm({ name, onConfirm, onClose }: { name: string; onConfirm: 
           </div>
         </div>
         <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 20, lineHeight: 1.5 }}>
-          Remove <strong style={{ color: "var(--text-primary)" }}>{name}</strong>? This won&apos;t affect existing inventory items.
+          Remove <strong style={{ color: "var(--text-primary)" }}>{name}</strong>? {message ?? "This won't affect existing inventory items."}
         </p>
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
           <button onClick={onClose} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
@@ -116,7 +119,7 @@ function DeleteConfirm({ name, onConfirm, onClose }: { name: string; onConfirm: 
   );
 }
 
-// ─── Simple Name Modal (Category only) ───────────────────────────────────────
+// ─── Simple Name Modal (single free-text field: Category, Device Fault) ─────
 
 function NameModal({ title, initial, onSave, onClose }: { title: string; initial: string; onSave: (name: string) => void; onClose: () => void }) {
   const [value, setValue] = useState(initial);
@@ -334,6 +337,124 @@ function CategoriesManager() {
       </div>
       {modal !== null && <NameModal title={modal === "new" ? "Add Category" : "Edit Category"} initial={modal === "new" ? "" : modal.name} onSave={handleSave} onClose={() => setModal(null)} />}
       {deleteTarget && <DeleteConfirm name={deleteTarget.name} onConfirm={() => { setCategories(prev => prev.filter(c => c.id !== deleteTarget.id)); setDeleteTarget(null); }} onClose={() => setDeleteTarget(null)} />}
+    </div>
+  );
+}
+
+// ─── Device Faults Manager ────────────────────────────────────────────────────
+// Admin-managed checklist shown on New Repair -> Step 2 (Device & Faults) —
+// see deviceFaults.ts / migration 20260821000002_device_faults.sql. Unlike
+// Categories/Brands/Suppliers above, this is genuinely persisted to Supabase
+// rather than in-memory state, since an admin's edits here need to actually
+// stick for every cashier, not just the current browser tab.
+
+function DeviceFaultsManager() {
+  const { faults, loading, error, configured, reload } = useDeviceFaults();
+  const toast = useToast();
+  const [search, setSearch] = useState("");
+  const [modal, setModal] = useState<DeviceFault | null | "new">(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeviceFault | null>(null);
+  const [busy, setBusy] = useState(false);
+  const filtered = faults.filter(f => f.label.toLowerCase().includes(search.toLowerCase()));
+
+  async function handleSave(label: string) {
+    const wasNew = modal === "new";
+    setBusy(true);
+    try {
+      if (modal && modal !== "new") {
+        await updateDeviceFault(modal.id, label);
+      } else {
+        const highest = faults.reduce((m, f) => Math.max(m, f.sortOrder), 0);
+        await createDeviceFault(label, highest);
+      }
+      await reload();
+      setModal(null);
+      toast.dialog("success", wasNew ? "Fault added" : "Fault updated", label);
+    } catch (e) {
+      toast.dialog("error", "Could not save", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setBusy(true);
+    try {
+      await deleteDeviceFault(deleteTarget.id);
+      await reload();
+      setDeleteTarget(null);
+    } catch (e) {
+      toast.dialog("error", "Could not remove", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {(!configured || error) && (
+        <div style={{ display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          <AlertCircle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+            {!configured
+              ? "Connect Supabase to manage the device faults checklist."
+              : `${error} — run migration 20260821000002_device_faults.sql.`}
+          </p>
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <div style={{ position: "relative", flex: 1, maxWidth: 320 }}>
+          <Search size={13} style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search faults…" style={{ ...inputStyle, paddingLeft: 34, fontSize: 12 }} />
+        </div>
+        <button onClick={() => setModal("new")} style={btnAccent}><Plus size={13} /> Add Fault</button>
+      </div>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          <thead><tr><th style={thStyle}>#</th><th style={thStyle}>Fault</th><th style={{ ...thStyle, width: 80 }}></th></tr></thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={3} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>Loading…</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={3} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>{search ? "No faults match" : "No faults added yet"}</td></tr>
+            ) : filtered.map((f, i) => (
+              <tr key={f.id}>
+                <td style={{ ...tdStyle, color: "var(--text-muted)", fontSize: 12, width: 48 }}>{i + 1}</td>
+                <td style={tdStyle}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <div style={{ width: 30, height: 30, borderRadius: 8, background: "var(--accent-dim)", border: "1px solid var(--accent-glow)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)", flexShrink: 0 }}><AlertTriangle size={13} /></div>
+                    <span style={{ fontWeight: 500 }}>{f.label}</span>
+                  </div>
+                </td>
+                <td style={tdStyle}>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button onClick={() => setModal(f)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><Edit2 size={14} /></button>
+                    <button onClick={() => setDeleteTarget(f)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}><Trash2 size={14} /></button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{filtered.length} of {faults.length} faults</div>
+      </div>
+      {modal !== null && (
+        <NameModal
+          title={modal === "new" ? "Add Fault" : "Edit Fault"}
+          initial={modal === "new" ? "" : modal.label}
+          onSave={label => { if (!busy) void handleSave(label); }}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {deleteTarget && (
+        <DeleteConfirm
+          name={deleteTarget.label}
+          message="It will disappear from the New Repair checklist; jobs that already used it keep their recorded fault text."
+          onConfirm={() => { if (!busy) void handleDelete(); }}
+          onClose={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1464,7 +1585,7 @@ function CredentialsManager() {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-type AdminTab = "Categories" | "Brands" | "Suppliers" | "Dealers" | "Agents" | "Parts" | "PartRequests" | "Barcode" | "Settings";
+type AdminTab = "Categories" | "Brands" | "Suppliers" | "Dealers" | "Agents" | "Parts" | "PartRequests" | "Faults" | "Barcode" | "Settings";
 
 const tabs: { id: AdminTab; icon: React.ComponentType<{ size?: number; strokeWidth?: number }>; label: string }[] = [
   { id: "Categories",   icon: Tag,            label: "Item Categories" },
@@ -1474,6 +1595,7 @@ const tabs: { id: AdminTab; icon: React.ComponentType<{ size?: number; strokeWid
   { id: "Agents",       icon: Building2,      label: "Repair Agents"   },
   { id: "Parts",        icon: Package,        label: "Repair Parts"    },
   { id: "PartRequests", icon: ClipboardCheck, label: "Part Requests"   },
+  { id: "Faults",       icon: AlertTriangle,  label: "Device Faults"   },
   { id: "Barcode",      icon: BarcodeIcon,    label: "Barcode"         },
   { id: "Settings",     icon: KeyRound,       label: "Settings"        },
 ];
@@ -1524,6 +1646,7 @@ export default function AdminControl() {
         {tab === "Agents"       && <AgentsManager />}
         {tab === "Parts"        && <PartsManager />}
         {tab === "PartRequests" && <PartRequestsManager />}
+        {tab === "Faults"       && <DeviceFaultsManager />}
         {tab === "Barcode"      && <BarcodeManager />}
         {tab === "Settings"     && <CredentialsManager />}
       </div>

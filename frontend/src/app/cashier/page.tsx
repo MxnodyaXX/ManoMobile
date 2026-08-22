@@ -359,7 +359,7 @@ export default function CashierPage() {
                 <div className="fade-up fade-up-2" style={{ paddingBottom: 16, borderBottom: "1px solid var(--border)" }}>
                   <p style={{ fontSize: 12, color: "var(--text-muted)" }}>All sales, repair, and return invoices — filterable by type, status, and date.</p>
                 </div>
-                <div className="fade-up fade-up-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                <div className="fade-up fade-up-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
                   <InvoiceHistory />
                 </div>
               </div>

@@ -172,15 +172,17 @@ export default function AuditLog() {
       </div>
 
       {/* Table */}
-      <div style={{ flex: 1, overflow: "auto", borderRadius: 12, border: "1px solid var(--border)" }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: "auto", borderRadius: 12, border: "1px solid var(--border)" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
-            <tr style={{ background: "var(--bg-secondary)", borderBottom: "1px solid var(--border)" }}>
+            <tr style={{ borderBottom: "1px solid var(--border)" }}>
               {["Timestamp", "Action", "Entity", "Detail", "User", "Amount"].map(h => (
                 <th key={h} style={{
+                  position: "sticky", top: 0, zIndex: 1,
                   padding: "10px 14px", textAlign: "left", fontSize: 11,
                   color: "var(--text-muted)", textTransform: "uppercase",
                   letterSpacing: "0.06em", fontWeight: 600, whiteSpace: "nowrap",
+                  background: "var(--bg-secondary)",
                 }}>{h}</th>
               ))}
             </tr>

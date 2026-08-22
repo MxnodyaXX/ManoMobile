@@ -64,6 +64,11 @@ export type LabelElement = TextElement | ImageElement | BarcodeElement | LineEle
 export interface LabelData {
   code: string;
   jobId?: string;
+  /** The job number on the originating dealer's own docket, when the device
+   *  came from another shop. Blank for Mano Mobile's own jobs — same rule
+   *  RepairJob.dealerJobNo already follows, so this token is naturally empty
+   *  on our own jobs without any extra logic. */
+  dealerJobNo?: string;
   customer?: string;
   device?: string;
   imei?: string;
@@ -77,6 +82,7 @@ export interface LabelData {
 
 export const LABEL_TOKENS: { token: string; label: string }[] = [
   { token: "{{jobId}}",       label: "Job number" },
+  { token: "{{dealerJobNo}}", label: "Dealer's job number" },
   { token: "{{code}}",        label: "Barcode value" },
   { token: "{{customer}}",    label: "Customer name" },
   { token: "{{device}}",      label: "Device brand & model" },
@@ -95,6 +101,7 @@ export const LABEL_TOKENS: { token: string; label: string }[] = [
 export function resolveTokens(text: string, data: LabelData): string {
   const map: Record<string, string | undefined> = {
     jobId: data.jobId,
+    dealerJobNo: data.dealerJobNo,
     code: data.code,
     customer: data.customer,
     device: data.device,

@@ -27,6 +27,7 @@ const MAX_IMAGE_BYTES = 200_000;
 const SAMPLE: LabelData = {
   code: "RM-011",
   jobId: "RM-011",
+  dealerJobNo: "D-4821",
   customer: "Wijaya Kumara",
   device: "Xiaomi Redmi 9C",
   imei: "356938035643809",

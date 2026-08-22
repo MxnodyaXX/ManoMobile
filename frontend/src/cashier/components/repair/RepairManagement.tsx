@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { Plus, Briefcase, AlertCircle, Clock, Hourglass, LayoutGrid, XCircle, PackageCheck, CheckCheck, FileClock, DatabaseZap } from "lucide-react";
 import { useRepair } from "@/cashier/contexts/RepairContext";
-import NewRepairForm from "./NewRepairForm";
+import NewRepairForm, { StepIndicator } from "./NewRepairForm";
 import JobsTable from "./JobsTable";
 import DraftsList from "./DraftsList";
 import type { RepairView } from "@/cashier/contexts/RepairContext";
@@ -55,6 +55,10 @@ export default function RepairManagement({ initialSection }: { initialSection?: 
   const [resuming, setResuming] = useState<RepairDraft | null>(null);
   const { backend, error: backendError } = useRepair();
   const isMobile = useIsMobile();
+  // Mirrors NewRepairForm's own step state, purely so the step indicator can
+  // render up here — next to the section card instead of stacked below it —
+  // without lifting the wizard's real state out of the component that owns it.
+  const [wizardStep, setWizardStep] = useState(1);
 
   // Allow the dashboard (or other callers) to deep-link a tab.
   useEffect(() => { if (initialSection) setActive(initialSection); }, [initialSection]);
@@ -159,43 +163,60 @@ export default function RepairManagement({ initialSection }: { initialSection?: 
         </div>
       )}
 
-      {/* Active section card */}
-      <div className="fade-up fade-up-2" style={{
-        display: "flex", alignItems: "center", gap: 10,
-        padding: "14px 18px",
-        background: "var(--bg-card)",
-        border: "1px solid var(--border)",
-        borderRadius: 14,
-        width: "fit-content",
-      }}>
-        <div style={{
-          width: 34, height: 34, borderRadius: 9,
-          background: "var(--accent-dim)",
-          border: "1px solid var(--accent-glow)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          color: "var(--accent)",
+      {/* Active section card — only stands alone for New Repair (paired with
+          the step indicator, same row) and Drafts. Every jobs-list view
+          renders its own version of this card up against its search bar
+          instead — see JobsTable's icon/description props below. */}
+      {(active === "New Repair" || active === "Drafts") && (
+        <div className="fade-up fade-up-2" style={{
+          display: "flex", flexDirection: isMobile ? "column" : "row",
+          alignItems: isMobile ? "stretch" : "center", gap: 16,
         }}>
-          <ActiveIcon size={15} strokeWidth={2.2} />
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "14px 18px",
+            background: "var(--bg-card)",
+            border: "1px solid var(--border)",
+            borderRadius: 14,
+            width: "fit-content", flexShrink: 0,
+          }}>
+            <div style={{
+              width: 34, height: 34, borderRadius: 9,
+              background: "var(--accent-dim)",
+              border: "1px solid var(--accent-glow)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "var(--accent)",
+            }}>
+              <ActiveIcon size={15} strokeWidth={2.2} />
+            </div>
+            <div>
+              <h2 className="heading" style={{ fontSize: 15, color: "var(--text-primary)" }}>
+                {active}
+              </h2>
+              <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 1 }}>
+                {sectionDescriptions[active]}
+              </p>
+            </div>
+          </div>
+          {active === "New Repair" && (
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <StepIndicator current={wizardStep} />
+            </div>
+          )}
         </div>
-        <div>
-          <h2 className="heading" style={{ fontSize: 15, color: "var(--text-primary)" }}>
-            {active}
-          </h2>
-          <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 1 }}>
-            {sectionDescriptions[active]}
-          </p>
-        </div>
-      </div>
+      )}
 
       {/* Content */}
-      <div className="fade-up fade-up-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div className="fade-up fade-up-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
         {active === "New Repair" ? (
-          <NewRepairForm initialDraft={resuming} />
+          <NewRepairForm initialDraft={resuming} onStepChange={setWizardStep} />
         ) : active === "Drafts" ? (
           <DraftsList onResume={(d) => { setResuming(d); setActive("New Repair"); }} />
         ) : (
           <JobsTable
             title={active}
+            icon={ActiveIcon}
+            description={sectionDescriptions[active]}
             view={activeSection.view ?? "All"}
           />
         )}

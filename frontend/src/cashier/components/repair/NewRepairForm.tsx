@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { previewNextJobNo, checkDealerJobNo, type DealerJobNoCheck } from "@/lib/repair/api";
-import { useRepair, IN_HOUSE_DEALER, type ConditionGrade, type DeviceConditionMap, type JobPriority, type RepairJob, type RepairDealer } from "@/cashier/contexts/RepairContext";
+import { useRepair, isInHouseDealer, IN_HOUSE_DEALER, type ConditionGrade, type DeviceConditionMap, type JobPriority, type RepairJob, type RepairDealer } from "@/cashier/contexts/RepairContext";
 import { useWarranty, effectiveStatus } from "@/cashier/contexts/WarrantyContext";
-import { usePersistentState } from "@/cashier/hooks/usePersistentState";
 import { useRepairDrafts, newDraftId, fmtSaved, type RepairDraft, type RepairFormData as FormData } from "@/cashier/hooks/useRepairDrafts";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
 import JobReceiptPrintable from "@/cashier/components/repair/JobReceiptPrintable";
@@ -15,7 +14,8 @@ import { useToast } from "@/lib/ui/toast";
 import { useTechnicians, type Technician } from "@/lib/repair/technicians";
 import Combobox from "@/cashier/components/shared/Combobox";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
-import { lookupModelNumber } from "@/cashier/data/modelNumbers";
+import { lookupModelNumber, normaliseModelNumber, type ModelInfo } from "@/cashier/data/modelNumbers";
+import { useDeviceFaults, FALLBACK_FAULTS } from "@/lib/repair/deviceFaults";
 import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2, AlertCircle, FileClock } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -44,22 +44,13 @@ const TERMS_VERSION = "v1.0";
 
 const RECEIVED_ITEMS = ["SIM Card", "Back Cover", "Charger", "Data Cable", "Earphones", "Memory Card", "SIM Tray", "Battery", "Box", "Other Accessories"];
 
-const COMMON_FAULTS = [
-  "Screen Cracked / Broken",
-  "Screen Not Displaying",
-  "Touch Not Working",
-  "Battery Draining Fast",
-  "Won't Turn On / Dead",
-  "Charging Port Faulty",
-  "Speaker / Mic Issue",
-  "Camera Not Working",
-  "Software / Bootloop",
-  "Water Damage",
-  "Overheating",
-  "Signal / Network Issue",
-];
-
-const DEVICE_MODELS: string[] = [];
+// The Device Faults checklist is now admin-managed (Admin Control -> Device
+// Faults) rather than hardcoded here — see deviceFaults.ts. FALLBACK_FAULTS
+// only covers the gap before that loads (or if Supabase isn't configured).
+//
+// Device models work the same way as faults conceptually, but with no admin
+// screen of their own — the shop's own job history *is* the catalogue.
+// See historicalModels/modelNumberLookup below.
 
 // ─── Step Indicator ───────────────────────────────────────────────────────────
 
@@ -71,9 +62,9 @@ const STEPS = [
   { num: 5, label: "Evidence & Sign" },
 ];
 
-function StepIndicator({ current }: { current: number }) {
+export function StepIndicator({ current }: { current: number }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 18 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
       {STEPS.map((step, idx) => {
         const isDone = current > step.num;
         const isActive = current === step.num;
@@ -167,16 +158,28 @@ type RequiredField =
   | "jobNumber"                          // step 1, only when not auto-generated
   | "dealerJobNo"                        // step 1, only for another shop's device
   | "customerName" | "customerContact"   // step 1
-  | "deviceModel"                        // step 2
+  | "deviceModel" | "deviceBrand"        // step 2
   | "estimatedCost"                      // step 3
   | "termsAccepted";                     // step 5
 
 // Intake photos and the customer signature are deliberately absent: they are
 // strongly recommended evidence, but a job can be booked in without them.
 // Terms acceptance is the one thing step 5 blocks on.
+//
+// dealerJobNo is deliberately NOT required, even for another shop's device —
+// some dealers just don't hand over their own number for a given drop-off.
+// Our own RM-nnn is what actually identifies the job either way; theirs, when
+// given, is only ever an extra cross-reference (still clash-checked while
+// typing — see dealerNoCheck — that part is unaffected by this).
+//
+// deviceBrand is required — not just guessed from deviceModel on save — so a
+// bare model number like "TA-1174" (no brand hint in the text at all) can
+// never silently end up filed as "Other"; the cashier has to actually pick
+// or type one. deviceModel already had full error-UI wired up but was never
+// actually enforced here — that looks like an oversight, fixed alongside it.
 const REQUIRED_BY_STEP: Record<number, RequiredField[]> = {
-  1: ["jobNumber", "dealerJobNo", "customerName", "customerContact"],
-  2: [],
+  1: ["jobNumber", "customerName", "customerContact"],
+  2: ["deviceModel", "deviceBrand"],
   3: ["estimatedCost"],
   5: ["termsAccepted"],
 };
@@ -187,6 +190,7 @@ const FIELD_LABELS: Record<RequiredField, string> = {
   customerName: "Full Name",
   customerContact: "Contact Number",
   deviceModel: "Device Model",
+  deviceBrand: "Device Brand",
   estimatedCost: "Estimated Repair Cost",
   termsAccepted: "Terms Acceptance",
 };
@@ -340,13 +344,13 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
         {/* ── The dealer's own number, when the device came from another shop ── */}
         {dealer && !dealer.inHouse && (
           <div style={{ marginBottom: 14 }} data-field="dealerJobNo" className={bad("dealerJobNo") ? "field-shake" : undefined}>
-            <label style={labelStyle}>{dealer.name}&apos;s Job Number</label>
+            <label style={labelStyle}>{dealer.name}&apos;s Job Number (Optional)</label>
             <input
               // Red the moment a clash is known, without waiting for a failed
               // Next — the number is wrong now, not when the wizard says so.
               style={{ ...inputStyle, ...(bad("dealerJobNo") || dealerNoCheck?.existing ? invalidStyle : {}) }}
               value={data.dealerJobNo}
-              placeholder="e.g. 54000 — the number on their docket"
+              placeholder="e.g. 54000 — leave blank if they didn't give you one"
               onChange={(e) => onChange({ dealerJobNo: e.target.value })}
             />
             {/* Caught while typing, not at save: correcting a digit here beats
@@ -386,11 +390,11 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
               <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5, lineHeight: 1.5 }}>
                 {checkingDealerNo
                   ? "Checking…"
-                  : <>Searchable alongside our own number, so the phone can be found by whichever one is quoted.
-                      Two dealers may use the same number; it only has to be unique within {dealer.name}.</>}
+                  : <>Not every dealer hands one over — leave it blank and the job is still tracked under our own
+                      number below. When given, it&apos;s searchable alongside ours, so the phone can be found by
+                      whichever one is quoted. Two dealers may use the same number; it only has to be unique within {dealer.name}.</>}
               </div>
             )}
-            <FieldError show={bad("dealerJobNo") && !dealerNoCheck?.existing}>Enter the number on {dealer.name}&apos;s docket</FieldError>
           </div>
         )}
 
@@ -465,24 +469,41 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
 
 // ─── Step 2: Device & Faults ──────────────────────────────────────────────────
 
-function Step2({ data, onChange, isMobile, models, onAddModel, errors }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; models: string[]; onAddModel: (m: string) => void; errors: RequiredField[] }) {
+function Step2({ data, onChange, isMobile, models, onAddModel, errors, modelNumberLookup, modelBrandLookup, brands, onAddBrand }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; models: string[]; onAddModel: (m: string) => void; errors: RequiredField[]; modelNumberLookup: Map<string, ModelInfo>; modelBrandLookup: Map<string, string>; brands: string[]; onAddBrand: (b: string) => void }) {
   const bad = (f: RequiredField) => errors.includes(f);
   const toggleItem = (list: string[], item: string) =>
     list.includes(item) ? list.filter((i) => i !== item) : [...list, item];
 
-  // When a model number is entered, try to resolve the device model.
+  // Admin-managed (Admin Control -> Device Faults) — falls back to the fixed
+  // list while it's still loading, when Supabase isn't configured, or if
+  // nothing's been seeded yet, so the checklist is never just empty.
+  const { faults: faultRows } = useDeviceFaults();
+  const commonFaults = faultRows.length > 0 ? faultRows.map(f => f.label) : FALLBACK_FAULTS;
+
+  // When a model number is entered, try to resolve the device model — the
+  // small offline table first (currently empty, but free to extend), then
+  // whatever this shop's own past jobs have already recorded for that
+  // number.
   const [lookupResult, setLookupResult] = useState<string | null>(null);
   const handleModelNumber = (raw: string) => {
     onChange({ deviceModelNumber: raw });
-    const hit = lookupModelNumber(raw);
+    const hit = lookupModelNumber(raw) ?? modelNumberLookup.get(normaliseModelNumber(raw)) ?? null;
     if (hit) {
-      onChange({ deviceModelNumber: raw, deviceModel: hit.model });
+      onChange({ deviceModelNumber: raw, deviceModel: hit.model, deviceBrand: hit.brand });
       // make sure the resolved model is in the combobox list
       if (!models.includes(hit.model)) onAddModel(hit.model);
       setLookupResult(`${hit.brand} ${hit.model}`);
     } else {
       setLookupResult(raw.trim() ? "no-match" : null);
     }
+  };
+
+  /** Picking (or typing) a model that's already got a known brand fills it
+   *  in automatically — only when Brand is still blank, so this never
+   *  overwrites something the cashier already chose on purpose. */
+  const handleDeviceModel = (m: string) => {
+    const knownBrand = modelBrandLookup.get(m);
+    onChange(knownBrand && !data.deviceBrand.trim() ? { deviceModel: m, deviceBrand: knownBrand } : { deviceModel: m });
   };
 
   return (
@@ -518,9 +539,21 @@ function Step2({ data, onChange, isMobile, models, onAddModel, errors }: { data:
               onAddOption={onAddModel}
               placeholder="Type or select a model…"
               inputStyle={bad("deviceModel") ? invalidStyle : undefined}
-              onChange={(m) => onChange({ deviceModel: m })}
+              onChange={handleDeviceModel}
             />
             <FieldError show={bad("deviceModel")}>Select or type the device model</FieldError>
+          </div>
+          <div data-field="deviceBrand" className={bad("deviceBrand") ? "field-shake" : undefined}>
+            <label style={labelStyle}>Device Brand</label>
+            <Combobox
+              value={data.deviceBrand}
+              options={brands}
+              onAddOption={onAddBrand}
+              placeholder="Auto-fills where known, or pick/type one…"
+              inputStyle={bad("deviceBrand") ? invalidStyle : undefined}
+              onChange={(b) => onChange({ deviceBrand: b })}
+            />
+            <FieldError show={bad("deviceBrand")}>Select or type the device brand</FieldError>
           </div>
           <div>
             <label style={labelStyle}>IMEI Number</label>
@@ -568,7 +601,7 @@ function Step2({ data, onChange, isMobile, models, onAddModel, errors }: { data:
       <div style={panelStyle}>
         <div style={sectionHeaderStyle}>🔧 Device Faults</div>
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 6, marginBottom: 18 }}>
-          {COMMON_FAULTS.map((fault) => {
+          {commonFaults.map((fault) => {
             const checked = data.faultCheckboxes.includes(fault);
             const toggle = () => onChange({ faultCheckboxes: toggleItem(data.faultCheckboxes, fault) });
             return (
@@ -611,11 +644,16 @@ function Step2({ data, onChange, isMobile, models, onAddModel, errors }: { data:
 
 // ─── Step 3: Costs & Job Info ─────────────────────────────────────────────────
 
-function Step3({ data, onChange, isMobile, errors }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; errors: RequiredField[] }) {
+function Step3({ data, onChange, isMobile, errors, dealers }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; errors: RequiredField[]; dealers: RepairDealer[] }) {
   const bad = (f: RequiredField) => errors.includes(f);
   const estimated = parseFloat(data.estimatedCost) || 0;
   const advance = parseFloat(data.advancePaid) || 0;
   const balance = estimated - advance;
+  // Another shop's device is billed on their own docket — the cost isn't
+  // required here the way it is for a job we're quoting and charging for
+  // ourselves. Mirrors the same check in isBlank().
+  const picked = dealers.find(d => String(d.id) === data.dealerId);
+  const fromAnotherShop = !!picked && !picked.inHouse;
 
   return (
     <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
@@ -624,7 +662,7 @@ function Step3({ data, onChange, isMobile, errors }: { data: FormData; onChange:
         <div style={sectionHeaderStyle}>💰 Cost & Payment</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div data-field="estimatedCost" className={bad("estimatedCost") ? "field-shake" : undefined}>
-            <label style={labelStyle}>Estimated Repair Cost (LKR) *</label>
+            <label style={labelStyle}>Estimated Repair Cost (LKR){fromAnotherShop ? "" : " *"}</label>
             <input
               style={{ ...inputStyle, ...(bad("estimatedCost") ? invalidStyle : {}) }}
               type="number"
@@ -633,7 +671,13 @@ function Step3({ data, onChange, isMobile, errors }: { data: FormData; onChange:
               value={data.estimatedCost}
               onChange={(e) => onChange({ estimatedCost: e.target.value })}
             />
-            <FieldError show={bad("estimatedCost")}>Enter an estimated cost (0 if not yet quoted)</FieldError>
+            {fromAnotherShop ? (
+              <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                Optional — this device is billed on {picked?.name ?? "the dealer"}'s own docket.
+              </p>
+            ) : (
+              <FieldError show={bad("estimatedCost")}>Enter an estimated cost (0 if not yet quoted)</FieldError>
+            )}
           </div>
           <div>
             <label style={labelStyle}>Advance Received (LKR)</label>
@@ -1060,7 +1104,7 @@ function Step5({ data, onChange, isMobile, errors }: { data: FormData; onChange:
 const INITIAL: FormData = {
   dealerId: "", jobNumber: "", autoJobNumber: true, dealerJobNo: "",
   customerName: "", customerNIC: "", customerContact: "", customerEmail: "",
-  deviceModel: "", deviceModelNumber: "", deviceIMEI: "", receivedItems: [], faultCheckboxes: [], faultDescription: "",
+  deviceBrand: "", deviceModel: "", deviceModelNumber: "", deviceIMEI: "", receivedItems: [], faultCheckboxes: [], faultDescription: "",
   estimatedCost: "", advancePaid: "", paymentMethod: "", jobPriority: "Normal", jobNotes: "",
   assignedRepairman: "", estimatedCompletion: "",
   condition: { front: "Good", back: "Good", frame: "Good", camera: "Good", ports: "Good", buttons: "Good" },
@@ -1070,6 +1114,11 @@ const INITIAL: FormData = {
 /** A blank wizard is never worth saving as a draft. */
 const isPristine = (f: FormData) => JSON.stringify(f) === JSON.stringify(INITIAL);
 
+// Fallback only, for when the cashier leaves Device Brand blank — guessing
+// from keywords inside the model text works for something like "iPhone 13"
+// but silently gives up on a bare model number like "A10" (Samsung, Oppo and
+// half a dozen other brands all sell an "A10"), which is exactly why Device
+// Brand is now its own field instead of the only source of truth.
 function detectBrand(model: string): string {
   const m = model.toLowerCase();
   if (m.includes("iphone") || m.includes("ipad") || m.includes("macbook")) return "Apple";
@@ -1084,13 +1133,17 @@ function detectBrand(model: string): string {
   return "Other";
 }
 
+/** A sensible floor for the Device Brand combobox before this shop has any
+ *  job history of its own to draw on — same names detectBrand recognises. */
+const BRAND_OPTIONS = ["Apple", "Samsung", "Xiaomi", "OPPO", "OnePlus", "Realme", "Huawei", "Vivo", "Nokia", "Other"];
+
 /**
  * `initialDraft` resumes a saved intake — the Drafts section passes one in and
  * switches to this tab, and the wizard opens on the step it was left at. Photos
  * are never part of a draft, so they always start empty.
  */
-export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () => void; initialDraft?: RepairDraft | null }) {
-  const { addJob, updateJob, dealers } = useRepair();
+export default function NewRepairForm({ onClose, initialDraft, onStepChange }: { onClose?: () => void; initialDraft?: RepairDraft | null; onStepChange?: (step: number) => void }) {
+  const { addJob, updateJob, dealers, jobs } = useRepair();
   // Shown in the job-number box so the cashier can see what will be assigned.
   // Advisory only — the sequence, not this value, decides on save.
   const [nextJobNo, setNextJobNo] = useState<string | null>(null);
@@ -1104,8 +1157,16 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
   const { technicians, loading: techLoading } = useTechnicians();
   const toast = useToast();
   const { warranties } = useWarranty();
-  const [customModels, setCustomModels] = usePersistentState<string[]>("mano_custom_models", []);
+  // A brand-new model typed this session, before it's saved as a real job —
+  // kept in memory only (not persisted) so it's immediately reusable while
+  // filling in several intakes back to back; once the job saves, it's part
+  // of `jobs` and shows up in historicalModels on its own from then on.
+  const [sessionModels, setSessionModels] = useState<string[]>([]);
   const [step, setStep] = useState(initialDraft?.step ?? 1);
+  // The step indicator now renders in RepairManagement's header row (next to
+  // the section card, not stacked below it) — this is how it finds out which
+  // step to highlight, since `step` itself stays owned here.
+  useEffect(() => { onStepChange?.(step); }, [step, onStepChange]);
   const [form, setForm] = useState<FormData>(
     initialDraft ? { ...INITIAL, ...initialDraft.form, intakePhotos: [] } : INITIAL,
   );
@@ -1170,13 +1231,70 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
   // Resuming keeps the draft's own id, so edits update it instead of piling up copies.
   const [draftId, setDraftId] = useState(() => initialDraft?.id ?? newDraftId());
 
-  // Base catalogue + any models the user has typed/saved before.
-  const modelOptions = [...new Set([...DEVICE_MODELS, ...customModels])].sort();
+  // Every device model any past job has recorded — the dropdown's catalogue
+  // is the shop's own history, not a hardcoded list. jobs is already
+  // in-memory (RepairContext), so this is a client-side derive, not a
+  // separate query.
+  const historicalModels = useMemo(
+    () => Array.from(new Set(jobs.map(j => j.model).filter((m): m is string => !!m?.trim()))),
+    [jobs],
+  );
+  const modelOptions = useMemo(
+    () => Array.from(new Set([...historicalModels, ...sessionModels])).sort(),
+    [historicalModels, sessionModels],
+  );
   const addModel = (m: string) => {
     const v = m.trim();
-    if (v && !DEVICE_MODELS.includes(v) && !customModels.includes(v)) {
-      setCustomModels((prev) => [...prev, v]);
+    if (v && !historicalModels.includes(v) && !sessionModels.includes(v)) {
+      setSessionModels((prev) => [...prev, v]);
     }
+  };
+
+  // Model-number → brand/model, learned the same way: whichever job most
+  // recently recorded a given model number wins (jobs is ordered newest
+  // first), so a number that was mis-typed once and corrected later doesn't
+  // keep auto-filling the wrong device.
+  const modelNumberLookup = useMemo(() => {
+    const map = new Map<string, ModelInfo>();
+    for (const j of jobs) {
+      const raw = j.modelNumber?.trim();
+      if (!raw) continue;
+      const key = normaliseModelNumber(raw);
+      if (!map.has(key)) map.set(key, { brand: j.brand, model: j.model });
+    }
+    return map;
+  }, [jobs]);
+
+  // Device model → brand, for suggesting a brand the moment a known model is
+  // picked. Self-healing: a model's brand only ever gets recorded as "Other"
+  // when nobody has typed the real one in yet, so the first *real* brand
+  // found for that model (jobs is newest-first) always wins over "Other" —
+  // one correct entry fixes the suggestion for every job after it, even
+  // though older rows for the same model stay stuck at whatever they were
+  // saved with.
+  const modelBrandLookup = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const j of jobs) {
+      if (!j.model?.trim()) continue;
+      const cur = map.get(j.model);
+      if (cur === undefined) map.set(j.model, j.brand);
+      else if (cur === "Other" && j.brand && j.brand !== "Other") map.set(j.model, j.brand);
+    }
+    return map;
+  }, [jobs]);
+
+  const historicalBrands = useMemo(
+    () => Array.from(new Set(jobs.map(j => j.brand).filter((b): b is string => !!b?.trim() && b !== "Other"))),
+    [jobs],
+  );
+  const [sessionBrands, setSessionBrands] = useState<string[]>([]);
+  const brandOptions = useMemo(
+    () => Array.from(new Set([...BRAND_OPTIONS, ...historicalBrands, ...sessionBrands])).sort(),
+    [historicalBrands, sessionBrands],
+  );
+  const addBrand = (b: string) => {
+    const v = b.trim();
+    if (v && !brandOptions.includes(v)) setSessionBrands((prev) => [...prev, v]);
   };
 
   // Save the in-progress intake shortly after each edit. Debounced so a burst of
@@ -1220,16 +1338,17 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
     // The job number is only required when the cashier is supplying it. With
     // auto-generate ticked the database picks it, so an empty box is correct.
     if (f === "jobNumber") return !form.autoJobNumber && form.jobNumber.trim() === "";
-    // Only asked for when the device belongs to another shop; our own walk-ins
-    // have no dealer docket to copy a number from.
     const picked = dealers.find(x => String(x.id) === form.dealerId);
     const fromAnotherShop = !!picked && !picked.inHouse;
-    if (f === "dealerJobNo") return fromAnotherShop && form.dealerJobNo.trim() === "";
     // The customer panel is hidden for another shop's device, so requiring
     // fields nobody can see would trap the wizard on a step with nothing to fix.
     if (f === "customerName" || f === "customerContact") {
       if (fromAnotherShop) return false;
     }
+    // Another shop's device is billed on their own docket, not ours — the
+    // cost isn't necessarily known (or ours to quote) at intake, so it isn't
+    // required the way it is for a job we're estimating and charging for.
+    if (f === "estimatedCost" && fromAnotherShop) return false;
     const v = form[f];
     if (Array.isArray(v)) return v.length === 0;
     if (typeof v === "boolean") return !v;
@@ -1302,7 +1421,7 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
       // Optional: blank stays undefined so the column is NULL rather than an
       // empty string, which would look like an address the send path could use.
       customerEmail: form.customerEmail.trim() || undefined,
-      brand: detectBrand(form.deviceModel),
+      brand: form.deviceBrand.trim() || detectBrand(form.deviceModel),
       model: form.deviceModel,
       modelNumber: form.deviceModelNumber || undefined,
       issue: issueFaults,
@@ -1340,8 +1459,6 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
         }
       }
 
-      toast.dialog("success", `Job ${job.id} created`, `${job.customerName} — ${job.brand} ${job.model}. Print the receipt or hand over the job number.`);
-      setCreatedJob(job);
       // The device tag prints itself — no click needed. True zero-dialog
       // silence depends on the browser being launched with silent/kiosk
       // printing to the label printer; this just removes every step on our
@@ -1349,6 +1466,18 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
       setAutoPrintJob(job);
       // The intake is now a real job — its draft has served its purpose.
       removeDraft(draftId);
+
+      if (dealer && !dealer.inHouse) {
+        // An outside dealer's own docket is what they hand the customer —
+        // our Job Receipt popup doesn't apply to their intake, so skip it
+        // and go straight back to a blank wizard instead of waiting on a
+        // "+ New Repair" click from a popup that never shows.
+        toast.dialog("success", `Job ${job.id} created`, `${job.customerName} — ${job.brand} ${job.model}. The device tag will print automatically.`);
+        startNewRepair();
+      } else {
+        toast.dialog("success", `Job ${job.id} created`, `${job.customerName} — ${job.brand} ${job.model}. Print the receipt or hand over the job number.`);
+        setCreatedJob(job);
+      }
     } catch (e) {
       // The wizard stays filled in and the draft survives, so nothing is lost
       // and the cashier can simply press Create again.
@@ -1377,13 +1506,6 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
         fontFamily: "'Plus Jakarta Sans', sans-serif",
       }}
     >
-      
-
-      {/* Step Indicator */}
-      <div style={{ padding: isMobile ? "14px 16px 8px" : "20px 28px 10px", flexShrink: 0 }}>
-        <StepIndicator current={step} />
-      </div>
-
       {/* Active-warranty alert — surfaced once IMEI / phone is known */}
       {existingWarranty && (
         <div style={{ margin: isMobile ? "0 16px 10px" : "0 28px 10px", display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 14px", borderRadius: 10, background: "rgba(167,139,250,0.08)", border: "1px solid rgba(167,139,250,0.3)" }}>
@@ -1399,8 +1521,8 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
       {/* Step Content */}
       <div ref={contentRef} className="repair-wizard" style={{ flex: isMobile ? "none" : 1, padding: isMobile ? "0 16px" : "0 28px", minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>
         {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} dealers={dealers} errors={errors} nextJobNo={nextJobNo} dealerNoCheck={dealerNoCheck} checkingDealerNo={checkingDealerNo} />}
-        {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} models={modelOptions} onAddModel={addModel} errors={errors} />}
-        {step === 3 && <Step3 data={form} onChange={update} isMobile={isMobile} errors={errors} />}
+        {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} models={modelOptions} onAddModel={addModel} errors={errors} modelNumberLookup={modelNumberLookup} modelBrandLookup={modelBrandLookup} brands={brandOptions} onAddBrand={addBrand} />}
+        {step === 3 && <Step3 data={form} onChange={update} isMobile={isMobile} errors={errors} dealers={dealers} />}
         {step === 4 && <Step4 data={form} onChange={update} isMobile={isMobile} technicians={technicians} techLoading={techLoading} />}
         {step === 5 && <Step5 data={form} onChange={update} isMobile={isMobile} errors={errors} />}
       </div>
@@ -1519,6 +1641,8 @@ export default function NewRepairForm({ onClose, initialDraft }: { onClose?: () 
           silent
           variant="repair"
           jobId={autoPrintJob.id}
+          dealerJobNo={autoPrintJob.dealerJobNo}
+          outsideDealer={!isInHouseDealer(dealers, autoPrintJob)}
           code={autoPrintJob.id}
           title={`${autoPrintJob.brand} ${autoPrintJob.model}`.trim()}
           subtitle={autoPrintJob.customerName}

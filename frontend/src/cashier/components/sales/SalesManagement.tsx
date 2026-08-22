@@ -178,7 +178,7 @@ export default function SalesManagement() {
       </div>
 
       {/* Content */}
-      <div className="fade-up fade-up-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div className="fade-up fade-up-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
         {active === "Accessories Sales" && <AccessorySales />}
         {active === "Mobile Sales"      && <MobileSales />}
         {active === "Repair Sales"      && <RepairSales />}

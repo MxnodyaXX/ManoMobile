@@ -8,7 +8,13 @@ import { useInventory } from "@/cashier/contexts/InventoryContext";
 import { printLabelNode } from "@/cashier/utils/printLabel";
 import { SHOP_DETAILS } from "@/lib/shop";
 import LabelRender from "@/cashier/components/shared/LabelRender";
-import { fetchTemplateForLayout, type BarcodeTemplate } from "@/lib/inventory/barcodeTemplates";
+import { fetchTemplateForLayout, fetchTemplateByName, type BarcodeTemplate } from "@/lib/inventory/barcodeTemplates";
+
+/** The exact name of the label template used for a repair job whose dealer
+ *  is someone other than Mano Mobile itself — must match the template's
+ *  saved name in Admin -> Barcode exactly (case-insensitive). Falls back to
+ *  the normal default "repair" template if no template has this name yet. */
+const OUTSIDE_DEALER_TEMPLATE_NAME = "RepairJobTagOutsideDealers";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 const PX_PER_MM = 96 / 25.4;
@@ -37,6 +43,14 @@ interface BarcodeLabelModalProps {
   variant?: "simple" | "repair" | "part";
   /** Job number for the repair tag — printed large, top-left. */
   jobId?: string;
+  /** The originating dealer's own job number, for a repair tag on a device
+   *  that came from another shop — blank for Mano Mobile's own jobs. */
+  dealerJobNo?: string;
+  /** True when this job's dealer is someone other than Mano Mobile itself —
+   *  picks the OUTSIDE_DEALER_TEMPLATE_NAME design instead of the normal
+   *  default "repair" template, when one exists. Only meaningful for
+   *  variant="repair". */
+  outsideDealer?: boolean;
   /**
    * Skip the confirm-and-click dialog entirely: render the label off-screen,
    * print it the moment the auto-fit sizing settles, then call onClose.
@@ -63,7 +77,7 @@ interface BarcodeLabelModalProps {
  * until it fits. Runs for both axes since a narrower label (38mm) can
  * overflow sideways even when a wider one (50mm) had enough slack.
  */
-export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, silent = false, onClose }: BarcodeLabelModalProps) {
+export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, outsideDealer = false, silent = false, onClose }: BarcodeLabelModalProps) {
   const { barcodeSettings: s } = useInventory();
   const labelRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -79,12 +93,18 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
   const [designLoaded, setDesignLoaded] = useState(false);
   useEffect(() => {
     let active = true;
-    fetchTemplateForLayout(variant)
+    // An outside dealer's job tries its own named template first — falling
+    // through to the normal default whenever that template doesn't exist
+    // (not yet created, renamed, or deleted) so nothing breaks either way.
+    const lookup = variant === "repair" && outsideDealer
+      ? fetchTemplateByName(OUTSIDE_DEALER_TEMPLATE_NAME).then(t => t ?? fetchTemplateForLayout(variant))
+      : fetchTemplateForLayout(variant);
+    lookup
       .then(t => { if (active && t && t.elements.length > 0) setDesign(t); })
       .catch(() => { /* built-in layout applies */ })
       .finally(() => { if (active) setDesignLoaded(true); });
     return () => { active = false; };
-  }, [variant]);
+  }, [variant, outsideDealer]);
 
   /**
    * The repair tag and part label are each designed for their own dedicated
@@ -246,6 +266,7 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
         data={{
           code,
           jobId: jobId ?? code,
+          dealerJobNo: dealerJobNo ?? "",
           customer: subtitle ?? "",
           device: title ?? "",
           title: title ?? "",

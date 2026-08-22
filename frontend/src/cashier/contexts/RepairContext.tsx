@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef, ReactNode, type Dispatch, type SetStateAction } from "react";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { notifyJobEvent } from "@/lib/sms/notify";
+import type { JobSmsEvent } from "@/lib/sms/templates";
 import { notifyJobEmail } from "@/lib/email/notify";
 import { rulesForTechnician } from "@/lib/settings/staffRules";
 import { fetchJobs, fetchDealers, insertJob, patchJob, upsertDealer, deleteDealer, claimJob as claimJobRow, UNASSIGNED_TECHNICIAN } from "@/lib/repair/api";
@@ -347,6 +348,17 @@ export function RepairProvider({ children }: { children: ReactNode }) {
   const dealersRef = useRef(dealers);
   useEffect(() => { dealersRef.current = dealers; }, [dealers]);
 
+  // An outside dealer's job isn't texted through the customer lifecycle —
+  // the dealer booked the device in and deals with the end customer
+  // themselves, so a stream of automated "your repair is..." texts to
+  // whatever phone number is on that job isn't ours to send. Only Mano
+  // Mobile's own customers get it. dealersRef (not `dealers`) so this stays
+  // callable from useCallbacks below without adding a dealers dependency.
+  const notify = useCallback((event: JobSmsEvent, job: RepairJob) => {
+    if (!isInHouseDealer(dealersRef.current, job)) return;
+    notifyJobEvent(event, job);
+  }, []);
+
   const load = useCallback(async () => {
     if (!configured) return;
     try {
@@ -378,12 +390,12 @@ export function RepairProvider({ children }: { children: ReactNode }) {
     const created = await insertJob(partial);
     setJobs(prev => [created, ...prev]);
     // "We have your device, here is the job number."
-    notifyJobEvent("created", created);
+    notify("created", created);
     // The same event by email, where the receipt has room to be a receipt.
     // Only fires when an address was given, and is a no-op otherwise.
     notifyJobEmail("created", created);
     return created;
-  }, [configured, jobs]);
+  }, [configured, jobs, notify]);
 
   /**
    * Optimistic: the row updates on screen immediately, then reconciles with what
@@ -398,13 +410,13 @@ export function RepairProvider({ children }: { children: ReactNode }) {
     const before = jobs.find(j => j.id === id);
     if (before && changes.status && changes.status !== before.status) {
       const after: RepairJob = { ...before, ...changes };
-      if (changes.status === "Issued" && before.status === "Non-Issued") notifyJobEvent("started", after);
-      else if (changes.status === "Pending") notifyJobEvent("paused", after);
+      if (changes.status === "Issued" && before.status === "Non-Issued") notify("started", after);
+      else if (changes.status === "Pending") notify("paused", after);
       else if (changes.status === "Completed") {
         // The "repaired and ready to collect" message is false for a Return —
         // nothing was repaired. Those customers get a call, not a template.
         if (after.completionType !== "Return") {
-          notifyJobEvent("finished", after);
+          notify("finished", after);
           notifyJobEmail("finished", after);
         }
       }
@@ -428,7 +440,7 @@ export function RepairProvider({ children }: { children: ReactNode }) {
       void load();
       return { ok: false, error: message };
     }
-  }, [configured, load, jobs]);
+  }, [configured, load, jobs, notify]);
 
   /**
    * Take an unassigned job. The database decides the winner (the update is
@@ -467,13 +479,13 @@ export function RepairProvider({ children }: { children: ReactNode }) {
       setJobs(prev => prev.map(j => (j.id === id ? claimed : j)));
       // Claiming *is* starting the repair, and it bypasses updateJob — so the
       // customer would otherwise never hear that work began.
-      notifyJobEvent("started", claimed);
+      notify("started", claimed);
       return "claimed";
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       return "error";
     }
-  }, [configured, jobs, load]);
+  }, [configured, jobs, load, notify]);
 
   /**
    * Accepts a value or an updater, like useState, and works out what changed so

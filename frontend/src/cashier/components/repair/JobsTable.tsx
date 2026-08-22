@@ -77,18 +77,23 @@ const plain = { fontSize: 12.5, color: "var(--text-primary)" } as const;
 const COLUMNS: Record<ColId, ColSpec> = {
   jobId: {
     label: "Job ID",
-    // The dealer's own number sits under ours, the way the phone number sits
-    // under the customer name: a dealer ringing about a device quotes their
-    // number, and staff need to match it without opening the job.
+    // For an outside dealer's job, their own number is what gets quoted over
+    // the phone and matched against their docket — so it leads, bold, with
+    // our RM number underneath as the secondary reference. A job with no
+    // dealer number (Mano Mobile's own) just shows the RM number as before.
     render: j => (
-      <>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)" }}>{j.id}</span>
-        {j.dealerJobNo && (
-          <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }} title="The dealer's own job number">
+      j.dealerJobNo ? (
+        <>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)" }} title="The dealer's own job number">
             #{j.dealerJobNo}
+          </span>
+          <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }} title="Our job number">
+            {j.id}
           </p>
-        )}
-      </>
+        </>
+      ) : (
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)" }}>{j.id}</span>
+      )
     ),
   },
   customer: {
@@ -1386,9 +1391,14 @@ function FinishJobModal({ job, onClose, onFinish }: {
 interface JobsTableProps {
   view?: RepairView;
   title: string;
+  /** Shown in the header card next to the search bar — same icon/description
+   *  RepairManagement's own section card would otherwise render alone above
+   *  this table, wasting a row. */
+  icon?: React.ComponentType<{ size?: number; strokeWidth?: number }>;
+  description?: string;
 }
 
-export default function JobsTable({ view = "All" }: JobsTableProps) {
+export default function JobsTable({ view = "All", title, icon: Icon, description }: JobsTableProps) {
   const { addEntry } = useCashRegister();
   const { jobs: allJobs, updateJob, dealers } = useRepair();
   const isMobile = useIsMobile();
@@ -1516,7 +1526,7 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
   const jobFilename = `repair-jobs-${new Date().toISOString().slice(0, 10)}`;
 
   return (
-    <div ref={tableRef} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div ref={tableRef} style={{ display: "flex", flexDirection: "column", gap: 16, flex: 1, minHeight: 0 }}>
 
       {/* Quick stat chips */}
       {view === "All" && (
@@ -1537,19 +1547,34 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
 
       {/* Toolbar */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {/* Row 1: Search + Filters */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ position: "relative", flex: 1 }}>
-            <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: searchFocused ? "var(--accent)" : "var(--text-muted)", transition: "color 0.18s", pointerEvents: "none" }} />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
-              placeholder="Search by name, ID, device..."
-              style={{ width: "100%", background: "var(--bg-card)", border: `1px solid ${searchFocused ? "var(--accent)" : "var(--border)"}`, borderRadius: 10, padding: "10px 14px 10px 36px", fontSize: 13.5, color: "var(--text-primary)", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "border-color 0.18s" }} />
+        {/* Row 1: Section card (when supplied) + Search + Filters, one row —
+            same idea as New Repair's step indicator sharing its header row
+            instead of each stacking as its own. */}
+        <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "center", gap: 12 }}>
+          {Icon && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "fit-content", flexShrink: 0 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 9, background: "var(--accent-dim)", border: "1px solid var(--accent-glow)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)" }}>
+                <Icon size={15} strokeWidth={2.2} />
+              </div>
+              <div>
+                <h2 className="heading" style={{ fontSize: 15, color: "var(--text-primary)" }}>{title}</h2>
+                {description && <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 1 }}>{description}</p>}
+              </div>
+            </div>
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: searchFocused ? "var(--accent)" : "var(--text-muted)", transition: "color 0.18s", pointerEvents: "none" }} />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
+                placeholder="Search by name, ID, device..."
+                style={{ width: "100%", background: "var(--bg-card)", border: `1px solid ${searchFocused ? "var(--accent)" : "var(--border)"}`, borderRadius: 10, padding: "10px 14px 10px 36px", fontSize: 13.5, color: "var(--text-primary)", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "border-color 0.18s" }} />
+            </div>
+            <button onClick={() => setShowFilters(!showFilters)}
+              style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 14px", borderRadius: 10, border: `1px solid ${showFilters ? "var(--accent-glow)" : "var(--border)"}`, background: showFilters ? "var(--accent-dim)" : "var(--bg-card)", color: showFilters ? "var(--accent)" : "var(--text-secondary)", fontSize: 13, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.18s", whiteSpace: "nowrap" }}>
+              <Filter size={14} />{!isMobile && "Filters"}
+              <ChevronDown size={13} style={{ transform: showFilters ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
+            </button>
           </div>
-          <button onClick={() => setShowFilters(!showFilters)}
-            style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 14px", borderRadius: 10, border: `1px solid ${showFilters ? "var(--accent-glow)" : "var(--border)"}`, background: showFilters ? "var(--accent-dim)" : "var(--bg-card)", color: showFilters ? "var(--accent)" : "var(--text-secondary)", fontSize: 13, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.18s", whiteSpace: "nowrap" }}>
-            <Filter size={14} />{!isMobile && "Filters"}
-            <ChevronDown size={13} style={{ transform: showFilters ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
-          </button>
         </div>
         {/* Row 2: Count + Export */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1599,15 +1624,17 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
         </div>
       )}
 
-      {/* Table */}
-      <div className="table-scroll" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14 }}>
+      {/* Table — bounded to the remaining space and scrolls internally (both
+          axes) so only the rows move; the header row stays pinned via
+          position: sticky rather than scrolling out of view with them. */}
+      <div className="table-scroll" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, flex: 1, minHeight: 0, overflowY: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900, tableLayout: "auto" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
                 {cols.map(id => (
-                  <th key={id} style={{ padding: "12px 14px", textAlign: COLUMNS[id].align ?? "left", fontSize: 11, color: "var(--text-secondary)", fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase" as const, whiteSpace: "nowrap", fontFamily: "'Plus Jakarta Sans', sans-serif", background: "var(--bg-secondary)" }}>{COLUMNS[id].label}</th>
+                  <th key={id} style={{ position: "sticky", top: 0, zIndex: 1, padding: "12px 14px", textAlign: COLUMNS[id].align ?? "left", fontSize: 11, color: "var(--text-secondary)", fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase" as const, whiteSpace: "nowrap", fontFamily: "'Plus Jakarta Sans', sans-serif", background: "var(--bg-secondary)" }}>{COLUMNS[id].label}</th>
                 ))}
-                <th style={{ padding: "12px 14px", background: "var(--bg-secondary)" }}></th>
+                <th style={{ position: "sticky", top: 0, zIndex: 1, padding: "12px 14px", background: "var(--bg-secondary)" }}></th>
               </tr>
             </thead>
             <tbody>
@@ -1686,6 +1713,8 @@ export default function JobsTable({ view = "All" }: JobsTableProps) {
         <BarcodeLabelModal
           variant="repair"
           jobId={labelJob.id}
+          dealerJobNo={labelJob.dealerJobNo}
+          outsideDealer={!isInHouseDealer(dealers, labelJob)}
           code={labelJob.id}
           title={`${labelJob.brand} ${labelJob.model}`.trim()}
           subtitle={labelJob.customerName}
