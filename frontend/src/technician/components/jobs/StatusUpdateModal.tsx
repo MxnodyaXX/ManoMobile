@@ -6,7 +6,7 @@ import {
   X, AlertTriangle, Play, Pause, CheckCircle,
   XCircle, ArrowRight, Shield, CheckSquare, DollarSign,
 } from "lucide-react";
-import { type RepairJob, type JobStatus, type CompletionType, type EstimateApproval, type ApprovalChannel, useRepair } from "@/cashier/contexts/RepairContext";
+import { type RepairJob, type JobStatus, type CompletionType, type EstimateApproval, type ApprovalChannel, useRepair, isInHouseDealer } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
 import { useParts } from "@/cashier/contexts/PartsContext";
 import { rulesForTechnician, type EffectiveRules } from "@/lib/settings/staffRules";
@@ -105,7 +105,11 @@ function StatusBadge({ status }: { status: JobStatus }) {
 }
 
 export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; onClose: () => void }) {
-  const { jobs, updateJob } = useRepair();
+  const { jobs, updateJob, dealers } = useRepair();
+  // A device sent in by another shop has no end customer of ours to ask —
+  // the dealer is who we deal with, and they already know their own quote.
+  // The approval gate below only makes sense for a Mano Mobile customer.
+  const isManoMobileJob = isInHouseDealer(dealers, job);
   const { technicianName, setJobMeta, getElapsedMinutes, diagnostics, addActivity, saveFunctionalTest, saveWarranty, partRequests } = useTech();
   const { parts: catalog } = useParts();
   const { issueWarranty } = useWarranty();
@@ -188,7 +192,7 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
   const revisedNum   = chargeable ? (parseFloat(revisedCost) || 0) : 0;
   // A device that was not repaired cannot carry a repair warranty.
   const canWarrant   = completionType !== "Return";
-  const needsApproval = revisedNum > originalEstimate + 0.001 && !job.approval;
+  const needsApproval = isManoMobileJob && revisedNum > originalEstimate + 0.001 && !job.approval;
   // Margin on this job. A Return charges nothing but the parts are usually
   // still gone, and an FOC is a loss by definition — so the shortfall is shown
   // for all three, and only a *chargeable* job asks for an acknowledgement,
@@ -325,9 +329,11 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
       const overallPass = testsFailed === 0;
       saveFunctionalTest({ jobId: job.id, completedAt: now, results: testResults, overallPass, notes: testNotes || undefined });
 
-      // Capture estimate approval if the cost went up
+      // Capture estimate approval if the cost went up — Mano Mobile jobs
+      // only; an outside dealer's job never showed the gate above, so there
+      // is no approval interaction here to record.
       let approval: EstimateApproval | undefined;
-      if (revisedNum > originalEstimate + 0.001 && !job.approval) {
+      if (isManoMobileJob && revisedNum > originalEstimate + 0.001 && !job.approval) {
         approval = {
           amount: revisedNum, approvedBy: job.customerName, channel: apprChannel,
           signature: apprChannel === "In-store" ? apprSig : undefined,
