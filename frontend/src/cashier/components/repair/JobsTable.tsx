@@ -65,10 +65,30 @@ const fmtDate = (d?: string) => {
 };
 const rs = (n: number) => `Rs. ${Math.round(n).toLocaleString("en-LK")}`;
 
+/** Today / this (calendar) week / this (calendar) month, all against the
+ *  job's own createdAt — i.e. when it was booked in, not when its status
+ *  last changed. Week starts Monday. */
+function isWithinDateFilter(createdAt: string, range: "Today" | "Week" | "Month"): boolean {
+  const created = new Date(createdAt);
+  if (isNaN(created.getTime())) return false;
+  const now = new Date();
+  if (range === "Today") return created.toDateString() === now.toDateString();
+  if (range === "Month") return created.getFullYear() === now.getFullYear() && created.getMonth() === now.getMonth();
+  // Week: Monday 00:00 through now.
+  const day = (now.getDay() + 6) % 7; // 0 = Monday
+  const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day);
+  return created >= startOfWeek;
+}
+
 interface ColSpec {
   label: string;
   align?: "left" | "right";
   render: (job: RepairJob) => React.ReactNode;
+  /** When present, the table footer totals this across every row currently
+   *  shown. Only set on columns that are actually a plain money value on the
+   *  job itself — Parts/Labour needs live PartsContext data the column spec
+   *  doesn't have access to, so it's left out rather than summed wrong. */
+  sum?: (job: RepairJob) => number;
 }
 
 const muted = { fontSize: 11.5, color: "var(--text-muted)" } as const;
@@ -129,13 +149,14 @@ const COLUMNS: Record<ColId, ColSpec> = {
     label: "Priority",
     render: j => <span style={{ fontSize: 11, fontWeight: 600, color: priorityColor[j.priority] }}>● {j.priority}</span>,
   },
-  estCost: { label: "Est. Cost", align: "right", render: j => <span style={plain}>{rs(j.estimatedCost)}</span> },
+  estCost: { label: "Est. Cost", align: "right", render: j => <span style={plain}>{rs(j.estimatedCost)}</span>, sum: j => j.estimatedCost },
   // Once a job is completed, estimatedCost holds the FINAL charge — the quote
   // survives in originalEstimate, so the two can be shown side by side.
   quotedCost: {
     label: "Estimated Cost",
     align: "right",
     render: j => <span style={plain}>{rs(j.originalEstimate ?? j.estimatedCost)}</span>,
+    sum: j => j.originalEstimate ?? j.estimatedCost,
   },
   /** Everything the customer has actually handed over, advance plus settlement. */
   paidAmount: {
@@ -147,11 +168,13 @@ const COLUMNS: Record<ColId, ColSpec> = {
         ? <span style={{ fontSize: 12.5, fontWeight: 600, color: "#4ade80" }}>{rs(paid)}</span>
         : <span style={{ fontSize: 12, color: "var(--text-muted)" }}>—</span>;
     },
+    sum: j => j.advancePaid,
   },
   finalBill: {
     label: "Final Bill",
     align: "right",
     render: j => <span style={{ ...plain, fontWeight: 700 }}>{rs(j.estimatedCost)}</span>,
+    sum: j => j.estimatedCost,
   },
   advance: {
     label: "Advance Paid",
@@ -159,6 +182,7 @@ const COLUMNS: Record<ColId, ColSpec> = {
     render: j => j.advancePaid > 0
       ? <span style={{ fontSize: 12, fontWeight: 600, color: "#4ade80" }}>{rs(j.advancePaid)}</span>
       : <span style={{ fontSize: 12, color: "var(--text-muted)" }}>—</span>,
+    sum: j => j.advancePaid,
   },
   balance: {
     label: "Balance",
@@ -167,6 +191,7 @@ const COLUMNS: Record<ColId, ColSpec> = {
       const b = j.estimatedCost - j.advancePaid;
       return <span style={{ fontSize: 12.5, fontWeight: 600, color: b > 0 ? "#f87171" : "#4ade80" }}>{rs(b)}</span>;
     },
+    sum: j => j.estimatedCost - j.advancePaid,
   },
   estCompletion: { label: "Est. Completion", render: j => <span style={muted}>{fmtDate(j.estimatedCompletion)}</span> },
   /** Quote with the date it is promised for — one column, two lines. */
@@ -179,11 +204,13 @@ const COLUMNS: Record<ColId, ColSpec> = {
         <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{fmtDate(j.estimatedCompletion)}</p>
       </>
     ),
+    sum: j => j.estimatedCost,
   },
   /** Same pairing for a finished job, where estimatedCost is the final charge. */
   quotedDue: {
     label: "Estimated Cost / Due",
     align: "right",
+    sum: j => j.originalEstimate ?? j.estimatedCost,
     render: j => (
       <>
         <p style={plain}>{rs(j.originalEstimate ?? j.estimatedCost)}</p>
@@ -229,6 +256,21 @@ const VIEW_COLUMNS: Partial<Record<RepairView, ColId[]>> = {
   "Non-Issued":  ["jobId", "customer", "deviceIssue", "technician", "status", "quotedDue", "advance", "finalBill", "paidAmount", "balance", "jobCost", "created", "started", "completed"],
   "Issued":      ["jobId", "customer", "deviceIssue", "technician", "status", "quotedDue", "advance", "finalBill", "paidAmount", "balance", "jobCost", "created", "started", "completed", "issued"],
 };
+
+// Pixel widths per column, used only where a totals footer needs a second,
+// separately-scrolling table to line up with the header/body table above it
+// (see the "fixed to the bottom" footer below) — table-layout: auto sizes
+// each table's columns from its own content alone, so two auto tables never
+// match; fixed widths shared by both are what actually keeps them aligned.
+const COL_WIDTHS: Record<ColId, number> = {
+  jobId: 100, customer: 150, device: 140, deviceIssue: 190, issue: 140,
+  technician: 110, status: 110, priority: 90,
+  estCost: 110, quotedCost: 130, costDue: 130, quotedDue: 150,
+  paidAmount: 120, finalBill: 110, advance: 120, balance: 110,
+  estCompletion: 120, created: 110, started: 110, paused: 150,
+  completed: 110, issued: 110, partsCost: 120, jobCost: 130,
+};
+const ACTION_COL_WIDTH = 90;
 
 
 const labelSt: React.CSSProperties = {
@@ -1418,6 +1460,11 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
   const [pickupJob,      setPickupJob]      = useState<RepairJob | null>(null);
   const [intakeSlipJob,  setIntakeSlipJob]  = useState<RepairJob | null>(null);
   const [labelJob,       setLabelJob]       = useState<RepairJob | null>(null);
+  // Daily/Weekly/Monthly, booked-date based — only surfaced on Issued and
+  // Non-Issued for now. Defaults to All so the list isn't narrowed until the
+  // cashier actually picks a range.
+  const [dateFilter, setDateFilter] = useState<"All" | "Today" | "Week" | "Month">("All");
+  const showDateFilter = view === "Issued" || view === "Non-Issued";
 
   const jobs = useMemo(() => allJobs.filter(j => {
     const q = search.toLowerCase();
@@ -1426,8 +1473,22 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
     const matchPriority = priorityFilter === "All" || j.priority === priorityFilter;
     const matchBrand    = brandFilter === "All" || j.brand === brandFilter;
     const matchDealer   = dealerFilter === "All" || dealerKey(dealers, j) === dealerFilter;
-    return matchView && matchSearch && matchPriority && matchBrand && matchDealer;
-  }), [allJobs, view, search, priorityFilter, brandFilter, dealerFilter, dealers]);
+    const matchDate      = dateFilter === "All" || isWithinDateFilter(j.createdAt, dateFilter);
+    return matchView && matchSearch && matchPriority && matchBrand && matchDealer && matchDate;
+  }), [allJobs, view, search, priorityFilter, brandFilter, dealerFilter, dealers, dateFilter]);
+
+  // Column totals for the footer — only the columns currently shown that
+  // actually declared a `sum`, over whatever rows are visible right now
+  // (so the total tracks the search/filter/date state above it).
+  const colSums = useMemo(() => {
+    if (!showDateFilter) return {} as Partial<Record<ColId, number>>;
+    const totals: Partial<Record<ColId, number>> = {};
+    for (const id of cols) {
+      const spec = COLUMNS[id];
+      if (spec.sum) totals[id] = jobs.reduce((s, j) => s + spec.sum!(j), 0);
+    }
+    return totals;
+  }, [cols, jobs, showDateFilter]);
 
   const handleFinish = (data: FinishJobData) => {
     const job = allJobs.find(j => j.id === finishJob!.id);
@@ -1521,6 +1582,13 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
   }, [allJobs]);
 
   const tableRef  = useRef<HTMLDivElement>(null);
+  // The totals table sits outside the scrolling body (so it can sit fixed
+  // at the card's bottom — see the render below), which means it doesn't
+  // scroll horizontally on its own; this keeps its columns tracking the
+  // body's horizontal scroll position so they don't drift out of line with
+  // the header/rows above when the table is wide enough to scroll sideways.
+  const bodyScrollRef   = useRef<HTMLDivElement>(null);
+  const footerScrollRef = useRef<HTMLDivElement>(null);
   const JOB_HEADERS = ["Job ID", "Dealer", "Customer", "Phone", "Brand", "Model", "Issue", "Technician", "Status", "Priority", "Est. Cost (Rs.)", "Advance (Rs.)"];
   const jobRows     = () => jobs.map(j => [j.id, findDealer(dealers, j)?.name ?? j.dealer ?? IN_HOUSE_DEALER, j.customerName, j.phone, j.brand, j.model, j.issue, j.technician, j.status, j.priority, j.estimatedCost, j.advancePaid]);
   const jobFilename = `repair-jobs-${new Date().toISOString().slice(0, 10)}`;
@@ -1569,6 +1637,22 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
                 placeholder="Search by name, ID, device..."
                 style={{ width: "100%", background: "var(--bg-card)", border: `1px solid ${searchFocused ? "var(--accent)" : "var(--border)"}`, borderRadius: 10, padding: "10px 14px 10px 36px", fontSize: 13.5, color: "var(--text-primary)", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "border-color 0.18s" }} />
             </div>
+            {/* Daily/Weekly/Monthly — booked-date range, Issued & Non-Issued only for now. */}
+            {showDateFilter && (
+              <div style={{ display: "flex", gap: 2, padding: 3, borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-card)", flexShrink: 0 }}>
+                {(["All", "Today", "Week", "Month"] as const).map(r => (
+                  <button key={r} onClick={() => setDateFilter(r)}
+                    style={{
+                      padding: "7px 11px", borderRadius: 7, fontSize: 12, fontWeight: dateFilter === r ? 700 : 400,
+                      border: "none", background: dateFilter === r ? "var(--accent-dim)" : "transparent",
+                      color: dateFilter === r ? "var(--accent)" : "var(--text-secondary)",
+                      cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s", whiteSpace: "nowrap",
+                    }}>
+                    {r === "All" ? "All" : r === "Today" ? "Daily" : r === "Week" ? "Weekly" : "Monthly"}
+                  </button>
+                ))}
+              </div>
+            )}
             <button onClick={() => setShowFilters(!showFilters)}
               style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 14px", borderRadius: 10, border: `1px solid ${showFilters ? "var(--accent-glow)" : "var(--border)"}`, background: showFilters ? "var(--accent-dim)" : "var(--bg-card)", color: showFilters ? "var(--accent)" : "var(--text-secondary)", fontSize: 13, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.18s", whiteSpace: "nowrap" }}>
               <Filter size={14} />{!isMobile && "Filters"}
@@ -1624,11 +1708,30 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
         </div>
       )}
 
-      {/* Table — bounded to the remaining space and scrolls internally (both
-          axes) so only the rows move; the header row stays pinned via
-          position: sticky rather than scrolling out of view with them. */}
-      <div className="table-scroll" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, flex: 1, minHeight: 0, overflowY: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900, tableLayout: "auto" }}>
+      {/* Table — bounded to the remaining space; the header row stays pinned
+          via position: sticky rather than scrolling out of view with the
+          rows. On Issued/Non-Issued, the totals table below is a genuinely
+          separate table sitting outside the scrolling area rather than a
+          sticky <tfoot> — a sticky element only holds at an edge once
+          scrolling would otherwise carry it past that edge, so on a short
+          list (nothing to scroll) it just sat in normal flow right after
+          the last row instead of at the card's true bottom. A real sibling
+          table has no such condition: it's always the last thing in the
+          card. Both tables share a table-layout: fixed colgroup (COL_WIDTHS)
+          so their columns line up — table-layout: auto sizes each table's
+          columns from only its own content, so two independent auto tables
+          never stay aligned. */}
+      {(() => {
+        const colGroup = showDateFilter ? (
+          <colgroup>
+            {cols.map(id => <col key={id} style={{ width: COL_WIDTHS[id] ?? 120 }} />)}
+            <col style={{ width: ACTION_COL_WIDTH }} />
+          </colgroup>
+        ) : null;
+
+        const mainTable = (
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900, tableLayout: showDateFilter ? "fixed" : "auto" }}>
+            {colGroup}
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
                 {cols.map(id => (
@@ -1689,7 +1792,53 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
               })}
             </tbody>
           </table>
-      </div>
+        );
+
+        if (!showDateFilter) {
+          return (
+            <div className="table-scroll" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, flex: 1, minHeight: 0, overflowY: "auto" }}>
+              {mainTable}
+            </div>
+          );
+        }
+
+        return (
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <div
+              ref={bodyScrollRef}
+              className="table-scroll"
+              style={{ flex: 1, minHeight: 0, overflowY: "auto" }}
+              onScroll={e => { if (footerScrollRef.current) footerScrollRef.current.scrollLeft = e.currentTarget.scrollLeft; }}
+            >
+              {mainTable}
+            </div>
+            {/* No scrollbar of its own — its horizontal position is driven
+                by the body's scroll above, so the totals stay lined up
+                under their columns even when the table is wide enough to
+                scroll sideways. */}
+            <div ref={footerScrollRef} style={{ overflowX: "hidden", flexShrink: 0 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900, tableLayout: "fixed" }}>
+                {colGroup}
+                <tfoot>
+                  <tr style={{ borderTop: "2px solid var(--border)" }}>
+                    {cols.map((id, i) => (
+                      <td key={id} style={{
+                        padding: "12px 14px",
+                        textAlign: COLUMNS[id].align ?? "left", fontSize: 12, fontWeight: 700,
+                        color: "var(--text-primary)", background: "var(--bg-secondary)",
+                        whiteSpace: "nowrap", fontFamily: "'Plus Jakarta Sans', sans-serif",
+                      }}>
+                        {i === 0 ? `Total (${jobs.length})` : colSums[id] !== undefined ? rs(colSums[id]!) : ""}
+                      </td>
+                    ))}
+                    <td style={{ background: "var(--bg-secondary)" }} />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modals */}
       {detailsJob && (

@@ -22,7 +22,8 @@ export interface RepairFormData {
   customerContact: string;
   customerEmail: string;
 
-  // Step 2
+  // Step 1 — Device Information / Device Faults (merged in alongside the
+  // dealer and customer fields; used to be its own step)
   /** Explicit, not guessed — see detectBrand's comment in NewRepairForm.tsx
    *  for why relying on keywords inside deviceModel alone was unreliable
    *  (a bare model like "A10" carries no brand hint at all). Left blank,
@@ -36,7 +37,7 @@ export interface RepairFormData {
   faultCheckboxes: string[];
   faultDescription: string;
 
-  // Step 3
+  // Step 2
   estimatedCost: string;
   advancePaid: string;
   paymentMethod: string;
@@ -45,11 +46,11 @@ export interface RepairFormData {
   jobPriority: JobPriority;
   jobNotes: string;
 
-  // Step 4
+  // Step 2 — Available Repairmen accordion
   assignedRepairman: string;
   estimatedCompletion: string;
 
-  // Step 5 — Evidence & Sign
+  // Step 2 — Device Cosmetic Condition / Device Unlock / Intake Photos / Terms accordions
   condition: DeviceConditionMap;
   intakePhotos: string[];
   passcodeType: "PIN" | "Pattern" | "Password" | "None" | "Provided Separately";

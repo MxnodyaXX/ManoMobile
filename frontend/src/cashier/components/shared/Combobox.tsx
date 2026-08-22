@@ -215,8 +215,12 @@ export default function Combobox({
                 onMouseEnter={() => setActive(i)}
                 onMouseDown={e => { e.preventDefault(); select(opt); }}
                 style={{
-                  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
-                  width: "100%", padding: "9px 11px", border: "none", borderRadius: 8,
+                  display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 8,
+                  // Left padding trimmed to 7px so the text lines up exactly
+                  // under the input's own text above (12px input padding −
+                  // 5px popup padding = 7px needed here), instead of sitting
+                  // a few pixels further right than the selected value.
+                  width: "100%", padding: "9px 11px 9px 7px", border: "none", borderRadius: 8,
                   cursor: "pointer", textAlign: "left",
                   background: isActive ? "var(--bg-card-hover)" : isSel ? "var(--accent-dim)" : "transparent",
                   color: isSel ? "var(--accent)" : "var(--text-primary)",
@@ -224,8 +228,8 @@ export default function Combobox({
                   transition: "background 0.12s",
                 }}
               >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{opt}</span>
-                {isSel && <Check size={14} style={{ flexShrink: 0 }} />}
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left" }}>{opt}</span>
+                {isSel && <Check size={14} style={{ flexShrink: 0, marginLeft: "auto" }} />}
               </button>
             );
           })}
@@ -239,7 +243,7 @@ export default function Combobox({
               onMouseEnter={() => setActive(filtered.length)}
               onMouseDown={e => { e.preventDefault(); add(); }}
               style={{
-                display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 11px",
+                display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 11px 10px 7px",
                 border: "none", borderRadius: 8, marginTop: filtered.length ? 4 : 0,
                 borderTop: filtered.length ? "1px solid var(--border)" : "none",
                 cursor: "pointer", textAlign: "left",

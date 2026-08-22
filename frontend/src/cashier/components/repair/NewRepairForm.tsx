@@ -16,7 +16,7 @@ import Combobox from "@/cashier/components/shared/Combobox";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import { lookupModelNumber, normaliseModelNumber, type ModelInfo } from "@/cashier/data/modelNumbers";
 import { useDeviceFaults, FALLBACK_FAULTS } from "@/lib/repair/deviceFaults";
-import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2, AlertCircle, FileClock } from "lucide-react";
+import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2, AlertCircle, FileClock, ChevronDown } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,12 +54,15 @@ const RECEIVED_ITEMS = ["SIM Card", "Back Cover", "Charger", "Data Cable", "Earp
 
 // ─── Step Indicator ───────────────────────────────────────────────────────────
 
+// Device & Faults, Assign Repairman, and Evidence & Sign used to each be
+// their own step. None of that blocks moving on except the device model/
+// brand, the cost estimate, and terms acceptance, so it's all folded down
+// to two steps: everything about the dealer, customer, and device up
+// front (the device is right there in the cashier's hands at intake
+// anyway), then costs and the optional evidence/assignment accordions.
 const STEPS = [
-  { num: 1, label: "Dealer & Customer" },
-  { num: 2, label: "Device & Faults" },
-  { num: 3, label: "Costs & Job Info" },
-  { num: 4, label: "Assign Repairman" },
-  { num: 5, label: "Evidence & Sign" },
+  { num: 1, label: "Dealer, Customer & Device" },
+  { num: 2, label: "Costs & Evidence" },
 ];
 
 export function StepIndicator({ current }: { current: number }) {
@@ -117,6 +120,17 @@ const inputStyle: React.CSSProperties = {
   transition: "border-color 0.15s", boxSizing: "border-box",
 };
 
+/** For fields that only ever display something (the dealer info panel) —
+ *  muted text, same white/card background and border as every other field
+ *  in the wizard (Device Information, etc.). `--bg-primary` was tried here
+ *  first, but it's nearly the same shade as `--border` in light mode, so
+ *  the box came out looking borderless/flat — keeping the normal bg-card
+ *  background is what actually keeps the border visible; the muted text
+ *  (plus `cursor: default`, no focus ring) is what says "read-only". */
+const readOnlyInputStyle: React.CSSProperties = {
+  ...inputStyle, color: "var(--text-muted)", cursor: "default",
+};
+
 const labelStyle: React.CSSProperties = {
   fontSize: 12, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif",
   color: "var(--text-secondary)", marginBottom: 5, display: "block",
@@ -133,6 +147,86 @@ const panelStyle: React.CSSProperties = {
   background: "var(--bg-card)", border: "1px solid var(--border)",
   borderRadius: 12, padding: "20px 22px", flex: 1,
 };
+
+/** A collapsed-by-default section for content that's genuinely optional —
+ *  never gate a required field behind one of these, since nothing here
+ *  scrolls-into-view or shakes on validation the way a normal field does.
+ *
+ *  Open/close is controlled by the parent (not local state) so a whole
+ *  group of these can be wired to keep only one open at a time — see
+ *  Step2's `openAccordion`. */
+function AccordionSection({ title, summary, open, onToggle, children }: {
+  title: string; summary?: React.ReactNode; open: boolean; onToggle: () => void; children: React.ReactNode;
+}) {
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "#fff", flexShrink: 0 }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 10, padding: "12px 14px", background: "#fff", border: "none",
+          cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", textAlign: "left",
+        }}
+      >
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)" }}>{title}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          {!open && summary && (
+            <span style={{ fontSize: 11.5, color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{summary}</span>
+          )}
+          <ChevronDown size={14} style={{ color: "var(--text-muted)", flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.28s cubic-bezier(0.4, 0, 0.2, 1)" }} />
+        </span>
+      </button>
+      {/* The 0fr/1fr grid-row trick animates to/from an unknown content
+          height (no JS measuring needed) — the outer track does the
+          easing, the inner div just clips whatever doesn't fit yet.
+          Children stay mounted the whole time (so the animation has
+          something to shrink), which would otherwise leave the collapsed
+          content's checkboxes/rows tabbable while invisible — `visibility`
+          drops them from the tab order, delayed on close so it only kicks
+          in once the fold has finished, not before. */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateRows: open ? "1fr" : "0fr",
+          visibility: open ? "visible" : "hidden",
+          transition: open
+            ? "grid-template-rows 0.28s cubic-bezier(0.4, 0, 0.2, 1)"
+            : "grid-template-rows 0.28s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0.28s",
+        }}
+      >
+        <div style={{ overflow: "hidden" }}>
+          <div style={{
+            padding: 16, borderTop: "1px solid var(--border)", background: "#fff",
+            opacity: open ? 1 : 0, transition: "opacity 0.2s ease",
+          }}>
+            {children}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Same shell as AccordionSection, minus the fold — for content that sits in
+ *  the same stacked list but is short/important enough to stay visible
+ *  (Device Unlock's passcode fields), so the list reads as one consistent
+ *  rhythm of boxes rather than accordions next to bare sections. */
+function StaticSection({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "#fff", flexShrink: 0 }}>
+      <div style={{
+        padding: "12px 14px", background: "#fff",
+        fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)",
+        fontFamily: "'Plus Jakarta Sans', sans-serif",
+      }}>
+        {title}
+      </div>
+      <div style={{ padding: 16, borderTop: "1px solid var(--border)", background: "#fff" }}>{children}</div>
+    </div>
+  );
+}
 
 const checkboxItemStyle = (checked: boolean): React.CSSProperties => ({
   display: "flex", alignItems: "center", gap: 8, padding: "7px 10px",
@@ -158,13 +252,13 @@ type RequiredField =
   | "jobNumber"                          // step 1, only when not auto-generated
   | "dealerJobNo"                        // step 1, only for another shop's device
   | "customerName" | "customerContact"   // step 1
-  | "deviceModel" | "deviceBrand"        // step 2
-  | "estimatedCost"                      // step 3
-  | "termsAccepted";                     // step 5
+  | "deviceModel" | "deviceBrand"        // step 1
+  | "estimatedCost"                      // step 2
+  | "termsAccepted";                     // step 2
 
 // Intake photos and the customer signature are deliberately absent: they are
 // strongly recommended evidence, but a job can be booked in without them.
-// Terms acceptance is the one thing step 5 blocks on.
+// Terms acceptance is the one thing the final step blocks on.
 //
 // dealerJobNo is deliberately NOT required, even for another shop's device —
 // some dealers just don't hand over their own number for a given drop-off.
@@ -178,10 +272,8 @@ type RequiredField =
 // or type one. deviceModel already had full error-UI wired up but was never
 // actually enforced here — that looks like an oversight, fixed alongside it.
 const REQUIRED_BY_STEP: Record<number, RequiredField[]> = {
-  1: ["jobNumber", "customerName", "customerContact"],
-  2: ["deviceModel", "deviceBrand"],
-  3: ["estimatedCost"],
-  5: ["termsAccepted"],
+  1: ["jobNumber", "customerName", "customerContact", "deviceModel", "deviceBrand"],
+  2: ["estimatedCost", "termsAccepted"],
 };
 
 const FIELD_LABELS: Record<RequiredField, string> = {
@@ -227,252 +319,33 @@ function fmtJoined(iso: string) {
   return isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoCheck, checkingDealerNo }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; dealers: RepairDealer[]; errors: RequiredField[]; nextJobNo: string | null; dealerNoCheck: DealerJobNoCheck | null; checkingDealerNo: boolean }) {
+function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoCheck, checkingDealerNo, models, onAddModel, modelNumberLookup, modelBrandLookup, brands, onAddBrand }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; dealers: RepairDealer[]; errors: RequiredField[]; nextJobNo: string | null; dealerNoCheck: DealerJobNoCheck | null; checkingDealerNo: boolean; models: string[]; onAddModel: (m: string) => void; modelNumberLookup: Map<string, ModelInfo>; modelBrandLookup: Map<string, string>; brands: string[]; onAddBrand: (b: string) => void }) {
   const dealer = dealers.find((d) => d.id.toString() === data.dealerId);
-  const bad = (f: RequiredField) => errors.includes(f);
-
-  return (
-    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
-      {/* Left: Dealer */}
-      <div style={panelStyle}>
-        <div style={sectionHeaderStyle}>🏪 Dealer Information</div>
-        <div style={{ marginBottom: 14 }}>
-          <label style={labelStyle}>Select Dealer</label>
-          <Combobox
-            value={dealer?.name ?? ""}
-            options={dealers.map((d) => d.name)}
-            allowAdd={false}
-            placeholder={dealers.length ? "— Choose a dealer —" : "No dealers — add them in Admin Control"}
-            onChange={(name) => {
-              const match = dealers.find((d) => d.name === name);
-              // Switching dealer resets the job number, because the right
-              // answer differs entirely: our own device gets our next RM
-              // number, another shop's device keeps the number on their docket.
-              // Our number is always ours to assign, whoever the device came
-              // from — it is what the tag encodes and what a scan resolves.
-              // Only the dealer's own reference changes with the dealer.
-              onChange({
-                dealerId: match ? String(match.id) : "",
-                dealerJobNo: "",
-              });
-            }}
-          />
-          {dealers.length === 0 && (
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5 }}>
-              Add repair dealers under Admin Control → Repair Dealers.
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, opacity: dealer ? 1 : 0.4, transition: "opacity 0.2s" }}>
-          <div>
-            <label style={labelStyle}>Address</label>
-            <input readOnly style={{ ...inputStyle, background: "var(--bg-primary)" }} value={dealer?.address ?? ""} placeholder="Select dealer above" />
-          </div>
-          <div>
-            <label style={labelStyle}>Contact Number</label>
-            <input readOnly style={{ ...inputStyle, background: "var(--bg-primary)" }} value={dealer?.contact ?? ""} placeholder="—" />
-          </div>
-          <div>
-            <label style={labelStyle}>Joining Date</label>
-            <input readOnly style={{ ...inputStyle, background: "var(--bg-primary)" }} value={dealer ? fmtJoined(dealer.joinedAt) : ""} placeholder="—" />
-          </div>
-          <div>
-            <label style={labelStyle}>Remarks</label>
-            <textarea
-              readOnly
-              style={{ ...inputStyle, background: "var(--bg-primary)", resize: "none", minHeight: 64 }}
-              value={dealer?.remarks ?? ""}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Right: this job — the numbers it is filed under, then whose it is.
-          The left panel is about the dealer as a business; these two belong to
-          the repair in front of you, which is why they sit together here.
-
-          Below them: our own walk-ins get the full customer form. A device sent
-          by another shop belongs to that shop as far as we are concerned — they
-          booked it, they collect it, they are who we ring — so asking for an end
-          customer we will never meet is a field nobody can fill in. */}
-      <div style={panelStyle}>
-        <div style={sectionHeaderStyle}>📄 Job & Customer Details</div>
-        {/* ── Job number ── */}
-        <div style={{ marginBottom: 14 }} data-field="jobNumber" className={bad("jobNumber") ? "field-shake" : undefined}>
-          <label style={labelStyle}>Job Number</label>
-          <input
-            style={{
-              ...inputStyle,
-              ...(bad("jobNumber") ? invalidStyle : {}),
-              ...(data.autoJobNumber ? { background: "var(--bg-primary)", color: "var(--text-secondary)" } : {}),
-            }}
-            // While auto-generating, fall back to the preview so the box shows
-            // the number that is coming rather than sitting blank. Derived
-            // rather than written into state: nothing needs saving, and the
-            // real number is still assigned by the sequence on insert.
-            value={data.autoJobNumber ? (data.jobNumber || nextJobNo || "") : data.jobNumber}
-            placeholder={data.autoJobNumber ? "Assigned on save" : "e.g. 54000 — the dealer's own number"}
-            onChange={(e) => {
-              // Typing is itself the decision to supply a number, so the tick
-              // clears rather than the box being locked until it is unticked.
-              onChange({ jobNumber: e.target.value, autoJobNumber: false });
-            }}
-          />
-
-          <label style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8, cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={data.autoJobNumber}
-              onChange={(e) => onChange({
-                autoJobNumber: e.target.checked,
-                jobNumber: e.target.checked ? (nextJobNo ?? "") : "",
-              })}
-              style={{ cursor: "pointer" }}
-            />
-            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Generate the job number automatically</span>
-          </label>
-
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5, lineHeight: 1.5 }}>
-            {data.autoJobNumber
-              ? <>The next number in our own sequence{nextJobNo ? <> — likely <strong>{nextJobNo}</strong></> : null}. The database assigns it on save, so two counters can never take the same one.</>
-              : <>Our internal number for this repair. It goes on the tag and must not already be in use.</>}
-          </div>
-          <FieldError show={bad("jobNumber")}>Enter the job number, or tick to generate one</FieldError>
-        </div>
-
-        {/* ── The dealer's own number, when the device came from another shop ── */}
-        {dealer && !dealer.inHouse && (
-          <div style={{ marginBottom: 14 }} data-field="dealerJobNo" className={bad("dealerJobNo") ? "field-shake" : undefined}>
-            <label style={labelStyle}>{dealer.name}&apos;s Job Number (Optional)</label>
-            <input
-              // Red the moment a clash is known, without waiting for a failed
-              // Next — the number is wrong now, not when the wizard says so.
-              style={{ ...inputStyle, ...(bad("dealerJobNo") || dealerNoCheck?.existing ? invalidStyle : {}) }}
-              value={data.dealerJobNo}
-              placeholder="e.g. 54000 — leave blank if they didn't give you one"
-              onChange={(e) => onChange({ dealerJobNo: e.target.value })}
-            />
-            {/* Caught while typing, not at save: correcting a digit here beats
-                redoing five steps of intake after the constraint rejects it. */}
-            {dealerNoCheck?.existing ? (
-              <div style={{
-                marginTop: 8, padding: "11px 13px", borderRadius: 9,
-                background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.45)",
-              }}>
-                <p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 700, marginBottom: 4 }}>
-                  {dealer.name} already has job {dealerNoCheck.existing.dealerJobNo}
-                </p>
-                <p style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
-                  {dealerNoCheck.existing.customerName} · {dealerNoCheck.existing.device} ·
-                  {" "}booked {fmtJoined(dealerNoCheck.existing.createdAt)} · {dealerNoCheck.existing.status}
-                  {" "}(our number {dealerNoCheck.existing.id})
-                </p>
-                {dealerNoCheck.suggestion && (
-                  <div style={{ marginTop: 9, display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
-                      Same device back again?
-                    </span>
-                    <button
-                      onClick={() => onChange({ dealerJobNo: dealerNoCheck.suggestion! })}
-                      style={{
-                        padding: "5px 12px", borderRadius: 7, fontSize: 12, fontWeight: 700,
-                        background: "var(--accent)", border: "none", color: "#fff", cursor: "pointer",
-                        fontFamily: "'Plus Jakarta Sans', sans-serif",
-                      }}
-                    >
-                      Book it as {dealerNoCheck.suggestion}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5, lineHeight: 1.5 }}>
-                {checkingDealerNo
-                  ? "Checking…"
-                  : <>Not every dealer hands one over — leave it blank and the job is still tracked under our own
-                      number below. When given, it&apos;s searchable alongside ours, so the phone can be found by
-                      whichever one is quoted. Two dealers may use the same number; it only has to be unique within {dealer.name}.</>}
-              </div>
-            )}
-          </div>
-        )}
-
-      {(!dealer || dealer.inHouse) ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div data-field="customerName" className={bad("customerName") ? "field-shake" : undefined}>
-            <label style={labelStyle}>Full Name *</label>
-            <input
-              style={{ ...inputStyle, ...(bad("customerName") ? invalidStyle : {}) }}
-              placeholder="e.g. Kasun Perera"
-              value={data.customerName}
-              onChange={(e) => onChange({ customerName: e.target.value })}
-            />
-            <FieldError show={bad("customerName")}>Enter the customer&apos;s full name</FieldError>
-          </div>
-          <div>
-            <label style={labelStyle}>NIC Number</label>
-            <input
-              style={inputStyle}
-              placeholder="e.g. 199912345678"
-              value={data.customerNIC}
-              onChange={(e) => onChange({ customerNIC: e.target.value })}
-            />
-          </div>
-          <div data-field="customerContact" className={bad("customerContact") ? "field-shake" : undefined}>
-            <label style={labelStyle}>Contact Number *</label>
-            <input
-              style={{ ...inputStyle, ...(bad("customerContact") ? invalidStyle : {}) }}
-              placeholder="e.g. 077 123 4567"
-              value={data.customerContact}
-              onChange={(e) => onChange({ customerContact: e.target.value })}
-            />
-            <FieldError show={bad("customerContact")}>Enter a contact number</FieldError>
-          </div>
-          <div>
-            <label style={labelStyle}>Email Address</label>
-            <input
-              style={inputStyle}
-              placeholder="e.g. customer@email.com"
-              type="email"
-              value={data.customerEmail}
-              onChange={(e) => onChange({ customerEmail: e.target.value })}
-            />
-          </div>
-        </div>
-      ) : (
-        <div>
-          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-            This device was sent in by <strong style={{ color: "var(--text-primary)" }}>{dealer.name}</strong>,
-            so they are recorded as the customer on the job — updates and the receipt go to them,
-            not to whoever owns the phone.
-          </p>
-          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
-            <div style={{ display: "flex", gap: 8 }}>
-              <span style={{ color: "var(--text-muted)", minWidth: 62 }}>Contact</span>
-              <span style={{ color: "var(--text-primary)" }}>{dealer.contact || "— none on file"}</span>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <span style={{ color: "var(--text-muted)", minWidth: 62 }}>Address</span>
-              <span style={{ color: "var(--text-primary)" }}>{dealer.address || "— none on file"}</span>
-            </div>
-          </div>
-          <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 12, lineHeight: 1.55 }}>
-            Edit these under Admin Control → Repair Dealers.
-          </p>
-        </div>
-      )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Step 2: Device & Faults ──────────────────────────────────────────────────
-
-function Step2({ data, onChange, isMobile, models, onAddModel, errors, modelNumberLookup, modelBrandLookup, brands, onAddBrand }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; models: string[]; onAddModel: (m: string) => void; errors: RequiredField[]; modelNumberLookup: Map<string, ModelInfo>; modelBrandLookup: Map<string, string>; brands: string[]; onAddBrand: (b: string) => void }) {
   const bad = (f: RequiredField) => errors.includes(f);
   const toggleItem = (list: string[], item: string) =>
     list.includes(item) ? list.filter((i) => i !== item) : [...list, item];
+
+  // A returning customer's contact number is already in our own job
+  // history — matched on the last 7 digits (same tolerance the active-
+  // warranty check below uses) so formatting differences (spaces, a
+  // leading 0 vs +94) don't stop it from finding them. jobs is newest-
+  // first, so the first hit is also their most recent visit.
+  const { jobs } = useRepair();
+  const [customerMatch, setCustomerMatch] = useState<string | null>(null);
+  const handleCustomerContact = (raw: string) => {
+    const digits = raw.replace(/\D/g, "");
+    const match = digits.length >= 7
+      ? jobs.find(j => (j.phone || "").replace(/\D/g, "").endsWith(digits.slice(-7)))
+      : undefined;
+    setCustomerMatch(match ? match.customerName : null);
+    onChange({
+      customerContact: raw,
+      // Never overwrite something the cashier already typed on purpose —
+      // this only fills in what's still blank.
+      ...(match && !data.customerName.trim() ? { customerName: match.customerName } : {}),
+      ...(match?.customerEmail && !data.customerEmail.trim() ? { customerEmail: match.customerEmail } : {}),
+    });
+  };
 
   // Admin-managed (Admin Control -> Device Faults) — falls back to the fixed
   // list while it's still loading, when Supabase isn't configured, or if
@@ -506,146 +379,428 @@ function Step2({ data, onChange, isMobile, models, onAddModel, errors, modelNumb
     onChange(knownBrand && !data.deviceBrand.trim() ? { deviceModel: m, deviceBrand: knownBrand } : { deviceModel: m });
   };
 
+  // "Items Received With Device" is the one part of the device panel that's
+  // genuinely optional and rarely revisited once set, so it folds like the
+  // accordions in Step 2 — keeping the newly-merged-in device column from
+  // outgrowing the dealer/job column beside it.
+  const [itemsOpen, setItemsOpen] = useState(false);
+  const receivedCount = data.receivedItems.length;
+
   return (
-    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
-      {/* Left: Device Info & Received Items */}
+    // Bounded to the wizard's content area on desktop (same fix as Step 2's
+    // accordion column) so the Device Info/Faults column on the right can
+    // scroll on its own when "Items Received" expands, instead of the whole
+    // step — and the page — growing taller and scrolling underneath it.
+    <div style={{
+      display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20,
+      alignItems: "stretch", height: isMobile ? "auto" : "100%", minHeight: 0,
+    }}>
+      {/* A single stacked column — Dealer Information on top, Job & Customer
+          Details directly below it — capped to a comfortable form width
+          instead of stretching to fill the row. alignSelf keeps it sized to
+          its own (shorter) content rather than stretching the full row
+          height, which the right column needs for its own scrollbar. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 20, width: isMobile ? "100%" : undefined, flex: isMobile ? "none" : "0 1 640px", alignSelf: isMobile ? "stretch" : "flex-start" }}>
+      {/* Dealer */}
       <div style={panelStyle}>
-        <div style={sectionHeaderStyle}>📱 Device Information</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
-          <div>
-            <label style={labelStyle}><Hash size={11} style={{ verticalAlign: "-1px" }} /> Model Number</label>
-            <input
-              style={inputStyle}
-              placeholder="e.g. M2006C3LMG — auto-fills the model"
-              value={data.deviceModelNumber}
-              onChange={(e) => handleModelNumber(e.target.value)}
-            />
-            {lookupResult && lookupResult !== "no-match" && (
-              <p style={{ fontSize: 11, color: "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
-                <CheckCircle2 size={12} /> Identified: <strong>{lookupResult}</strong>
-              </p>
-            )}
-            {lookupResult === "no-match" && (
-              <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4 }}>
-                Not in the local database — select or type the model below.
-              </p>
-            )}
-          </div>
-          <div data-field="deviceModel" className={bad("deviceModel") ? "field-shake" : undefined}>
-            <label style={labelStyle}>Device Model</label>
-            <Combobox
-              value={data.deviceModel}
-              options={models}
-              onAddOption={onAddModel}
-              placeholder="Type or select a model…"
-              inputStyle={bad("deviceModel") ? invalidStyle : undefined}
-              onChange={handleDeviceModel}
-            />
-            <FieldError show={bad("deviceModel")}>Select or type the device model</FieldError>
-          </div>
-          <div data-field="deviceBrand" className={bad("deviceBrand") ? "field-shake" : undefined}>
-            <label style={labelStyle}>Device Brand</label>
-            <Combobox
-              value={data.deviceBrand}
-              options={brands}
-              onAddOption={onAddBrand}
-              placeholder="Auto-fills where known, or pick/type one…"
-              inputStyle={bad("deviceBrand") ? invalidStyle : undefined}
-              onChange={(b) => onChange({ deviceBrand: b })}
-            />
-            <FieldError show={bad("deviceBrand")}>Select or type the device brand</FieldError>
-          </div>
-          <div>
-            <label style={labelStyle}>IMEI Number</label>
-            <input
-              style={inputStyle}
-              placeholder="15-digit IMEI"
-              maxLength={15}
-              value={data.deviceIMEI}
-              onChange={(e) => onChange({ deviceIMEI: e.target.value.replace(/\D/g, "") })}
-            />
-          </div>
+        <div style={sectionHeaderStyle}>🏪 Dealer Information</div>
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Select Dealer</label>
+          <Combobox
+            value={dealer?.name ?? ""}
+            options={dealers.map((d) => d.name)}
+            allowAdd={false}
+            placeholder={dealers.length ? "— Choose a dealer —" : "No dealers — add them in Admin Control"}
+            onChange={(name) => {
+              const match = dealers.find((d) => d.name === name);
+              // Switching dealer resets the job number, because the right
+              // answer differs entirely: our own device gets our next RM
+              // number, another shop's device keeps the number on their docket.
+              // Our number is always ours to assign, whoever the device came
+              // from — it is what the tag encodes and what a scan resolves.
+              // Only the dealer's own reference changes with the dealer.
+              onChange({
+                dealerId: match ? String(match.id) : "",
+                dealerJobNo: "",
+              });
+            }}
+          />
+          {dealers.length === 0 && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5 }}>
+              Add repair dealers under Admin Control → Repair Dealers.
+            </div>
+          )}
         </div>
 
-        <div style={sectionHeaderStyle}>📦 Items Received With Device</div>
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 6 }}>
-          {RECEIVED_ITEMS.map((item) => {
-            const checked = data.receivedItems.includes(item);
-            const toggle = () => onChange({ receivedItems: toggleItem(data.receivedItems, item) });
-            return (
-              <div
-                key={item}
-                role="checkbox"
-                aria-checked={checked}
-                tabIndex={0}
-                style={checkboxItemStyle(checked)}
-                onClick={toggle}
-                onKeyDown={onCheckboxKeyDown(toggle)}
-              >
-                <div style={{
-                  width: 16, height: 16, borderRadius: 4, border: `2px solid ${checked ? "var(--accent)" : "var(--border)"}`,
-                  background: checked ? "var(--accent)" : "transparent",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  flexShrink: 0, transition: "all 0.15s",
-                }}>
-                  {checked && <span style={{ color: "var(--accent-fg)", fontSize: 10, fontWeight: 700 }}>✓</span>}
-                </div>
-                <span style={{ fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)" }}>{item}</span>
-              </div>
-            );
-          })}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, opacity: dealer ? 1 : 0.4, transition: "opacity 0.2s" }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr", gap: 12 }}>
+            <div>
+              <label style={labelStyle}>Address</label>
+              <input readOnly style={readOnlyInputStyle} value={dealer?.address ?? ""} placeholder="Select dealer above" />
+            </div>
+            <div>
+              <label style={labelStyle}>Contact Number</label>
+              <input readOnly style={readOnlyInputStyle} value={dealer?.contact ?? ""} placeholder="—" />
+            </div>
+            <div>
+              <label style={labelStyle}>Joining Date</label>
+              <input readOnly style={readOnlyInputStyle} value={dealer ? fmtJoined(dealer.joinedAt) : ""} placeholder="—" />
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Right: Faults */}
+      {/* This job — the numbers it is filed under, then whose it is. The
+          panel above is about the dealer as a business; this one is about
+          the repair in front of you, which is why it sits directly below.
+
+          Our own walk-ins get the full customer form. A device sent by
+          another shop belongs to that shop as far as we're concerned — they
+          booked it, they collect it, they are who we ring — so there's no
+          end-customer form to fill in, just the two job numbers. */}
       <div style={panelStyle}>
-        <div style={sectionHeaderStyle}>🔧 Device Faults</div>
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 6, marginBottom: 18 }}>
-          {commonFaults.map((fault) => {
-            const checked = data.faultCheckboxes.includes(fault);
-            const toggle = () => onChange({ faultCheckboxes: toggleItem(data.faultCheckboxes, fault) });
+        <div style={sectionHeaderStyle}>📄 Job & Customer Details</div>
+        {(() => {
+          // Both branches below need the Job Number field, just laid out
+          // differently — side-by-side with the dealer's own number for an
+          // outside dealer, or on its own row above the customer form for
+          // an in-house job — so it's built once here rather than twice.
+          const jobNumberField = (
+            <div data-field="jobNumber" className={bad("jobNumber") ? "field-shake" : undefined}>
+              <label style={labelStyle}>Job Number</label>
+              <input
+                style={{
+                  ...inputStyle,
+                  ...(bad("jobNumber") ? invalidStyle : {}),
+                  // Muted text only, same bg-card background as every other
+                  // field — var(--bg-primary) here made the border all but
+                  // disappear (it's nearly the same shade as var(--border)).
+                  ...(data.autoJobNumber ? { color: "var(--text-muted)" } : {}),
+                }}
+                // While auto-generating, fall back to the preview so the box
+                // shows the number that is coming rather than sitting blank.
+                // Derived rather than written into state: nothing needs
+                // saving, and the real number is still assigned by the
+                // sequence on insert.
+                value={data.autoJobNumber ? (data.jobNumber || nextJobNo || "") : data.jobNumber}
+                placeholder={data.autoJobNumber ? "Assigned on save" : "e.g. 54000 — the dealer's own number"}
+                onChange={(e) => {
+                  // Typing is itself the decision to supply a number, so the
+                  // tick clears rather than the box being locked until it is
+                  // unticked.
+                  onChange({ jobNumber: e.target.value, autoJobNumber: false });
+                }}
+              />
+
+              <label style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={data.autoJobNumber}
+                  onChange={(e) => onChange({
+                    autoJobNumber: e.target.checked,
+                    jobNumber: e.target.checked ? (nextJobNo ?? "") : "",
+                  })}
+                  style={{ cursor: "pointer" }}
+                />
+                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Generate the job number automatically</span>
+              </label>
+
+              <FieldError show={bad("jobNumber")}>Enter the job number, or tick to generate one</FieldError>
+            </div>
+          );
+
+          // Outside dealer: just the two job numbers, side by side, then
+          // nothing else — there's no end customer to take details for.
+          if (dealer && !dealer.inHouse) {
             return (
-              <div
-                key={fault}
-                role="checkbox"
-                aria-checked={checked}
-                tabIndex={0}
-                style={checkboxItemStyle(checked)}
-                onClick={toggle}
-                onKeyDown={onCheckboxKeyDown(toggle)}
-              >
-                <div style={{
-                  width: 16, height: 16, borderRadius: 4, border: `2px solid ${checked ? "#ff6b6b" : "var(--border)"}`,
-                  background: checked ? "#ff6b6b" : "transparent",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  flexShrink: 0, transition: "all 0.15s",
-                }}>
-                  {checked && <span style={{ color: "#fff", fontSize: 10, fontWeight: 700 }}>✓</span>}
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20 }}>
+                {jobNumberField}
+                <div data-field="dealerJobNo" className={bad("dealerJobNo") ? "field-shake" : undefined}>
+                  <label style={labelStyle}>{dealer.name}&apos;s Job Number (Optional)</label>
+                  <input
+                    // Red the moment a clash is known, without waiting for a
+                    // failed Next — the number is wrong now, not when the
+                    // wizard says so.
+                    style={{ ...inputStyle, ...(bad("dealerJobNo") || dealerNoCheck?.existing ? invalidStyle : {}) }}
+                    value={data.dealerJobNo}
+                    placeholder="e.g. 54000 — leave blank if they didn't give you one"
+                    onChange={(e) => onChange({ dealerJobNo: e.target.value })}
+                  />
+                  {/* Caught while typing, not at save: correcting a digit here
+                      beats redoing five steps of intake after the constraint
+                      rejects it. */}
+                  {dealerNoCheck?.existing ? (
+                    <div style={{
+                      marginTop: 8, padding: "11px 13px", borderRadius: 9,
+                      background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.45)",
+                    }}>
+                      <p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 700, marginBottom: 4 }}>
+                        {dealer.name} already has job {dealerNoCheck.existing.dealerJobNo}
+                      </p>
+                      <p style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+                        {dealerNoCheck.existing.customerName} · {dealerNoCheck.existing.device} ·
+                        {" "}booked {fmtJoined(dealerNoCheck.existing.createdAt)} · {dealerNoCheck.existing.status}
+                        {" "}(our number {dealerNoCheck.existing.id})
+                      </p>
+                      {dealerNoCheck.suggestion && (
+                        <div style={{ marginTop: 9, display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+                            Same device back again?
+                          </span>
+                          <button
+                            onClick={() => onChange({ dealerJobNo: dealerNoCheck.suggestion! })}
+                            style={{
+                              padding: "5px 12px", borderRadius: 7, fontSize: 12, fontWeight: 700,
+                              background: "var(--accent)", border: "none", color: "#fff", cursor: "pointer",
+                              fontFamily: "'Plus Jakarta Sans', sans-serif",
+                            }}
+                          >
+                            Book it as {dealerNoCheck.suggestion}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : checkingDealerNo ? (
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5 }}>Checking…</div>
+                  ) : null}
                 </div>
-                <span style={{ fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)" }}>{fault}</span>
               </div>
             );
-          })}
+          }
+
+          // In-house / no dealer yet: Job Number on its own row, then the
+          // customer form laid out as a 2x2 grid — four columns left each
+          // field too narrow for its placeholder/error text to fit on one
+          // line, and left the panel awkwardly short next to the empty
+          // space below it.
+          return (
+            <>
+              <div style={{ marginBottom: 20 }}>{jobNumberField}</div>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)", gap: 20 }}>
+                {/* Contact number comes first — typing a number already in
+                    our job history fills in the rest below, so it's worth
+                    asking for before the fields it can fill. */}
+                <div data-field="customerContact" className={bad("customerContact") ? "field-shake" : undefined}>
+                  <label style={labelStyle}>Contact Number *</label>
+                  <input
+                    style={{ ...inputStyle, ...(bad("customerContact") ? invalidStyle : {}) }}
+                    placeholder="e.g. 077 123 4567"
+                    value={data.customerContact}
+                    onChange={(e) => handleCustomerContact(e.target.value)}
+                  />
+                  {customerMatch && (
+                    <p style={{ fontSize: 11, color: "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                      <CheckCircle2 size={12} /> Returning customer: <strong>{customerMatch}</strong>
+                    </p>
+                  )}
+                  <FieldError show={bad("customerContact")}>Enter a contact number</FieldError>
+                </div>
+                <div>
+                  <label style={labelStyle}>NIC Number</label>
+                  <input
+                    style={inputStyle}
+                    placeholder="e.g. 199912345678"
+                    value={data.customerNIC}
+                    onChange={(e) => onChange({ customerNIC: e.target.value })}
+                  />
+                </div>
+                <div data-field="customerName" className={bad("customerName") ? "field-shake" : undefined}>
+                  <label style={labelStyle}>Full Name *</label>
+                  <input
+                    style={{ ...inputStyle, ...(bad("customerName") ? invalidStyle : {}) }}
+                    placeholder="e.g. Kasun Perera"
+                    value={data.customerName}
+                    onChange={(e) => onChange({ customerName: e.target.value })}
+                  />
+                  <FieldError show={bad("customerName")}>Enter the customer&apos;s full name</FieldError>
+                </div>
+                <div>
+                  <label style={labelStyle}>Email Address</label>
+                  <input
+                    style={inputStyle}
+                    placeholder="e.g. customer@email.com"
+                    type="email"
+                    value={data.customerEmail}
+                    onChange={(e) => onChange({ customerEmail: e.target.value })}
+                  />
+                </div>
+              </div>
+            </>
+          );
+        })()}
+      </div>
+      </div>
+
+      {/* Right: Device Information + Device Faults — used to be their own
+          step; the device is right there in front of the cashier at the
+          same time as the dealer and customer, so there's no real reason
+          it needed a separate page. Items Received folds since it's the
+          one part nobody needs to see twice. Scrolls on its own, bounded to
+          the row's height, so expanding it never grows the page. */}
+      <div style={{
+        display: "flex", flexDirection: "column", gap: 20, flex: isMobile ? "none" : 1,
+        minWidth: isMobile ? undefined : 280, minHeight: 0,
+        overflowY: isMobile ? "visible" : "auto", paddingRight: isMobile ? 0 : 6,
+      }}>
+        {/* flexShrink: 0 — without it, this scrolling column's flex items get
+            squashed to fit instead of the column growing a scrollbar (same
+            issue the Step 2 accordions hit; see AccordionSection). */}
+        <div style={{ ...panelStyle, flexShrink: 0 }}>
+          <div style={sectionHeaderStyle}>📱 Device Information</div>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(4, 1fr)", gap: 14, marginBottom: 18 }}>
+            <div>
+              <label style={labelStyle}><Hash size={11} style={{ verticalAlign: "-1px" }} /> Model Number</label>
+              <input
+                style={inputStyle}
+                placeholder="e.g. M2006C3LMG — auto-fills the model"
+                value={data.deviceModelNumber}
+                onChange={(e) => handleModelNumber(e.target.value)}
+              />
+              {lookupResult && lookupResult !== "no-match" && (
+                <p style={{ fontSize: 11, color: "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                  <CheckCircle2 size={12} /> Identified: <strong>{lookupResult}</strong>
+                </p>
+              )}
+              {lookupResult === "no-match" && (
+                <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4 }}>
+                  Not in the local database — select or type the model below.
+                </p>
+              )}
+            </div>
+            <div data-field="deviceModel" className={bad("deviceModel") ? "field-shake" : undefined}>
+              <label style={labelStyle}>Device Model</label>
+              <Combobox
+                value={data.deviceModel}
+                options={models}
+                onAddOption={onAddModel}
+                placeholder="Type or select…"
+                inputStyle={bad("deviceModel") ? invalidStyle : undefined}
+                onChange={handleDeviceModel}
+              />
+              <FieldError show={bad("deviceModel")}>Select or type the model</FieldError>
+            </div>
+            <div data-field="deviceBrand" className={bad("deviceBrand") ? "field-shake" : undefined}>
+              <label style={labelStyle}>Device Brand</label>
+              <Combobox
+                value={data.deviceBrand}
+                options={brands}
+                onAddOption={onAddBrand}
+                placeholder="Auto-fills where known…"
+                inputStyle={bad("deviceBrand") ? invalidStyle : undefined}
+                onChange={(b) => onChange({ deviceBrand: b })}
+              />
+              <FieldError show={bad("deviceBrand")}>Select or type the brand</FieldError>
+            </div>
+            <div>
+              <label style={labelStyle}>IMEI Number</label>
+              <input
+                style={inputStyle}
+                placeholder="15-digit IMEI"
+                maxLength={15}
+                value={data.deviceIMEI}
+                onChange={(e) => onChange({ deviceIMEI: e.target.value.replace(/\D/g, "") })}
+              />
+            </div>
+          </div>
+
+          <AccordionSection
+            title="📦 Items Received With Device"
+            summary={receivedCount > 0 ? `${receivedCount} item${receivedCount !== 1 ? "s" : ""}` : "None selected"}
+            open={itemsOpen}
+            onToggle={() => setItemsOpen(o => !o)}
+          >
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 6 }}>
+              {RECEIVED_ITEMS.map((item) => {
+                const checked = data.receivedItems.includes(item);
+                const toggle = () => onChange({ receivedItems: toggleItem(data.receivedItems, item) });
+                return (
+                  <div
+                    key={item}
+                    role="checkbox"
+                    aria-checked={checked}
+                    tabIndex={0}
+                    style={checkboxItemStyle(checked)}
+                    onClick={toggle}
+                    onKeyDown={onCheckboxKeyDown(toggle)}
+                  >
+                    <div style={{
+                      width: 16, height: 16, borderRadius: 4, border: `2px solid ${checked ? "var(--accent)" : "var(--border)"}`,
+                      background: checked ? "var(--accent)" : "transparent",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      flexShrink: 0, transition: "all 0.15s",
+                    }}>
+                      {checked && <span style={{ color: "var(--accent-fg)", fontSize: 10, fontWeight: 700 }}>✓</span>}
+                    </div>
+                    <span style={{ fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)" }}>{item}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </AccordionSection>
         </div>
 
-        <div>
-          <label style={labelStyle}>Additional Fault Description</label>
-          <textarea
-            style={{ ...inputStyle, resize: "vertical", minHeight: 90 }}
-            placeholder="Describe any additional issues or customer-reported symptoms in detail..."
-            value={data.faultDescription}
-            onChange={(e) => onChange({ faultDescription: e.target.value })}
-          />
+        <div style={{ ...panelStyle, flexShrink: 0 }}>
+          <div style={sectionHeaderStyle}>🔧 Device Faults</div>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr", gap: 6, marginBottom: 18 }}>
+            {commonFaults.map((fault) => {
+              const checked = data.faultCheckboxes.includes(fault);
+              const toggle = () => onChange({ faultCheckboxes: toggleItem(data.faultCheckboxes, fault) });
+              return (
+                <div
+                  key={fault}
+                  role="checkbox"
+                  aria-checked={checked}
+                  tabIndex={0}
+                  style={checkboxItemStyle(checked)}
+                  onClick={toggle}
+                  onKeyDown={onCheckboxKeyDown(toggle)}
+                >
+                  <div style={{
+                    width: 16, height: 16, borderRadius: 4, border: `2px solid ${checked ? "#ff6b6b" : "var(--border)"}`,
+                    background: checked ? "#ff6b6b" : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    flexShrink: 0, transition: "all 0.15s",
+                  }}>
+                    {checked && <span style={{ color: "#fff", fontSize: 10, fontWeight: 700 }}>✓</span>}
+                  </div>
+                  <span style={{ fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)" }}>{fault}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div>
+            <label style={labelStyle}>Additional Fault Description</label>
+            <textarea
+              style={{ ...inputStyle, resize: "vertical", minHeight: 90 }}
+              placeholder="Describe any additional issues or customer-reported symptoms in detail..."
+              value={data.faultDescription}
+              onChange={(e) => onChange({ faultDescription: e.target.value })}
+            />
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-// ─── Step 3: Costs & Job Info ─────────────────────────────────────────────────
+// ─── Step 2: Costs & Evidence ─────────────────────────────────────────────────
+//
+// Cost & Payment is the one thing that's actually required here, so it stays
+// permanently visible on the left. Everything else that used to be spread
+// across "Assign Repairman" and "Evidence & Sign" — Job Details, Available
+// Repairmen, Device Cosmetic Condition, Intake Photos — is optional at intake
+// and now lives folded up on the right, opened only when needed. Device
+// Unlock and Terms & Conditions stay unfolded: the former is short enough
+// not to need hiding, the latter is what the final step blocks on.
 
-function Step3({ data, onChange, isMobile, errors, dealers }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; errors: RequiredField[]; dealers: RepairDealer[] }) {
+function Step2({ data, onChange, isMobile, errors, dealers, technicians, techLoading }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; errors: RequiredField[]; dealers: RepairDealer[]; technicians: Technician[]; techLoading: boolean }) {
   const bad = (f: RequiredField) => errors.includes(f);
+  // Only one of the accordions below is ever open at a time — opening one
+  // closes whichever else was open, so the list doesn't grow tall with
+  // several expanded sections at once.
+  const [openAccordion, setOpenAccordion] = useState<string | null>(null);
+  const toggleAccordion = (id: string) => setOpenAccordion(o => o === id ? null : id);
   const estimated = parseFloat(data.estimatedCost) || 0;
   const advance = parseFloat(data.advancePaid) || 0;
   const balance = estimated - advance;
@@ -655,10 +810,42 @@ function Step3({ data, onChange, isMobile, errors, dealers }: { data: FormData; 
   const picked = dealers.find(d => String(d.id) === data.dealerId);
   const fromAnotherShop = !!picked && !picked.inHouse;
 
+  const { jobs } = useRepair();
+  // Live workload rather than a hard-coded number, so the cashier can see who is
+  // actually loaded up before assigning.
+  const workload = (name: string) =>
+    jobs.filter(j => j.technician === name && (j.status === "Issued" || j.status === "Pending")).length;
+  const assignedTech = technicians.find((r) => r.id === data.assignedRepairman);
+
+  const fileRef = useRef<HTMLInputElement>(null);
+  const setCond = (key: keyof Omit<DeviceConditionMap, "notes">, grade: ConditionGrade) =>
+    onChange({ condition: { ...data.condition, [key]: grade } });
+  const onFiles = (files: FileList | null) => {
+    if (!files) return;
+    Array.from(files).slice(0, 6).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = () => onChange({ intakePhotos: [...data.intakePhotos, reader.result as string] });
+      reader.readAsDataURL(file);
+    });
+  };
+  const removePhoto = (i: number) =>
+    onChange({ intakePhotos: data.intakePhotos.filter((_, idx) => idx !== i) });
+
+  // On desktop this row is pinned to exactly the height Step 1/2 already get
+  // from the wizard's content area (not left to grow with it) — Cost &
+  // Payment sizes to its own content as before, and the accordion stack gets
+  // its own internal scrollbar instead of pushing the whole step taller.
   return (
-    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
-      {/* Left: Financials */}
-      <div style={panelStyle}>
+    <div style={{
+      display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20,
+      alignItems: "stretch", height: isMobile ? "auto" : "100%", minHeight: 0,
+    }}>
+      {/* Left: Cost & Payment — the only required content on this step, so it
+          never folds. alignSelf overrides the row's stretch (which the right
+          column still needs, for its own scrollbar) so this panel sizes to
+          its own short content instead of stretching into empty space all
+          the way down to the footer. */}
+      <div style={{ ...panelStyle, alignSelf: "flex-start" }}>
         <div style={sectionHeaderStyle}>💰 Cost & Payment</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div data-field="estimatedCost" className={bad("estimatedCost") ? "field-shake" : undefined}>
@@ -678,6 +865,15 @@ function Step3({ data, onChange, isMobile, errors, dealers }: { data: FormData; 
             ) : (
               <FieldError show={bad("estimatedCost")}>Enter an estimated cost (0 if not yet quoted)</FieldError>
             )}
+          </div>
+          <div>
+            <label style={labelStyle}>Estimated Completion Date</label>
+            <input
+              type="date"
+              style={inputStyle}
+              value={data.estimatedCompletion}
+              onChange={(e) => onChange({ estimatedCompletion: e.target.value })}
+            />
           </div>
           <div>
             <label style={labelStyle}>Advance Received (LKR)</label>
@@ -728,331 +924,224 @@ function Step3({ data, onChange, isMobile, errors, dealers }: { data: FormData; 
         </div>
       </div>
 
-      {/* Right: Job Info */}
-      <div style={panelStyle}>
-        <div style={sectionHeaderStyle}>📋 Job Details</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div>
-            <label style={labelStyle}>Job Priority</label>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {/* These four are the job_priority enum. Anything else is
-                  rejected by the database at save time, after the whole intake
-                  has been filled in — so the picker must not offer it. Colours
-                  match the priority chips in JobsTable. */}
-              {(["Low", "Normal", "High", "Urgent"] as JobPriority[]).map((p) => {
-                const colors: Record<JobPriority, string> = { Low: "#94a3b8", Normal: "#60a5fa", High: "#fbbf24", Urgent: "#f87171" };
-                const isActive = data.jobPriority === p;
-                return (
-                  <button
-                    key={p}
-                    onClick={() => onChange({ jobPriority: p })}
-                    style={{
-                      padding: "7px 18px", borderRadius: 7, border: `1px solid ${isActive ? colors[p] : "var(--border)"}`,
-                      background: isActive ? colors[p] : "transparent",
-                      color: isActive ? "var(--accent-fg)" : "var(--text-secondary)",
-                      fontWeight: isActive ? 700 : 400, fontSize: 12, cursor: "pointer",
-                      fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s",
-                    }}
-                  >
-                    {p}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <label style={labelStyle}>Job / Internal Notes</label>
-            <textarea
-              style={{ ...inputStyle, resize: "vertical", minHeight: 120 }}
-              placeholder="Add any internal notes about this job, special handling instructions, customer preferences, etc."
-              value={data.jobNotes}
-              onChange={(e) => onChange({ jobNotes: e.target.value })}
-            />
-          </div>
-
-          <div style={{
-            padding: "12px 14px", borderRadius: 8,
-            background: "rgba(var(--accent-rgb, 232,232,232), 0.06)",
-            border: "1px dashed var(--accent)",
-          }}>
-            <p style={{ margin: 0, fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-secondary)", lineHeight: 1.6 }}>
-              💡 A job card will be auto-generated with a unique reference number upon submission. The customer will be notified via SMS if a contact number is provided.
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Step 4: Assign Repairman ─────────────────────────────────────────────────
-
-function Step4({ data, onChange, isMobile, technicians, techLoading }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; technicians: Technician[]; techLoading: boolean }) {
-  const { jobs } = useRepair();
-  // Live workload rather than a hard-coded number, so the cashier can see who is
-  // actually loaded up before assigning.
-  const workload = (name: string) =>
-    jobs.filter(j => j.technician === name && (j.status === "Issued" || j.status === "Pending")).length;
-
-  return (
-    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
-      <div style={{ ...panelStyle, flex: 1.3 }}>
-        <div style={sectionHeaderStyle}>🛠️ Available Repairmen</div>
-
-        {techLoading && (
-          <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", padding: "10px 0" }}>
-            Loading technicians…
-          </p>
-        )}
-
-        {/* An empty roster is a setup problem, not "no one is free" — say so. */}
-        {!techLoading && technicians.length === 0 && (
-          <div style={{ display: "flex", gap: 9, padding: "11px 13px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)" }}>
-            <AlertCircle size={15} color="var(--warning)" style={{ flexShrink: 0, marginTop: 1 }} />
-            <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
-              No technicians in the staff directory yet. Add staff with the{" "}
-              <strong>Technician</strong> role in Supabase (or Admin Control), or skip this step and
-              let any technician pick the job up.
-            </p>
-          </div>
-        )}
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {technicians.map((r) => {
-            const isSelected = data.assignedRepairman === r.id;
-            const canSelect = r.available;
-            const toggle = () => canSelect && onChange({ assignedRepairman: isSelected ? "" : r.id });
-            return (
-              <div
-                key={r.id}
-                // Clicking the assigned repairman again unassigns them, so a
-                // misclick can be undone and the step left as "Skip".
-                onClick={toggle}
-                onKeyDown={e => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggle(); } }}
-                role="radio"
-                aria-checked={isSelected}
-                aria-disabled={!canSelect}
-                tabIndex={canSelect ? 0 : -1}
-                title={!canSelect ? `${r.name} is busy` : isSelected ? "Click to unassign" : `Assign to ${r.name}`}
-                style={{
-                  display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
-                  borderRadius: 10, border: `1px solid ${isSelected ? "var(--accent)" : "var(--border)"}`,
-                  background: isSelected ? "rgba(var(--accent-rgb, 232,232,232), 0.06)" : "var(--bg)",
-                  cursor: canSelect ? "pointer" : "not-allowed",
-                  opacity: canSelect ? 1 : 0.5, transition: "all 0.15s",
-                }}
-              >
-                <div style={{
-                  width: 44, height: 44, borderRadius: "50%",
-                  background: isSelected ? "var(--accent)" : "var(--border)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 18, fontWeight: 700, flexShrink: 0,
-                  color: isSelected ? "var(--accent-fg)" : "var(--text-secondary)",
-                  fontFamily: "'Plus Jakarta Sans', sans-serif",
-                }}>
-                  {r.name.charAt(0)}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)", marginBottom: 3 }}>
-                    {r.name}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                    {r.speciality} · {workload(r.name)} active job{workload(r.name) !== 1 ? "s" : ""}
-                  </div>
-                </div>
-                <div style={{
-                  padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600,
-                  background: r.available ? "rgba(74, 222, 128, 0.12)" : "rgba(239, 68, 68, 0.12)",
-                  color: r.available ? "#4ade80" : "#ef4444",
-                  fontFamily: "'Plus Jakarta Sans', sans-serif",
-                }}>
-                  {r.available ? "Available" : "Busy"}
-                </div>
-                {isSelected && (
-                  <div style={{
-                    width: 22, height: 22, borderRadius: "50%", background: "var(--accent)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 12, color: "var(--accent-fg)", fontWeight: 700,
-                  }}>✓</div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div style={{ ...panelStyle, flex: 1 }}>
-        <div style={sectionHeaderStyle}>📅 Schedule & Completion</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div>
-            <label style={labelStyle}>Estimated Completion Date</label>
-            <input
-              type="date"
-              style={inputStyle}
-              value={data.estimatedCompletion}
-              onChange={(e) => onChange({ estimatedCompletion: e.target.value })}
-            />
-          </div>
-
-          {data.assignedRepairman && (
-            <div style={{
-              padding: "14px 16px", borderRadius: 10,
-              background: "rgba(var(--accent-rgb, 232,232,232), 0.06)",
-              border: "1px solid var(--accent)",
-            }}>
-              {(() => {
-                const r = technicians.find((rm) => rm.id === data.assignedRepairman);
-                return r ? (
-                  <>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
-                      <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                        Assigned to
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => onChange({ assignedRepairman: "" })}
-                        style={{
-                          display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 6,
-                          border: "1px solid var(--border)", background: "transparent", cursor: "pointer",
-                          fontSize: 10.5, fontWeight: 600, color: "var(--text-secondary)",
-                          fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s",
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.border = "1px solid var(--danger)"; e.currentTarget.style.color = "var(--danger)"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.border = "1px solid var(--border)"; e.currentTarget.style.color = "var(--text-secondary)"; }}
-                      >
-                        <XIcon size={10} /> Unassign
-                      </button>
-                    </div>
-                    <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)", marginBottom: 4 }}>
-                      {r.name}
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                      {r.speciality}
-                    </div>
-                  </>
-                ) : null;
-              })()}
-            </div>
-          )}
-
-          <div style={{
-            marginTop: "auto", padding: "14px 16px", borderRadius: 10,
-            background: "var(--bg-primary)", border: "1px solid var(--border)",
-          }}>
-            <div style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-secondary)", marginBottom: 10 }}>
-              REPAIR SUMMARY
-            </div>
-            {[
-              ["Repairman", technicians.find((r) => r.id === data.assignedRepairman)?.name ?? "Not assigned"],
-              ["Completion", data.estimatedCompletion || "Not set"],
-            ].map(([k, v]) => (
-              <div key={k} style={{ display: "flex", justifyContent: "space-between", marginBottom: 7 }}>
-                <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{k}</span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{v}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Step 5: Evidence & Sign ──────────────────────────────────────────────────
-
-function Step5({ data, onChange, isMobile, errors }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; errors: RequiredField[] }) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const bad = (f: RequiredField) => errors.includes(f);
-
-  const setCond = (key: keyof Omit<DeviceConditionMap, "notes">, grade: ConditionGrade) =>
-    onChange({ condition: { ...data.condition, [key]: grade } });
-
-  const onFiles = (files: FileList | null) => {
-    if (!files) return;
-    Array.from(files).slice(0, 6).forEach(file => {
-      const reader = new FileReader();
-      reader.onload = () => onChange({ intakePhotos: [...data.intakePhotos, reader.result as string] });
-      reader.readAsDataURL(file);
-    });
-  };
-
-  const removePhoto = (i: number) =>
-    onChange({ intakePhotos: data.intakePhotos.filter((_, idx) => idx !== i) });
-
-  return (
-    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 20, alignItems: isMobile ? "stretch" : "flex-start" }}>
-      {/* Left: Condition + Passcode */}
-      <div style={panelStyle}>
-        <div style={sectionHeaderStyle}>🩹 Device Cosmetic Condition</div>
-        <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 12, lineHeight: 1.5 }}>
-          Record the device&apos;s condition <strong>at drop-off</strong> — this protects both the
-          customer and the shop in any dispute.
-        </p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 16 }}>
-          {CONDITION_ZONES.map(zone => (
-            <div key={zone.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", width: isMobile ? 90 : 110, flexShrink: 0 }}>{zone.label}</span>
-              <div style={{ display: "flex", gap: 4, flex: 1 }}>
-                {GRADES.map(g => {
-                  const active = data.condition[zone.key] === g.value;
+      {/* Right: everything else, stacked — folded by default except Device
+          Unlock and Terms & Conditions. Scrolls on its own, bounded to the
+          same height as the Cost & Payment panel beside it, so this list
+          never grows the step (or the page) taller than it was before. */}
+      <div style={{
+        flex: 1, display: "flex", flexDirection: "column", gap: 14, minWidth: 0,
+        minHeight: 0, overflowY: isMobile ? "visible" : "auto", paddingRight: isMobile ? 0 : 6,
+      }}>
+        <AccordionSection title="📋 Job Details" summary={data.jobPriority} open={openAccordion === "job-details"} onToggle={() => toggleAccordion("job-details")}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <label style={labelStyle}>Job Priority</label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {/* These four are the job_priority enum. Anything else is
+                    rejected by the database at save time, after the whole intake
+                    has been filled in — so the picker must not offer it. Colours
+                    match the priority chips in JobsTable. */}
+                {(["Low", "Normal", "High", "Urgent"] as JobPriority[]).map((p) => {
+                  const colors: Record<JobPriority, string> = { Low: "#94a3b8", Normal: "#60a5fa", High: "#fbbf24", Urgent: "#f87171" };
+                  const isActive = data.jobPriority === p;
                   return (
-                    <button key={g.value} type="button" onClick={() => setCond(zone.key, g.value)}
+                    <button
+                      key={p}
+                      onClick={() => onChange({ jobPriority: p })}
                       style={{
-                        flex: 1, padding: "5px 4px", borderRadius: 6, fontSize: 10.5, fontWeight: 600,
-                        border: `1px solid ${active ? g.color : "var(--border)"}`,
-                        background: active ? `${g.color}1e` : "transparent",
-                        color: active ? g.color : "var(--text-muted)",
-                        cursor: "pointer", transition: "all 0.12s", fontFamily: "'Plus Jakarta Sans', sans-serif",
-                      }}>
-                      {g.value}
+                        padding: "7px 18px", borderRadius: 7, border: `1px solid ${isActive ? colors[p] : "var(--border)"}`,
+                        background: isActive ? colors[p] : "transparent",
+                        color: isActive ? "var(--accent-fg)" : "var(--text-secondary)",
+                        fontWeight: isActive ? 700 : 400, fontSize: 12, cursor: "pointer",
+                        fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s",
+                      }}
+                    >
+                      {p}
                     </button>
                   );
                 })}
               </div>
             </div>
-          ))}
-        </div>
-        <div style={{ marginBottom: 16 }}>
-          <label style={labelStyle}>Condition Notes</label>
-          <textarea
-            style={{ ...inputStyle, resize: "vertical", minHeight: 56 }}
-            placeholder="e.g. deep scratch top-left corner, small dent on right frame…"
-            value={data.condition.notes ?? ""}
-            onChange={e => onChange({ condition: { ...data.condition, notes: e.target.value } })}
-          />
-        </div>
 
-        <div style={sectionHeaderStyle}><Lock size={12} style={{ verticalAlign: "-1px" }} /> Device Unlock</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div>
-            <label style={labelStyle}>Passcode Type</label>
-            <select
-              style={{ ...inputStyle, appearance: "none", cursor: "pointer" }}
-              value={data.passcodeType}
-              onChange={e => onChange({ passcodeType: e.target.value as FormData["passcodeType"] })}
-            >
-              {["None", "PIN", "Pattern", "Password", "Provided Separately"].map(t => <option key={t}>{t}</option>)}
-            </select>
-          </div>
-          {(data.passcodeType === "PIN" || data.passcodeType === "Pattern" || data.passcodeType === "Password") && (
             <div>
-              <label style={labelStyle}>{data.passcodeType} (visible only to technician)</label>
-              <input
-                style={inputStyle}
-                placeholder={data.passcodeType === "Pattern" ? "e.g. 1-2-3-6-9" : "Enter unlock code"}
-                value={data.passcode}
-                onChange={e => onChange({ passcode: e.target.value })}
+              <label style={labelStyle}>Job / Internal Notes</label>
+              <textarea
+                style={{ ...inputStyle, resize: "vertical", minHeight: 120 }}
+                placeholder="Add any internal notes about this job, special handling instructions, customer preferences, etc."
+                value={data.jobNotes}
+                onChange={(e) => onChange({ jobNotes: e.target.value })}
               />
             </div>
-          )}
-        </div>
-      </div>
 
-      {/* Right: Photos + Terms + Signature */}
-      <div style={panelStyle}>
-        <div style={{ marginBottom: 16 }}>
-          <div style={sectionHeaderStyle}><Camera size={12} style={{ verticalAlign: "-1px" }} /> Intake Photos</div>
+            <div style={{
+              padding: "12px 14px", borderRadius: 8,
+              background: "rgba(var(--accent-rgb, 232,232,232), 0.06)",
+              border: "1px dashed var(--accent)",
+            }}>
+              <p style={{ margin: 0, fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                💡 A job card will be auto-generated with a unique reference number upon submission. The customer will be notified via SMS if a contact number is provided.
+              </p>
+            </div>
+          </div>
+        </AccordionSection>
+
+        <AccordionSection
+          title="🛠️ Available Repairmen"
+          summary={assignedTech ? `${assignedTech.name}${data.estimatedCompletion ? ` · Due ${data.estimatedCompletion}` : ""}` : "Not assigned yet"}
+          open={openAccordion === "repairmen"}
+          onToggle={() => toggleAccordion("repairmen")}
+        >
+          <div>
+            {techLoading && (
+              <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", padding: "10px 0" }}>
+                Loading technicians…
+              </p>
+            )}
+
+            {/* An empty roster is a setup problem, not "no one is free" — say so. */}
+            {!techLoading && technicians.length === 0 && (
+              <div style={{ display: "flex", gap: 9, padding: "11px 13px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)" }}>
+                <AlertCircle size={15} color="var(--warning)" style={{ flexShrink: 0, marginTop: 1 }} />
+                <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
+                  No technicians in the staff directory yet. Add staff with the{" "}
+                  <strong>Technician</strong> role in Supabase (or Admin Control), or skip this step and
+                  let any technician pick the job up.
+                </p>
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {technicians.map((r) => {
+                const isSelected = data.assignedRepairman === r.id;
+                const canSelect = r.available;
+                const toggle = () => canSelect && onChange({ assignedRepairman: isSelected ? "" : r.id });
+                return (
+                  <div
+                    key={r.id}
+                    // Clicking the assigned repairman again unassigns them, so a
+                    // misclick can be undone and the step left as "Skip".
+                    onClick={toggle}
+                    onKeyDown={e => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggle(); } }}
+                    role="radio"
+                    aria-checked={isSelected}
+                    aria-disabled={!canSelect}
+                    tabIndex={canSelect ? 0 : -1}
+                    title={!canSelect ? `${r.name} is busy` : isSelected ? "Click to unassign" : `Assign to ${r.name}`}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
+                      borderRadius: 10, border: `1px solid ${isSelected ? "var(--accent)" : "var(--border)"}`,
+                      background: isSelected ? "rgba(var(--accent-rgb, 232,232,232), 0.06)" : "var(--bg)",
+                      cursor: canSelect ? "pointer" : "not-allowed",
+                      opacity: canSelect ? 1 : 0.5, transition: "all 0.15s",
+                    }}
+                  >
+                    <div style={{
+                      width: 44, height: 44, borderRadius: "50%",
+                      background: isSelected ? "var(--accent)" : "var(--border)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 18, fontWeight: 700, flexShrink: 0,
+                      color: isSelected ? "var(--accent-fg)" : "var(--text-secondary)",
+                      fontFamily: "'Plus Jakarta Sans', sans-serif",
+                    }}>
+                      {r.name.charAt(0)}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)", marginBottom: 3 }}>
+                        {r.name}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                        {r.speciality} · {workload(r.name)} active job{workload(r.name) !== 1 ? "s" : ""}
+                      </div>
+                    </div>
+                    <div style={{
+                      padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                      background: r.available ? "rgba(74, 222, 128, 0.12)" : "rgba(239, 68, 68, 0.12)",
+                      color: r.available ? "#4ade80" : "#ef4444",
+                      fontFamily: "'Plus Jakarta Sans', sans-serif",
+                    }}>
+                      {r.available ? "Available" : "Busy"}
+                    </div>
+                    {isSelected && (
+                      <div style={{
+                        width: 22, height: 22, borderRadius: "50%", background: "var(--accent)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 12, color: "var(--accent-fg)", fontWeight: 700,
+                      }}>✓</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </AccordionSection>
+
+        <AccordionSection title="🩹 Device Cosmetic Condition" summary={data.condition.notes?.trim() ? "Notes added" : "At drop-off"} open={openAccordion === "condition"} onToggle={() => toggleAccordion("condition")}>
+          <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 12, lineHeight: 1.5 }}>
+            Record the device&apos;s condition <strong>at drop-off</strong> — this protects both the
+            customer and the shop in any dispute.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 16 }}>
+            {CONDITION_ZONES.map(zone => (
+              <div key={zone.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", width: isMobile ? 90 : 110, flexShrink: 0 }}>{zone.label}</span>
+                <div style={{ display: "flex", gap: 4, flex: 1 }}>
+                  {GRADES.map(g => {
+                    const active = data.condition[zone.key] === g.value;
+                    return (
+                      <button key={g.value} type="button" onClick={() => setCond(zone.key, g.value)}
+                        style={{
+                          flex: 1, padding: "5px 4px", borderRadius: 6, fontSize: 10.5, fontWeight: 600,
+                          border: `1px solid ${active ? g.color : "var(--border)"}`,
+                          background: active ? `${g.color}1e` : "transparent",
+                          color: active ? g.color : "var(--text-muted)",
+                          cursor: "pointer", transition: "all 0.12s", fontFamily: "'Plus Jakarta Sans', sans-serif",
+                        }}>
+                        {g.value}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div>
+            <label style={labelStyle}>Condition Notes</label>
+            <textarea
+              style={{ ...inputStyle, resize: "vertical", minHeight: 56 }}
+              placeholder="e.g. deep scratch top-left corner, small dent on right frame…"
+              value={data.condition.notes ?? ""}
+              onChange={e => onChange({ condition: { ...data.condition, notes: e.target.value } })}
+            />
+          </div>
+        </AccordionSection>
+
+        <StaticSection title={<><Lock size={12} style={{ verticalAlign: "-1px" }} /> Device Unlock</>}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div>
+              <label style={labelStyle}>Passcode Type</label>
+              <select
+                style={{ ...inputStyle, appearance: "none", cursor: "pointer" }}
+                value={data.passcodeType}
+                onChange={e => onChange({ passcodeType: e.target.value as FormData["passcodeType"] })}
+              >
+                {["None", "PIN", "Pattern", "Password", "Provided Separately"].map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+            {(data.passcodeType === "PIN" || data.passcodeType === "Pattern" || data.passcodeType === "Password") && (
+              <div>
+                <label style={labelStyle}>{data.passcodeType} (visible only to technician)</label>
+                <input
+                  style={inputStyle}
+                  placeholder={data.passcodeType === "Pattern" ? "e.g. 1-2-3-6-9" : "Enter unlock code"}
+                  value={data.passcode}
+                  onChange={e => onChange({ passcode: e.target.value })}
+                />
+              </div>
+            )}
+          </div>
+        </StaticSection>
+
+        <AccordionSection title="📷 Intake Photos" summary={`${data.intakePhotos.length} photo${data.intakePhotos.length !== 1 ? "s" : ""}`} open={openAccordion === "photos"} onToggle={() => toggleAccordion("photos")}>
           <input ref={fileRef} type="file" accept="image/*" multiple capture="environment" style={{ display: "none" }} onChange={e => onFiles(e.target.files)} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", gap: 8, marginBottom: 8 }}>
             {data.intakePhotos.map((src, i) => (
@@ -1069,14 +1158,15 @@ function Step5({ data, onChange, isMobile, errors }: { data: FormData; onChange:
               <Camera size={18} /> Add
             </button>
           </div>
-          <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 16 }}>
             Optional, but strongly recommended: front, back, and both sides — photos are your
             evidence of the device&apos;s state at drop-off.
           </p>
-        </div>
+          <SignaturePad value={data.signature} onChange={s => onChange({ signature: s })} label="Customer Signature" />
+        </AccordionSection>
 
-        {/* Terms */}
-        <div data-field="termsAccepted" className={bad("termsAccepted") ? "field-shake" : undefined} style={{ padding: "12px 14px", borderRadius: 10, background: "var(--bg-primary)", border: `1px solid ${bad("termsAccepted") ? "var(--danger)" : "var(--border)"}`, marginBottom: 14 }}>
+        {/* Terms — always visible; it's what the final Create Job click blocks on. */}
+        <div data-field="termsAccepted" className={bad("termsAccepted") ? "field-shake" : undefined} style={{ padding: "12px 14px", borderRadius: 10, background: "var(--bg-primary)", border: `1px solid ${bad("termsAccepted") ? "var(--danger)" : "var(--border)"}`, flexShrink: 0 }}>
           <p style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.06em", textTransform: "uppercase", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 8 }}>Terms &amp; Conditions ({TERMS_VERSION})</p>
           <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.6 }}>
             <li>Repair warranty covers only the parts/labour listed on completion.</li>
@@ -1092,8 +1182,6 @@ function Step5({ data, onChange, isMobile, errors }: { data: FormData; onChange:
           </label>
           <FieldError show={bad("termsAccepted")}>The customer must accept the terms</FieldError>
         </div>
-
-        <SignaturePad value={data.signature} onChange={s => onChange({ signature: s })} label="Customer Signature" />
       </div>
     </div>
   );
@@ -1162,7 +1250,11 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
   // filling in several intakes back to back; once the job saves, it's part
   // of `jobs` and shows up in historicalModels on its own from then on.
   const [sessionModels, setSessionModels] = useState<string[]>([]);
-  const [step, setStep] = useState(initialDraft?.step ?? 1);
+  // Clamped to 2: a draft saved before Device & Faults folded into Step 1
+  // (and before that, Assign Repairman / Evidence & Sign folding into what's
+  // now Step 2) could still carry an old step 3, 4, or 5, none of which
+  // exist any more.
+  const [step, setStep] = useState(Math.min(initialDraft?.step ?? 1, 2));
   // The step indicator now renders in RepairManagement's header row (next to
   // the section card, not stacked below it) — this is how it finds out which
   // step to highlight, since `step` itself stays owned here.
@@ -1215,10 +1307,10 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
   // active — Next Step / Back otherwise leave focus sitting on the button
   // that was clicked, so typing (or Tab) does nothing until the cashier
   // clicks into the form again. Includes custom controls like the technician
-  // rows and Step 2's checkbox grids (real <input>/<textarea>/<select> only
+  // rows and Step 1's checkbox grids (real <input>/<textarea>/<select> only
   // covers text fields — a step whose first control is one of those custom
-  // rows, e.g. Step 4's technician list ahead of the completion-date input,
-  // needs its own tabIndex to be found here in DOM order instead.
+  // rows, e.g. the technician list inside Step 2's accordions, needs its own
+  // tabIndex to be found here in DOM order instead.
   useEffect(() => {
     const id = requestAnimationFrame(() => {
       contentRef.current?.querySelector<HTMLElement>('input, textarea, select, [tabindex="0"]')?.focus({ preventScroll: true });
@@ -1373,10 +1465,6 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
     });
   };
 
-  // Step 4 (assigning a repairman) is optional — the job can be booked in and
-  // handed to a technician later, so the button says so when nobody is picked.
-  const nextLabel = step === 4 && !form.assignedRepairman.trim() ? "Skip This Step →" : "Next Step →";
-
   const handleNext = () => {
     const missing = missingIn(step);
     if (missing.length) { flagMissing(missing); return; }
@@ -1388,7 +1476,7 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
   };
 
   const handleSubmit = async () => {
-    const missing = missingIn(5);
+    const missing = missingIn(2);
     if (missing.length) { flagMissing(missing); return; }
     if (dealerNoCheck?.existing) { setStep(1); flagMissing(["dealerJobNo"]); return; }
     setErrors([]);
@@ -1508,7 +1596,7 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
     >
       {/* Active-warranty alert — surfaced once IMEI / phone is known */}
       {existingWarranty && (
-        <div style={{ margin: isMobile ? "0 16px 10px" : "0 28px 10px", display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 14px", borderRadius: 10, background: "rgba(167,139,250,0.08)", border: "1px solid rgba(167,139,250,0.3)" }}>
+        <div style={{ margin: "0 0 10px", display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 14px", borderRadius: 10, background: "rgba(167,139,250,0.08)", border: "1px solid rgba(167,139,250,0.3)" }}>
           <ShieldCheck size={15} color="#a78bfa" style={{ flexShrink: 0, marginTop: 1 }} />
           <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
             <strong style={{ color: "#a78bfa" }}>Active warranty found</strong> — {existingWarranty.id} covering{" "}
@@ -1518,19 +1606,21 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
         </div>
       )}
 
-      {/* Step Content */}
-      <div ref={contentRef} className="repair-wizard" style={{ flex: isMobile ? "none" : 1, padding: isMobile ? "0 16px" : "0 28px", minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>
-        {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} dealers={dealers} errors={errors} nextJobNo={nextJobNo} dealerNoCheck={dealerNoCheck} checkingDealerNo={checkingDealerNo} />}
-        {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} models={modelOptions} onAddModel={addModel} errors={errors} modelNumberLookup={modelNumberLookup} modelBrandLookup={modelBrandLookup} brands={brandOptions} onAddBrand={addBrand} />}
-        {step === 3 && <Step3 data={form} onChange={update} isMobile={isMobile} errors={errors} dealers={dealers} />}
-        {step === 4 && <Step4 data={form} onChange={update} isMobile={isMobile} technicians={technicians} techLoading={techLoading} />}
-        {step === 5 && <Step5 data={form} onChange={update} isMobile={isMobile} errors={errors} />}
+      {/* Step Content. No left padding — the "New Repair" card and step
+          indicator above (rendered by RepairManagement, outside this
+          component) sit flush against the page's own left margin with no
+          inset of their own, so matching that here is what actually lines
+          the panels up with them; padding on this side just pushed
+          everything an extra 16–28px to the right of that reference. */}
+      <div ref={contentRef} className="repair-wizard" style={{ flex: isMobile ? "none" : 1, padding: 0, minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>
+        {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} dealers={dealers} errors={errors} nextJobNo={nextJobNo} dealerNoCheck={dealerNoCheck} checkingDealerNo={checkingDealerNo} models={modelOptions} onAddModel={addModel} modelNumberLookup={modelNumberLookup} modelBrandLookup={modelBrandLookup} brands={brandOptions} onAddBrand={addBrand} />}
+        {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} errors={errors} dealers={dealers} technicians={technicians} techLoading={techLoading} />}
       </div>
 
       {/* Backend failure — the form keeps its contents so Create can be retried */}
       {saveError && (
         <div style={{
-          margin: isMobile ? "10px 16px 0" : "10px 28px 0", padding: "10px 14px",
+          margin: "10px 0 0", padding: "10px 14px",
           display: "flex", alignItems: "flex-start", gap: 9, borderRadius: 10,
           background: "rgba(248, 113, 113, 0.08)", border: "1px solid rgba(248, 113, 113, 0.35)",
           flexShrink: 0,
@@ -1549,7 +1639,7 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
           key={attempt}
           className="field-shake"
           style={{
-            margin: isMobile ? "10px 16px 0" : "10px 28px 0", padding: "10px 14px",
+            margin: "10px 0 0", padding: "10px 14px",
             display: "flex", alignItems: "center", gap: 9, borderRadius: 10,
             background: "rgba(248, 113, 113, 0.08)", border: "1px solid rgba(248, 113, 113, 0.35)",
             flexShrink: 0,
@@ -1563,9 +1653,12 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
         </div>
       )}
 
-      {/* Footer Navigation */}
+      {/* Footer Navigation — horizontal padding dropped entirely to match
+          the step content above (see contentRef's comment), so Back and
+          Next Step line up flush with the panels on both sides instead of
+          sitting inset from them. */}
       <div style={{
-        padding: isMobile ? "12px 16px" : "14px 28px",
+        padding: isMobile ? "12px 0" : "14px 0",
         borderTop: "1px solid var(--border)",
         background: "var(--bg-card)", flexShrink: 0,
         display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -1586,7 +1679,7 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
 
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
           <div style={{ display: "flex", gap: 6 }}>
-            {[1, 2, 3, 4, 5].map((s) => (
+            {[1, 2].map((s) => (
               <div key={s} style={{
                 width: s === step ? 20 : 6, height: 6, borderRadius: 3,
                 background: s <= step ? "var(--accent)" : "var(--border)",
@@ -1605,7 +1698,7 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
           )}
         </div>
 
-        {step < 5 ? (
+        {step < 2 ? (
           <button
             onClick={handleNext}
             style={{
@@ -1616,7 +1709,7 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
               transition: "all 0.15s",
             }}
           >
-            {nextLabel}
+            Next Step →
           </button>
         ) : (
           <button
