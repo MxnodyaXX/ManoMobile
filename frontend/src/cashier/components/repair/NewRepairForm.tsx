@@ -159,14 +159,14 @@ function AccordionSection({ title, summary, open, onToggle, children }: {
   title: string; summary?: React.ReactNode; open: boolean; onToggle: () => void; children: React.ReactNode;
 }) {
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "#fff", flexShrink: 0 }}>
+    <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "var(--bg-card)", flexShrink: 0 }}>
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
         style={{
           width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-          gap: 10, padding: "12px 14px", background: "#fff", border: "none",
+          gap: 10, padding: "12px 14px", background: "var(--bg-card)", border: "none",
           cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", textAlign: "left",
         }}
       >
@@ -198,7 +198,7 @@ function AccordionSection({ title, summary, open, onToggle, children }: {
       >
         <div style={{ overflow: "hidden" }}>
           <div style={{
-            padding: 16, borderTop: "1px solid var(--border)", background: "#fff",
+            padding: 16, borderTop: "1px solid var(--border)", background: "var(--bg-card)",
             opacity: open ? 1 : 0, transition: "opacity 0.2s ease",
           }}>
             {children}
@@ -215,15 +215,15 @@ function AccordionSection({ title, summary, open, onToggle, children }: {
  *  rhythm of boxes rather than accordions next to bare sections. */
 function StaticSection({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "#fff", flexShrink: 0 }}>
+    <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "var(--bg-card)", flexShrink: 0 }}>
       <div style={{
-        padding: "12px 14px", background: "#fff",
+        padding: "12px 14px", background: "var(--bg-card)",
         fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)",
         fontFamily: "'Plus Jakarta Sans', sans-serif",
       }}>
         {title}
       </div>
-      <div style={{ padding: 16, borderTop: "1px solid var(--border)", background: "#fff" }}>{children}</div>
+      <div style={{ padding: 16, borderTop: "1px solid var(--border)", background: "var(--bg-card)" }}>{children}</div>
     </div>
   );
 }
@@ -410,7 +410,7 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
             value={dealer?.name ?? ""}
             options={dealers.map((d) => d.name)}
             allowAdd={false}
-            placeholder={dealers.length ? "— Choose a dealer —" : "No dealers — add them in Admin Control"}
+            placeholder=""
             onChange={(name) => {
               const match = dealers.find((d) => d.name === name);
               // Switching dealer resets the job number, because the right
@@ -436,15 +436,15 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr", gap: 12 }}>
             <div>
               <label style={labelStyle}>Address</label>
-              <input readOnly style={readOnlyInputStyle} value={dealer?.address ?? ""} placeholder="Select dealer above" />
+              <input readOnly style={readOnlyInputStyle} value={dealer?.address ?? ""} />
             </div>
             <div>
               <label style={labelStyle}>Contact Number</label>
-              <input readOnly style={readOnlyInputStyle} value={dealer?.contact ?? ""} placeholder="—" />
+              <input readOnly style={readOnlyInputStyle} value={dealer?.contact ?? ""} />
             </div>
             <div>
               <label style={labelStyle}>Joining Date</label>
-              <input readOnly style={readOnlyInputStyle} value={dealer ? fmtJoined(dealer.joinedAt) : ""} placeholder="—" />
+              <input readOnly style={readOnlyInputStyle} value={dealer ? fmtJoined(dealer.joinedAt) : ""} />
             </div>
           </div>
         </div>
@@ -483,7 +483,6 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
                 // saving, and the real number is still assigned by the
                 // sequence on insert.
                 value={data.autoJobNumber ? (data.jobNumber || nextJobNo || "") : data.jobNumber}
-                placeholder={data.autoJobNumber ? "Assigned on save" : "e.g. 54000 — the dealer's own number"}
                 onChange={(e) => {
                   // Typing is itself the decision to supply a number, so the
                   // tick clears rather than the box being locked until it is
@@ -523,7 +522,6 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
                     // wizard says so.
                     style={{ ...inputStyle, ...(bad("dealerJobNo") || dealerNoCheck?.existing ? invalidStyle : {}) }}
                     value={data.dealerJobNo}
-                    placeholder="e.g. 54000 — leave blank if they didn't give you one"
                     onChange={(e) => onChange({ dealerJobNo: e.target.value })}
                   />
                   {/* Caught while typing, not at save: correcting a digit here
@@ -584,7 +582,6 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
                   <label style={labelStyle}>Contact Number *</label>
                   <input
                     style={{ ...inputStyle, ...(bad("customerContact") ? invalidStyle : {}) }}
-                    placeholder="e.g. 077 123 4567"
                     value={data.customerContact}
                     onChange={(e) => handleCustomerContact(e.target.value)}
                   />
@@ -599,7 +596,6 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
                   <label style={labelStyle}>NIC Number</label>
                   <input
                     style={inputStyle}
-                    placeholder="e.g. 199912345678"
                     value={data.customerNIC}
                     onChange={(e) => onChange({ customerNIC: e.target.value })}
                   />
@@ -608,7 +604,6 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
                   <label style={labelStyle}>Full Name *</label>
                   <input
                     style={{ ...inputStyle, ...(bad("customerName") ? invalidStyle : {}) }}
-                    placeholder="e.g. Kasun Perera"
                     value={data.customerName}
                     onChange={(e) => onChange({ customerName: e.target.value })}
                   />
@@ -618,7 +613,6 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
                   <label style={labelStyle}>Email Address</label>
                   <input
                     style={inputStyle}
-                    placeholder="e.g. customer@email.com"
                     type="email"
                     value={data.customerEmail}
                     onChange={(e) => onChange({ customerEmail: e.target.value })}
@@ -642,17 +636,18 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
         minWidth: isMobile ? undefined : 280, minHeight: 0,
         overflowY: isMobile ? "visible" : "auto", paddingRight: isMobile ? 0 : 6,
       }}>
-        {/* flexShrink: 0 — without it, this scrolling column's flex items get
-            squashed to fit instead of the column growing a scrollbar (same
-            issue the Step 2 accordions hit; see AccordionSection). */}
-        <div style={{ ...panelStyle, flexShrink: 0 }}>
+        {/* flex: "0 0 auto" — panelStyle's own flex: 1 would otherwise still
+            grow this to fill any leftover height in the column (empty space
+            below the content), on top of the flexShrink: 0 this needs so it
+            doesn't get squashed instead of the column scrolling (same issue
+            the Step 2 accordions hit; see AccordionSection). */}
+        <div style={{ ...panelStyle, flex: "0 0 auto" }}>
           <div style={sectionHeaderStyle}>📱 Device Information</div>
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(4, 1fr)", gap: 14, marginBottom: 18 }}>
             <div>
               <label style={labelStyle}><Hash size={11} style={{ verticalAlign: "-1px" }} /> Model Number</label>
               <input
                 style={inputStyle}
-                placeholder="e.g. M2006C3LMG — auto-fills the model"
                 value={data.deviceModelNumber}
                 onChange={(e) => handleModelNumber(e.target.value)}
               />
@@ -673,7 +668,7 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
                 value={data.deviceModel}
                 options={models}
                 onAddOption={onAddModel}
-                placeholder="Type or select…"
+                placeholder=""
                 inputStyle={bad("deviceModel") ? invalidStyle : undefined}
                 onChange={handleDeviceModel}
               />
@@ -685,7 +680,7 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
                 value={data.deviceBrand}
                 options={brands}
                 onAddOption={onAddBrand}
-                placeholder="Auto-fills where known…"
+                placeholder=""
                 inputStyle={bad("deviceBrand") ? invalidStyle : undefined}
                 onChange={(b) => onChange({ deviceBrand: b })}
               />
@@ -695,7 +690,6 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
               <label style={labelStyle}>IMEI Number</label>
               <input
                 style={inputStyle}
-                placeholder="15-digit IMEI"
                 maxLength={15}
                 value={data.deviceIMEI}
                 onChange={(e) => onChange({ deviceIMEI: e.target.value.replace(/\D/g, "") })}
@@ -739,7 +733,7 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
           </AccordionSection>
         </div>
 
-        <div style={{ ...panelStyle, flexShrink: 0 }}>
+        <div style={{ ...panelStyle, flex: "0 0 auto" }}>
           <div style={sectionHeaderStyle}>🔧 Device Faults</div>
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr", gap: 6, marginBottom: 18 }}>
             {commonFaults.map((fault) => {
@@ -773,7 +767,6 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
             <label style={labelStyle}>Additional Fault Description</label>
             <textarea
               style={{ ...inputStyle, resize: "vertical", minHeight: 90 }}
-              placeholder="Describe any additional issues or customer-reported symptoms in detail..."
               value={data.faultDescription}
               onChange={(e) => onChange({ faultDescription: e.target.value })}
             />
@@ -854,7 +847,6 @@ function Step2({ data, onChange, isMobile, errors, dealers, technicians, techLoa
               style={{ ...inputStyle, ...(bad("estimatedCost") ? invalidStyle : {}) }}
               type="number"
               min={0}
-              placeholder="0.00"
               value={data.estimatedCost}
               onChange={(e) => onChange({ estimatedCost: e.target.value })}
             />
@@ -881,7 +873,6 @@ function Step2({ data, onChange, isMobile, errors, dealers, technicians, techLoa
               style={inputStyle}
               type="number"
               min={0}
-              placeholder="0.00"
               value={data.advancePaid}
               onChange={(e) => onChange({ advancePaid: e.target.value })}
             />
@@ -892,7 +883,7 @@ function Step2({ data, onChange, isMobile, errors, dealers, technicians, techLoa
               value={data.paymentMethod}
               options={["Cash", "Card", "Bank Transfer", "Online Payment"]}
               allowAdd={false}
-              placeholder="— Select Method —"
+              placeholder=""
               onChange={(m) => onChange({ paymentMethod: m })}
             />
           </div>
@@ -967,7 +958,6 @@ function Step2({ data, onChange, isMobile, errors, dealers, technicians, techLoa
               <label style={labelStyle}>Job / Internal Notes</label>
               <textarea
                 style={{ ...inputStyle, resize: "vertical", minHeight: 120 }}
-                placeholder="Add any internal notes about this job, special handling instructions, customer preferences, etc."
                 value={data.jobNotes}
                 onChange={(e) => onChange({ jobNotes: e.target.value })}
               />
@@ -1108,7 +1098,6 @@ function Step2({ data, onChange, isMobile, errors, dealers, technicians, techLoa
             <label style={labelStyle}>Condition Notes</label>
             <textarea
               style={{ ...inputStyle, resize: "vertical", minHeight: 56 }}
-              placeholder="e.g. deep scratch top-left corner, small dent on right frame…"
               value={data.condition.notes ?? ""}
               onChange={e => onChange({ condition: { ...data.condition, notes: e.target.value } })}
             />
@@ -1132,7 +1121,6 @@ function Step2({ data, onChange, isMobile, errors, dealers, technicians, techLoa
                 <label style={labelStyle}>{data.passcodeType} (visible only to technician)</label>
                 <input
                   style={inputStyle}
-                  placeholder={data.passcodeType === "Pattern" ? "e.g. 1-2-3-6-9" : "Enter unlock code"}
                   value={data.passcode}
                   onChange={e => onChange({ passcode: e.target.value })}
                 />
