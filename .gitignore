@@ -55,3 +55,8 @@ obj/
 
 # editor session state
 .emrac-session.json
+
+# Local backups: customer names, phone numbers, emails and device details.
+# Never committed. The README is kept so the restore steps live in git.
+/backups/*
+!/backups/README.md

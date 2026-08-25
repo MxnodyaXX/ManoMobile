@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   X, AlertTriangle, Play, Pause, CheckCircle,
-  XCircle, ArrowRight, Shield, CheckSquare, DollarSign,
+  XCircle, ArrowRight, Shield, CheckSquare, DollarSign, ChevronDown,
 } from "lucide-react";
 import { type RepairJob, type JobStatus, type CompletionType, type EstimateApproval, type ApprovalChannel, useRepair, isInHouseDealer } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
@@ -125,6 +125,7 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
     Object.fromEntries(FUNCTIONAL_TESTS.map(t => [t, null]))
   );
   const [testNotes, setTestNotes]       = useState("");
+  const [testsOpen, setTestsOpen]       = useState(false);
   const [warrantyDays, setWarrantyDays] = useState(30);
   const [completionType, setCompletionType] = useState<CompletionType>("Normal");
   // What this technician is allowed to do. Defaults are permissive, so a rules
@@ -190,6 +191,10 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
   // original estimate stays on the job; this is the final charge.
   const chargeable   = completionType === "Normal";
   const revisedNum   = chargeable ? (parseFloat(revisedCost) || 0) : 0;
+  // What the box shows. Derived rather than written into state so switching
+  // Return -> Normal brings the original figure back instead of leaving a zero
+  // the technician has to retype.
+  const shownCost    = chargeable ? revisedCost : "0";
   // A device that was not repaired cannot carry a repair warranty.
   const canWarrant   = completionType !== "Return";
   const needsApproval = isManoMobileJob && revisedNum > originalEstimate + 0.001 && !job.approval;
@@ -250,6 +255,10 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
   })();
 
   const testsPassed = Object.values(testResults).filter(v => v === true).length;
+  // How many checks were actually answered. A collapsed, untouched checklist
+  // has none — which is not the same as eleven passes, and must not be
+  // recorded as one.
+  const testsAnswered = Object.values(testResults).filter(v => v !== null).length;
   const testsFailed = Object.values(testResults).filter(v => v === false).length;
   const testsTotal  = FUNCTIONAL_TESTS.length;
 
@@ -326,8 +335,15 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
       // from one finished before this field existed (those stay null).
       completedPatch.labourCost = labourCost;
       // Save functional test
-      const overallPass = testsFailed === 0;
-      saveFunctionalTest({ jobId: job.id, completedAt: now, results: testResults, overallPass, notes: testNotes || undefined });
+      // Only record a QC result when something was actually checked. Saving
+      // "overall pass" for a checklist nobody opened would put a test on the
+      // job's history that never happened.
+      if (testsAnswered > 0) {
+        saveFunctionalTest({
+          jobId: job.id, completedAt: now, results: testResults,
+          overallPass: testsFailed === 0, notes: testNotes || undefined,
+        });
+      }
 
       // Capture estimate approval if the cost went up — Mano Mobile jobs
       // only; an outside dealer's job never showed the gate above, so there
@@ -367,7 +383,9 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
       completedPatch.completionType = completionType;
       if (approval) completedPatch.approval = approval;
 
-      addActivity({ jobId: job.id, type: "test_completed", description: `Functional tests: ${testsPassed}/${testsTotal} passed${testsFailed > 0 ? `, ${testsFailed} failed` : ""}` });
+      if (testsAnswered > 0) {
+        addActivity({ jobId: job.id, type: "test_completed", description: `Functional tests: ${testsPassed}/${testsTotal} passed${testsFailed > 0 ? `, ${testsFailed} failed` : ""}` });
+      }
       addActivity({
         jobId: job.id,
         type: "status_change",
@@ -539,8 +557,20 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
                     </div>
                     <ArrowRight size={14} color="var(--text-muted)" />
                     <div style={{ flex: 1 }}>
-                      <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginBottom: 3 }}>Final cost (Rs.)</p>
-                      <input type="number" min={0} value={revisedCost} onChange={e => setRevisedCost(e.target.value)} style={inputStyle} />
+                      <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginBottom: 3 }}>
+                        Final cost (Rs.){!chargeable && <span style={{ color: "#fbbf24" }}> · nothing to pay</span>}
+                      </p>
+                      <input
+                        type="number"
+                        min={0}
+                        value={shownCost}
+                        readOnly={!chargeable}
+                        onChange={e => setRevisedCost(e.target.value)}
+                        style={{
+                          ...inputStyle,
+                          ...(chargeable ? {} : { background: "var(--bg-primary)", color: "var(--text-muted)", cursor: "not-allowed" }),
+                        }}
+                      />
                     </div>
                   </div>
 
@@ -737,15 +767,36 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
                   <textarea placeholder="e.g. Battery health at 82% — may need replacement soon" value={futureFaults} onChange={e => setFutureFaults(e.target.value)} rows={2} style={inputStyle} />
                 </div>
 
-                {/* Functional tests */}
+                {/* Functional tests — collapsed by default.
+                    Eleven checks are worth having on a screen replacement and
+                    pointless on a software reset, so this opens on demand
+                    rather than standing between every job and its Complete
+                    button. The header carries the count, so a technician can
+                    see at a glance whether anything was recorded. */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button
+                    onClick={() => setTestsOpen(o => !o)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8, width: "100%",
+                      padding: "10px 12px", borderRadius: 9, cursor: "pointer", fontFamily: ff,
+                      background: "var(--bg-secondary)", border: "1px solid var(--border)",
+                      textAlign: "left",
+                    }}
+                  >
                     <CheckSquare size={13} color={TA} />
-                    {sec("Functional Test Checklist")}
-                    <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: testsFailed > 0 ? "#f87171" : TA, fontFamily: ff }}>
-                      {testsPassed}/{testsTotal} passed
+                    <span style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                      Functional Test Checklist
                     </span>
-                  </div>
+                    <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: testsAnswered === 0 ? "var(--text-muted)" : testsFailed > 0 ? "#f87171" : TA }}>
+                      {testsAnswered === 0 ? "Not filled in" : `${testsPassed}/${testsTotal} passed`}
+                    </span>
+                    <ChevronDown
+                      size={14}
+                      style={{ color: "var(--text-muted)", transform: testsOpen ? "rotate(180deg)" : undefined, transition: "transform 0.18s" }}
+                    />
+                  </button>
+
+                  {testsOpen && (<>
 
                   {/* Marking eleven checks one at a time is the slowest part of
                       finishing a job — set them all, then correct the odd one. */}
@@ -795,6 +846,7 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
                     })}
                   </div>
                   <textarea placeholder="Test notes (optional)…" value={testNotes} onChange={e => setTestNotes(e.target.value)} rows={2} style={inputStyle} />
+                  </>)}
                 </div>
 
                 {/* Warranty */}
