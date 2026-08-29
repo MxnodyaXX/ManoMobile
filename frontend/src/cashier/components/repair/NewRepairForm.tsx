@@ -15,6 +15,8 @@ import { useTechnicians, type Technician } from "@/lib/repair/technicians";
 import Combobox from "@/cashier/components/shared/Combobox";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import { lookupModelNumber, normaliseModelNumber, type ModelInfo } from "@/cashier/data/modelNumbers";
+import { useDeviceModelLookup, rememberDeviceModel } from "@/lib/repair/deviceModels";
+import { fetchStaffRules } from "@/lib/settings/staffRules";
 import { useDeviceFaults, FALLBACK_FAULTS } from "@/lib/repair/deviceFaults";
 import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2, AlertCircle, FileClock, ChevronDown } from "lucide-react";
 
@@ -319,7 +321,7 @@ function fmtJoined(iso: string) {
   return isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoCheck, checkingDealerNo, models, onAddModel, modelNumberLookup, modelBrandLookup, brands, onAddBrand }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; dealers: RepairDealer[]; errors: RequiredField[]; nextJobNo: string | null; dealerNoCheck: DealerJobNoCheck | null; checkingDealerNo: boolean; models: string[]; onAddModel: (m: string) => void; modelNumberLookup: Map<string, ModelInfo>; modelBrandLookup: Map<string, string>; brands: string[]; onAddBrand: (b: string) => void }) {
+function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoCheck, checkingDealerNo, models, onAddModel, modelNumberLookup, deviceModelLookup, modelBrandLookup, brands, onAddBrand }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; dealers: RepairDealer[]; errors: RequiredField[]; nextJobNo: string | null; dealerNoCheck: DealerJobNoCheck | null; checkingDealerNo: boolean; models: string[]; onAddModel: (m: string) => void; modelNumberLookup: Map<string, ModelInfo>; deviceModelLookup: Map<string, ModelInfo>; modelBrandLookup: Map<string, string>; brands: string[]; onAddBrand: (b: string) => void }) {
   const dealer = dealers.find((d) => d.id.toString() === data.dealerId);
   const bad = (f: RequiredField) => errors.includes(f);
   const toggleItem = (list: string[], item: string) =>
@@ -360,7 +362,14 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
   const [lookupResult, setLookupResult] = useState<string | null>(null);
   const handleModelNumber = (raw: string) => {
     onChange({ deviceModelNumber: raw });
-    const hit = lookupModelNumber(raw) ?? modelNumberLookup.get(normaliseModelNumber(raw)) ?? null;
+    // Reference table first, then this shop's own past jobs, then the small
+    // offline table. History is the least trustworthy of the three — it is
+    // where the wrong answers come from — so it is asked last, not first.
+    const key = normaliseModelNumber(raw);
+    const hit = deviceModelLookup.get(key)
+      ?? lookupModelNumber(raw)
+      ?? modelNumberLookup.get(key)
+      ?? null;
     if (hit) {
       onChange({ deviceModelNumber: raw, deviceModel: hit.model, deviceBrand: hit.brand });
       // make sure the resolved model is in the combobox list
@@ -1177,6 +1186,9 @@ function Step2({ data, onChange, isMobile, errors, dealers, technicians, techLoa
 
 // ─── Main Form Component ──────────────────────────────────────────────────────
 
+/** Where the last-used dealer is remembered. Per browser: see lastDealerId. */
+const LAST_DEALER_KEY = "mano_last_dealer";
+
 const INITIAL: FormData = {
   dealerId: "", jobNumber: "", autoJobNumber: true, dealerJobNo: "",
   customerName: "", customerNIC: "", customerContact: "", customerEmail: "",
@@ -1220,6 +1232,45 @@ const BRAND_OPTIONS = ["Apple", "Samsung", "Xiaomi", "OPPO", "OnePlus", "Realme"
  */
 export default function NewRepairForm({ onClose, initialDraft, onStepChange }: { onClose?: () => void; initialDraft?: RepairDraft | null; onStepChange?: (step: number) => void }) {
   const { addJob, updateJob, dealers, jobs } = useRepair();
+  // The corrected model-number reference table. Preferred over job history,
+  // which learned from every typo anyone ever entered.
+  const { lookup: deviceModelLookup, reload: reloadDeviceModels } = useDeviceModelLookup();
+
+  /**
+   * The main technician, pre-selected on Step 4 so the usual assignment is
+   * already made. Applied once, and only to a blank field: it must never
+   * overwrite a choice the cashier made, or reappear after they deliberately
+   * cleared it to leave the job in the pool.
+   */
+  const [defaultTechId, setDefaultTechId] = useState<string | null>(null);
+  const defaultApplied = useRef(false);
+
+  /**
+   * The dealer this counter used last.
+   *
+   * Devices arrive from a dealer in batches — ten phones from Phone House get
+   * booked in one after another — and picking the same name every time is the
+   * most repeated action in the whole intake. Remembered per browser rather
+   * than in the database: it is which batch this counter is working through
+   * right now, not a fact about the shop, and two counters can be on different
+   * dealers at the same moment.
+   */
+  const [lastDealerId, setLastDealerId] = useState<string>("");
+  const dealerApplied = useRef(false);
+  useEffect(() => {
+    try {
+      setLastDealerId(window.localStorage.getItem(LAST_DEALER_KEY) ?? "");
+    } catch { /* private mode; the cashier picks as before */ }
+  }, []);
+  useEffect(() => {
+    let active = true;
+    fetchStaffRules()
+      .then(rows => {
+        if (active) setDefaultTechId(rows.find(r => r.isDefaultTechnician)?.profileId ?? null);
+      })
+      .catch(() => { /* no pre-selection; the cashier picks as before */ });
+    return () => { active = false; };
+  }, []);
   // Shown in the job-number box so the cashier can see what will be assigned.
   // Advisory only — the sequence, not this value, decides on save.
   const [nextJobNo, setNextJobNo] = useState<string | null>(null);
@@ -1250,6 +1301,25 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
   const [form, setForm] = useState<FormData>(
     initialDraft ? { ...INITIAL, ...initialDraft.form, intakePhotos: [] } : INITIAL,
   );
+
+  // Pre-select the remembered dealer, once, on a fresh intake only. Skipped if
+  // that dealer has since been deleted, so a stale id never leaves the form
+  // pointing at nothing.
+  useEffect(() => {
+    if (!lastDealerId || dealerApplied.current || initialDraft) return;
+    if (!dealers.some(d => String(d.id) === lastDealerId)) return;
+    dealerApplied.current = true;
+    setForm(f => (f.dealerId ? f : { ...f, dealerId: lastDealerId }));
+  }, [lastDealerId, dealers, initialDraft]);
+
+  // Fill the main technician in once the lookup lands, and only into an empty
+  // field on a fresh intake. A resumed draft keeps whatever it was saved with,
+  // including a deliberately blank assignment.
+  useEffect(() => {
+    if (!defaultTechId || defaultApplied.current || initialDraft) return;
+    defaultApplied.current = true;
+    setForm(f => (f.assignedRepairman ? f : { ...f, assignedRepairman: defaultTechId }));
+  }, [defaultTechId, initialDraft]);
 
   /**
    * Live clash check on the dealer's number, debounced so a four-digit entry
@@ -1543,6 +1613,22 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
       // The intake is now a real job — its draft has served its purpose.
       removeDraft(draftId);
 
+      // Remember the dealer for the next intake. Written on success only: an
+      // abandoned form should not change what the next one starts with.
+      if (form.dealerId) {
+        setLastDealerId(form.dealerId);
+        try { window.localStorage.setItem(LAST_DEALER_KEY, form.dealerId); } catch { /* ignore */ }
+      }
+
+      // Teach the lookup what this model number turned out to be, so the next
+      // device with the same number fills itself in. Deliberately fire and
+      // forget, and deliberately picky about what counts as identified — see
+      // rememberDeviceModel. A reference table that could not be updated must
+      // never cost the shop a job it has already taken in.
+      void rememberDeviceModel(job.modelNumber, job.brand, job.model)
+        .then(() => reloadDeviceModels())
+        .catch(() => { /* next intake tries again */ });
+
       if (dealer && !dealer.inHouse) {
         // An outside dealer's own docket is what they hand the customer —
         // our Job Receipt popup doesn't apply to their intake, so skip it
@@ -1566,7 +1652,12 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
   };
 
   const startNewRepair = () => {
-    setForm(INITIAL);
+    // Straight into the next device from the same dealer — the case this whole
+    // feature exists for. Set here rather than left to the effect above, whose
+    // one-shot guard has already fired. Same existence check: a dealer deleted
+    // mid-session must not leave the form pointing at nothing.
+    const stillExists = dealers.some(d => String(d.id) === lastDealerId);
+    setForm({ ...INITIAL, dealerId: stillExists ? lastDealerId : "" });
     setStep(1);
     setCreatedJob(null);
     setErrors([]);
@@ -1601,7 +1692,7 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
           the panels up with them; padding on this side just pushed
           everything an extra 16–28px to the right of that reference. */}
       <div ref={contentRef} className="repair-wizard" style={{ flex: isMobile ? "none" : 1, padding: 0, minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>
-        {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} dealers={dealers} errors={errors} nextJobNo={nextJobNo} dealerNoCheck={dealerNoCheck} checkingDealerNo={checkingDealerNo} models={modelOptions} onAddModel={addModel} modelNumberLookup={modelNumberLookup} modelBrandLookup={modelBrandLookup} brands={brandOptions} onAddBrand={addBrand} />}
+        {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} dealers={dealers} errors={errors} nextJobNo={nextJobNo} dealerNoCheck={dealerNoCheck} checkingDealerNo={checkingDealerNo} models={modelOptions} onAddModel={addModel} modelNumberLookup={modelNumberLookup} deviceModelLookup={deviceModelLookup} modelBrandLookup={modelBrandLookup} brands={brandOptions} onAddBrand={addBrand} />}
         {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} errors={errors} dealers={dealers} technicians={technicians} techLoading={techLoading} />}
       </div>
 

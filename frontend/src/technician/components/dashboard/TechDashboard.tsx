@@ -3,13 +3,14 @@
 import { useEffect, useState, useRef } from "react";
 import {
   Wrench, Clock, CheckCircle, AlertCircle, PackageCheck,
-  Play, Timer, Layers, TrendingUp, Calendar, Package,
+  Play, Pause, Timer, Layers, TrendingUp, Calendar, Package,
 } from "lucide-react";
-import { useRepair } from "@/cashier/contexts/RepairContext";
+import { useRepair, type JobStatus } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
 import StatusUpdateModal from "@/technician/components/jobs/StatusUpdateModal";
 import PartRequestModal from "@/technician/components/parts/PartRequestModal";
 import { useParts } from "@/cashier/contexts/PartsContext";
+import InsightModal, { type InsightColumn, type InsightRow, type InsightSummary } from "@/cashier/components/dashboard/InsightModal";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -40,30 +41,180 @@ export default function TechDashboard() {
   const { technicianName, partRequests, jobMeta, getElapsedMinutes } = useTech();
   const { parts } = useParts();
   const [, tick] = useState(0);
-  const [statusModalJob, setStatusModalJob] = useState<string | null>(null);
-  const [showPartReq, setShowPartReq] = useState(false);
-  const [showPartsView, setShowPartsView] = useState(false);
+  // Which job the status modal is for, and which transition it opens on.
+  const [statusModalJob, setStatusModalJob] = useState<{ id: string; next?: JobStatus } | null>(null);
+  // Which job the Request Parts sheet is for. Was a bare boolean, which
+  // silently attached every request to the first active job once a technician
+  // could have several.
+  const [partReqJob, setPartReqJob] = useState<string | null>(null);
+  const [partsViewJob, setPartsViewJob] = useState<string | null>(null);
+  const [openStat, setOpenStat] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const myJobs = jobs.filter(j => j.technician === technicianName);
-  const activeJob = myJobs.find(j => j.status === "Issued");
+  /**
+   * Every job this technician has in progress, oldest first.
+   *
+   * This used to take only the first: fine when the shop allowed one job at a
+   * time, wrong the moment "work on several jobs at once" is granted — the
+   * other live jobs simply vanished off the dashboard, timer and all.
+   */
+  const activeJobs = myJobs
+    .filter(j => j.status === "Issued")
+    .sort((a, b) => new Date(a.startedAt ?? a.createdAt).getTime() - new Date(b.startedAt ?? b.createdAt).getTime());
+  // Kept for the Request Parts / parts-view modals, which act on one job.
+  const activeJob = activeJobs[0];
 
   // Tick every second for live timer
   useEffect(() => {
-    if (activeJob) {
+    if (activeJobs.length > 0) {
       timerRef.current = setInterval(() => tick(n => n + 1), 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [activeJob?.id]);
+  }, [activeJobs.length]);
 
-  const stats = [
-    { label: "Assigned",       value: myJobs.length,                                                      color: TA,       icon: Wrench      },
-    { label: "In Progress",    value: myJobs.filter(j => j.status === "Issued").length,                   color: "#34d399", icon: Play        },
-    { label: "Paused",         value: myJobs.filter(j => j.status === "Pending").length,                  color: "#fbbf24", icon: Timer       },
-    { label: "Ready Pickup",   value: myJobs.filter(j => j.status === "Completed").length,                color: "#60a5fa", icon: PackageCheck },
-    { label: "Parts Pending",  value: partRequests.filter(r => r.status === "Pending").length,            color: "#a78bfa", icon: Layers      },
+  /**
+   * Each tile knows the rows behind its number, so a count is never a dead end.
+   * Built from the same filtered lists the tile counts rather than re-deriving
+   * them, or the breakdown could disagree with the headline it opened from.
+   */
+  const money = (n: number) => `Rs. ${Math.round(n || 0).toLocaleString("en-LK")}`;
+  const dev = (j: typeof myJobs[number]) => [j.brand, j.model].filter(Boolean).join(" ") || "—";
+  const day = (v?: string) => (v ? new Date(v).toLocaleDateString("en-GB") : "—");
+
+  const JOB_COLS: InsightColumn[] = [
+    { key: "job", label: "Job" },
+    { key: "customer", label: "Customer" },
+    { key: "device", label: "Device" },
+    { key: "issue", label: "Fault" },
+    { key: "priority", label: "Priority" },
+    { key: "created", label: "Taken in" },
+    { key: "cost", label: "Estimate", numeric: true },
+  ];
+
+  const jobRows = (list: typeof myJobs): InsightRow[] => list.map(j => ({
+    id: j.id,
+    cells: {
+      job: j.id, customer: j.customerName || "—", device: dev(j),
+      issue: j.issue || "—", priority: j.priority,
+      created: day(j.createdAt), cost: money(j.estimatedCost),
+    },
+  }));
+
+  const jobSummary = (list: typeof myJobs): InsightSummary[] => [
+    { label: "Jobs", value: String(list.length), strong: true },
+    { label: "Estimated value", value: money(list.reduce((t, j) => t + j.estimatedCost, 0)) },
+  ];
+
+  const inProgress = myJobs.filter(j => j.status === "Issued");
+  const pausedJobs = myJobs.filter(j => j.status === "Pending");
+  const readyJobs  = myJobs.filter(j => j.status === "Completed");
+  const pendingReq = partRequests.filter(r => r.status === "Pending");
+
+  const stats: {
+    label: string; value: number; color: string; icon: typeof Wrench;
+    insight: () => React.ComponentProps<typeof InsightModal>;
+  }[] = [
+    {
+      label: "Assigned", value: myJobs.length, color: TA, icon: Wrench,
+      insight: () => ({
+        title: "My Jobs", subtitle: "Everything currently on your bench",
+        columns: JOB_COLS, rows: jobRows(myJobs), summary: jobSummary(myJobs),
+        emptyText: "Nothing is assigned to you. Unclaimed jobs appear under Job Pool.",
+        onClose: () => {},
+      }),
+    },
+    {
+      label: "In Progress", value: inProgress.length, color: "#34d399", icon: Play,
+      insight: () => ({
+        title: "In Progress", subtitle: "Started and being worked on",
+        columns: JOB_COLS, rows: jobRows(inProgress), summary: jobSummary(inProgress),
+        emptyText: "Nothing started yet. Open a job and press Start.",
+        onClose: () => {},
+      }),
+    },
+    {
+      label: "Paused", value: pausedJobs.length, color: "#fbbf24", icon: Timer,
+      insight: () => ({
+        title: "Paused Jobs", subtitle: "On hold — each with the reason it stopped",
+        // The reason is the whole point of this list, so it replaces the
+        // columns a paused job tells you nothing new about.
+        columns: [
+          { key: "job", label: "Job" }, { key: "device", label: "Device" },
+          { key: "reason", label: "Why it is on hold" }, { key: "paused", label: "Paused" },
+        ],
+        rows: pausedJobs.map(j => ({
+          id: j.id,
+          cells: {
+            job: j.id, device: dev(j),
+            reason: j.pauseReason || "No reason recorded",
+            paused: day(j.pausedAt),
+          },
+        })),
+        summary: jobSummary(pausedJobs),
+        emptyText: "Nothing is on hold.",
+        onClose: () => {},
+      }),
+    },
+    {
+      label: "Ready Pickup", value: readyJobs.length, color: "#60a5fa", icon: PackageCheck,
+      insight: () => ({
+        title: "Ready For Pickup", subtitle: "Finished, waiting for the customer to collect",
+        columns: [
+          { key: "job", label: "Job" }, { key: "customer", label: "Customer" },
+          { key: "device", label: "Device" }, { key: "completed", label: "Finished" },
+          { key: "cost", label: "Final bill", numeric: true },
+          { key: "balance", label: "Balance", numeric: true },
+        ],
+        rows: readyJobs.map(j => ({
+          id: j.id,
+          cells: {
+            job: j.id, customer: j.customerName || "—", device: dev(j),
+            completed: day(j.completedAt), cost: money(j.estimatedCost),
+            balance: money(Math.max(0, j.estimatedCost - j.advancePaid)),
+          },
+        })),
+        summary: [
+          { label: "Waiting", value: String(readyJobs.length), strong: true },
+          { label: "To collect", value: money(readyJobs.reduce((t, j) => t + Math.max(0, j.estimatedCost - j.advancePaid), 0)) },
+        ],
+        note: "Handover is done at the counter — the cashier issues these.",
+        emptyText: "Nothing waiting to be collected.",
+        onClose: () => {},
+      }),
+    },
+    {
+      label: "Parts Pending", value: pendingReq.length, color: "#a78bfa", icon: Layers,
+      insight: () => ({
+        title: "Parts Awaiting Approval", subtitle: "Requested, not yet approved by Admin",
+        columns: [
+          { key: "job", label: "Job" }, { key: "part", label: "Part" },
+          { key: "qty", label: "Qty", numeric: true },
+          { key: "stock", label: "In stock", numeric: true },
+          { key: "asked", label: "Requested" },
+        ],
+        rows: pendingReq.map(r => {
+          const inStock = parts.find(p => p.sku === r.partSku)?.stock;
+          return {
+            id: r.id,
+            // Dimmed when the shelf cannot cover it — approval will fail, and
+            // that is worth seeing before waiting on it.
+            dim: inStock !== undefined && inStock < r.quantity,
+            cells: {
+              job: r.jobId, part: r.partName, qty: String(r.quantity),
+              stock: inStock === undefined ? "—" : String(inStock),
+              asked: day(r.requestedAt instanceof Date ? r.requestedAt.toISOString() : String(r.requestedAt)),
+            },
+          };
+        }),
+        summary: [{ label: "Awaiting approval", value: String(pendingReq.length), strong: true }],
+        note: "Admin approves these under Admin Control → Part Requests.",
+        emptyText: "No part requests are waiting.",
+        onClose: () => {},
+      }),
+    },
   ];
 
   const pendingJobs  = myJobs.filter(j => j.status === "Pending");
@@ -76,7 +227,7 @@ export default function TechDashboard() {
     Rejected: { color: "#f87171", bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.2)" },
   };
 
-  const activeJobModal = statusModalJob ? myJobs.find(j => j.id === statusModalJob) : null;
+  const activeJobModal = statusModalJob ? myJobs.find(j => j.id === statusModalJob.id) : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22, fontFamily: ff }}>
@@ -91,8 +242,8 @@ export default function TechDashboard() {
         </p>
       </div>
 
-      {/* ── ACTIVE JOB BANNER ── */}
-      {activeJob ? (() => {
+      {/* ── ACTIVE JOB BANNERS — one per job in progress ── */}
+      {activeJobs.length > 0 ? activeJobs.map((activeJob, idx) => (() => {
         const meta = jobMeta[activeJob.id];
         const elapsed = meta?.startedAt ? fmtElapsed(meta.startedAt) : "00:00";
         const pc = PRIORITY_CFG[activeJob.priority];
@@ -104,7 +255,7 @@ export default function TechDashboard() {
           Rejected: { color: "#f87171", bg: "rgba(248,113,113,0.12)", border: "rgba(248,113,113,0.3)" },
         };
         return (
-          <div className="fade-up" style={{
+          <div key={activeJob.id} className="fade-up" style={{
             background: `linear-gradient(135deg, ${TA}12 0%, ${TA}06 100%)`,
             border: `1px solid ${TA}35`,
             borderRadius: 16, padding: "20px 22px",
@@ -122,7 +273,9 @@ export default function TechDashboard() {
               <div style={{ flex: 1 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
                   <span style={{ width: 7, height: 7, borderRadius: "50%", background: TA, animation: "pulse-tech 2s infinite", display: "inline-block" }} />
-                  <span style={{ fontSize: 11, fontWeight: 700, color: TA, letterSpacing: "0.07em", textTransform: "uppercase", fontFamily: ff }}>ACTIVE JOB</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: TA, letterSpacing: "0.07em", textTransform: "uppercase", fontFamily: ff }}>
+                    {activeJobs.length > 1 ? `ACTIVE JOB ${idx + 1} OF ${activeJobs.length}` : "ACTIVE JOB"}
+                  </span>
                 </div>
                 <p style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)", marginBottom: 3, fontFamily: ff }}>
                   {activeJob.brand} {activeJob.model} — {activeJob.issue}
@@ -145,7 +298,7 @@ export default function TechDashboard() {
               </div>
               {jobParts.length > 0 && (
                 <button
-                  onClick={() => setShowPartsView(true)}
+                  onClick={() => setPartsViewJob(activeJob.id)}
                   style={{
                     display: "flex", alignItems: "center", gap: 6,
                     padding: "9px 14px", borderRadius: 9, fontSize: 12.5, fontWeight: 600,
@@ -161,7 +314,7 @@ export default function TechDashboard() {
                 </button>
               )}
               <button
-                onClick={() => setShowPartReq(true)}
+                onClick={() => setPartReqJob(activeJob.id)}
                 style={{
                   display: "flex", alignItems: "center", gap: 6,
                   padding: "9px 16px", borderRadius: 9, fontSize: 12.5, fontWeight: 600,
@@ -172,20 +325,38 @@ export default function TechDashboard() {
                 <Package size={14} />
                 Request Parts
               </button>
+              {/* The two things anyone actually does to a running job. "Update
+                  Status" made every pause and every completion start with the
+                  same extra choice, on a screen the technician had already
+                  decided about before reaching for the mouse. */}
               <button
-                onClick={() => setStatusModalJob(activeJob.id)}
+                onClick={() => setStatusModalJob({ id: activeJob.id, next: "Pending" })}
                 style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "9px 16px", borderRadius: 9, fontSize: 12.5, fontWeight: 600,
+                  background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.35)", color: "#b45309",
+                  cursor: "pointer", fontFamily: ff, flexShrink: 0,
+                }}
+              >
+                <Pause size={14} />
+                Mark as Paused
+              </button>
+              <button
+                onClick={() => setStatusModalJob({ id: activeJob.id, next: "Completed" })}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
                   padding: "9px 16px", borderRadius: 9, fontSize: 12.5, fontWeight: 600,
                   background: TA, border: "none", color: "#000",
                   cursor: "pointer", fontFamily: ff, flexShrink: 0,
                 }}
               >
-                Update Status
+                <CheckCircle size={14} />
+                Mark as Completed
               </button>
             </div>
           </div>
         );
-      })() : (
+      })()) : (
         <div className="fade-up" style={{
           background: "var(--bg-card)", border: "1px dashed var(--border)",
           borderRadius: 16, padding: "22px", textAlign: "center",
@@ -201,13 +372,22 @@ export default function TechDashboard() {
         {stats.map(s => {
           const Icon = s.icon;
           return (
-            <div key={s.label} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px" }}>
+            <button
+              key={s.label}
+              onClick={() => setOpenStat(s.label)}
+              title={`See the ${s.value} behind this`}
+              className="stat-card-clickable"
+              style={{
+                background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12,
+                padding: "14px 16px", textAlign: "left", width: "100%", cursor: "pointer", font: "inherit",
+              }}
+            >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                 <p style={{ fontSize: 10.5, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: ff }}>{s.label}</p>
                 <Icon size={13} color={s.color} />
               </div>
               <p style={{ fontSize: 22, fontWeight: 800, color: s.color, fontFamily: ff, letterSpacing: "-0.02em" }}>{s.value}</p>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -247,7 +427,7 @@ export default function TechDashboard() {
                     )}
                   </div>
                   <button
-                    onClick={() => setStatusModalJob(job.id)}
+                    onClick={() => setStatusModalJob({ id: job.id })}
                     style={{ fontSize: 11, fontWeight: 600, padding: "5px 10px", borderRadius: 7, background: `${TA}12`, border: `1px solid ${TA}30`, color: TA, cursor: "pointer", fontFamily: ff, flexShrink: 0 }}
                   >
                     Resume
@@ -347,15 +527,17 @@ export default function TechDashboard() {
       })()}
 
       {statusModalJob && activeJobModal && (
-        <StatusUpdateModal job={activeJobModal} onClose={() => setStatusModalJob(null)} />
+        <StatusUpdateModal job={activeJobModal} initialNext={statusModalJob.next} onClose={() => setStatusModalJob(null)} />
       )}
 
-      {showPartReq && activeJob && (
-        <PartRequestModal job={activeJob} onClose={() => setShowPartReq(false)} />
+      {partReqJob && myJobs.find(j => j.id === partReqJob) && (
+        <PartRequestModal job={myJobs.find(j => j.id === partReqJob)!} onClose={() => setPartReqJob(null)} />
       )}
 
       {/* Parts view modal */}
-      {showPartsView && activeJob && (() => {
+      {partsViewJob && (() => {
+        const activeJob = myJobs.find(j => j.id === partsViewJob);
+        if (!activeJob) return null;
         const jobParts = partRequests.filter(r => r.jobId === activeJob.id);
         const RC: Record<string, { color: string; bg: string; border: string }> = {
           Pending:  { color: "#fbbf24", bg: "rgba(251,191,36,0.1)",  border: "rgba(251,191,36,0.25)"  },
@@ -366,7 +548,7 @@ export default function TechDashboard() {
         const totalCost = jobParts.reduce((sum, r) => sum + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
         return (
           <>
-            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 60 }} onClick={() => setShowPartsView(false)} />
+            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 60 }} onClick={() => setPartsViewJob(null)} />
             <div style={{
               position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
               width: 580, maxHeight: "80vh", background: "var(--bg-card)",
@@ -383,7 +565,7 @@ export default function TechDashboard() {
                     <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff }}>{activeJob.id} · {activeJob.brand} {activeJob.model}</p>
                   </div>
                 </div>
-                <button onClick={() => setShowPartsView(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}>✕</button>
+                <button onClick={() => setPartsViewJob(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}>✕</button>
               </div>
 
               {/* Table */}
@@ -434,6 +616,14 @@ export default function TechDashboard() {
             </div>
           </>
         );
+      })()}
+
+      {/* Breakdown behind whichever tile was clicked. Mounted at the end so it
+          survives the re-render that opening it causes. */}
+      {(() => {
+        const stat = stats.find(x => x.label === openStat);
+        if (!stat) return null;
+        return <InsightModal {...stat.insight()} onClose={() => setOpenStat(null)} />;
       })()}
 
       <style>{`@keyframes pulse-tech { 0%,100%{opacity:1} 50%{opacity:.4} }`}</style>

@@ -5,7 +5,7 @@ import { AlertCircle, Users } from "lucide-react";
 import { useStaff } from "@/lib/staff/api";
 import { useWorkRules } from "@/lib/settings/workRules";
 import {
-  useStaffRules, mergeRules, blankOverride, LABOUR_MODES,
+  useStaffRules, mergeRules, blankOverride, LABOUR_MODES, setDefaultTechnician,
   type StaffRuleOverride,
 } from "@/lib/settings/staffRules";
 import { describeRate } from "@/lib/repair/labour";
@@ -96,11 +96,31 @@ function YesNo({ value, onChange, disabled }: { value: boolean; onChange: (v: bo
 export default function TechnicianPermissions() {
   const { staff, loading: staffLoading, configured } = useStaff();
   const { rules: shopRules, loading: shopLoading } = useWorkRules();
-  const { overrides, loading: rulesLoading, error, save } = useStaffRules();
+  const { overrides, loading: rulesLoading, error, save, reload } = useStaffRules();
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, StaffRuleOverride>>({});
+
+  /**
+   * Nominating the main technician clears whoever held it before, so this
+   * cannot go through the per-row save — it reloads every row afterwards
+   * rather than patching one, since two rows changed.
+   */
+  const makeDefault = async (profileId: string, on: boolean) => {
+    setBusy(profileId);
+    setSaveError(null);
+    try {
+      await setDefaultTechnician(on ? profileId : null);
+      setDrafts({});
+      await reload();
+      toast.success(on ? "Main technician set" : "Main technician cleared");
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const technicians = staff.filter(s => s.role === "Technician");
   const loading = staffLoading || shopLoading || rulesLoading;
@@ -151,7 +171,7 @@ export default function TechnicianPermissions() {
           <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
             {!configured
               ? "Connect Supabase to set per-technician permissions."
-              : saveError ?? `${error} — run migration 20260816000007_staff_work_rules.sql.`}
+              : saveError ?? error}
           </p>
         </div>
       )}
@@ -244,6 +264,27 @@ export default function TechnicianPermissions() {
               <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                 <span style={{ ...label, flex: 1, minWidth: 190 }}>Use repair parts without approval</span>
                 <YesNo value={rule.canUsePartsWithoutApproval} disabled={saving} onChange={v => apply({ ...rule, canUsePartsWithoutApproval: v })} />
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <span style={{ ...label, flex: 1, minWidth: 190 }}>
+                  Main technician
+                  <span style={{ color: "var(--text-muted)", fontSize: 11 }}> · new repairs are pre-assigned to them</span>
+                </span>
+                <button
+                  onClick={() => makeDefault(tech.id, !rule.isDefaultTechnician)}
+                  disabled={saving}
+                  style={{
+                    padding: "4px 13px", borderRadius: 7, fontSize: 11,
+                    fontWeight: rule.isDefaultTechnician ? 700 : 500,
+                    border: `1px solid ${rule.isDefaultTechnician ? `${AA}55` : "var(--border)"}`,
+                    background: rule.isDefaultTechnician ? `${AA}18` : "var(--bg-secondary)",
+                    color: rule.isDefaultTechnician ? AA : "var(--text-muted)",
+                    cursor: saving ? "not-allowed" : "pointer", fontFamily: ff, transition: "all 0.15s",
+                  }}
+                >
+                  {rule.isDefaultTechnician ? "★ Main technician" : "Make main"}
+                </button>
               </div>
 
               {/* What their work costs the shop — the missing half of profit */}

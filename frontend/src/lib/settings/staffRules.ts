@@ -30,6 +30,10 @@ export interface StaffRuleOverride {
   labourCostMode: LabourCostMode;
   /** Rupees when the mode is "fixed", percent when "percentage". */
   labourCostValue: number;
+  /** True for the one technician new repairs are pre-assigned to. Set through
+   *  setDefaultTechnician(), never by writing this field directly — only the
+   *  database can swap it without briefly having two. */
+  isDefaultTechnician: boolean;
 }
 
 /**
@@ -54,6 +58,7 @@ export interface EffectiveRules extends WorkRules {
   canUsePartsWithoutApproval: boolean;
   labourCostMode: LabourCostMode;
   labourCostValue: number;
+  isDefaultTechnician: boolean;
   /** True when this person has at least one explicit override. */
   hasOverrides: boolean;
 }
@@ -68,6 +73,7 @@ export const blankOverride = (profileId: string): StaffRuleOverride => ({
   canUsePartsWithoutApproval: false,
   labourCostMode: "none",
   labourCostValue: 0,
+  isDefaultTechnician: false,
 });
 
 interface RuleRow {
@@ -80,6 +86,7 @@ interface RuleRow {
   can_use_parts_without_approval: boolean;
   labour_cost_mode: LabourCostMode;
   labour_cost_value: number | string;
+  is_default_technician: boolean;
 }
 
 const rowToOverride = (r: RuleRow): StaffRuleOverride => ({
@@ -93,14 +100,37 @@ const rowToOverride = (r: RuleRow): StaffRuleOverride => ({
   labourCostMode: r.labour_cost_mode ?? "none",
   // numeric(12,2) arrives as a string over PostgREST.
   labourCostValue: Number(r.labour_cost_value ?? 0),
+  isDefaultTechnician: !!r.is_default_technician,
 });
+
+/**
+ * Point at the migration that actually adds a missing column.
+ *
+ * This screen used to name one hard-coded file whatever went wrong, which sent
+ * people to a migration that was already applied while the real one sat unrun.
+ * An error that names the wrong fix is worse than one that names none.
+ */
+function migrationHint(message: string): string {
+  const byColumn: [string, string][] = [
+    ["can_use_parts_without_approval", "20260819000009_parts_approval_permission.sql"],
+    ["labour_cost_mode",               "20260819000013_technician_labour_cost.sql"],
+    ["labour_cost_value",              "20260819000013_technician_labour_cost.sql"],
+    ["is_default_technician",          "20260825000004_default_technician.sql"],
+  ];
+  const hit = byColumn.find(([col]) => message.includes(col));
+  if (hit) return ` — run migration ${hit[1]}.`;
+  if (/does not exist|Could not find/i.test(message)) {
+    return " — a migration has not been run. Apply anything newer than your database from supabase/migrations/.";
+  }
+  return "";
+}
 
 export async function fetchStaffRules(): Promise<StaffRuleOverride[]> {
   const { data, error } = await getSupabaseBrowserClient()
     .from("staff_work_rules")
-    .select("profile_id, allow_multiple_active_jobs, max_active_jobs, require_start_before_finish, can_claim_unassigned, can_transfer_to_agent, can_use_parts_without_approval, labour_cost_mode, labour_cost_value");
+    .select("profile_id, allow_multiple_active_jobs, max_active_jobs, require_start_before_finish, can_claim_unassigned, can_transfer_to_agent, can_use_parts_without_approval, labour_cost_mode, labour_cost_value, is_default_technician");
 
-  if (error) throw new Error(`Could not load technician permissions: ${error.message}`);
+  if (error) throw new Error(`Could not load technician permissions: ${error.message}${migrationHint(error.message)}`);
   return (data as RuleRow[]).map(rowToOverride);
 }
 
@@ -118,6 +148,9 @@ export async function saveStaffRule(rule: StaffRuleOverride): Promise<void> {
       can_use_parts_without_approval: rule.canUsePartsWithoutApproval,
       labour_cost_mode: rule.labourCostMode,
       labour_cost_value: rule.labourCostValue,
+      // is_default_technician is deliberately absent: writing it here could
+      // leave two rows true, which the unique index rejects. It moves only
+      // through setDefaultTechnician().
       updated_by: user?.id ?? null,
     });
 
@@ -137,7 +170,7 @@ export function mergeRules(shop: WorkRules, override?: StaffRuleOverride | null)
     return {
       ...shop, canClaimUnassigned: true, canTransferToAgent: true,
       canUsePartsWithoutApproval: false, labourCostMode: "none", labourCostValue: 0,
-      hasOverrides: false,
+      isDefaultTechnician: false, hasOverrides: false,
     };
   }
   const hasOverrides =
@@ -158,6 +191,7 @@ export function mergeRules(shop: WorkRules, override?: StaffRuleOverride | null)
     canUsePartsWithoutApproval: override.canUsePartsWithoutApproval,
     labourCostMode: override.labourCostMode,
     labourCostValue: override.labourCostValue,
+    isDefaultTechnician: override.isDefaultTechnician,
     hasOverrides,
   };
 }
@@ -204,7 +238,7 @@ export async function rulesForTechnician(technicianName: string): Promise<Effect
     return {
       ...shop, canClaimUnassigned: true, canTransferToAgent: true,
       canUsePartsWithoutApproval: false, labourCostMode: "none", labourCostValue: 0,
-      hasOverrides: false,
+      isDefaultTechnician: false, hasOverrides: false,
     };
   }
   try {
@@ -217,7 +251,7 @@ export async function rulesForTechnician(technicianName: string): Promise<Effect
       // No rate could be read, so nothing is costed — better than guessing an
       // amount and writing it onto a job as if it were agreed.
       labourCostMode: "none", labourCostValue: 0,
-      hasOverrides: false,
+      isDefaultTechnician: false, hasOverrides: false,
     };
   }
 }
@@ -286,4 +320,25 @@ export function useTechnicianRates(): (technicianName: string) => EffectiveRules
     },
     [byName, shop],
   );
+}
+
+/**
+ * Nominate the main technician, or pass null to have none.
+ *
+ * Goes through the database function because clearing the previous default and
+ * setting the new one must happen together — the unique index rejects a moment
+ * with two, so doing it from here in two calls fails outright.
+ */
+export async function setDefaultTechnician(profileId: string | null): Promise<void> {
+  const { error } = await getSupabaseBrowserClient()
+    .rpc("set_default_technician", { p_profile_id: profileId });
+
+  if (error) {
+    throw new Error(
+      error.code === "42501" || /Only an Admin/i.test(error.message)
+        ? "Only an Admin can set the main technician."
+        : `Could not set the main technician: ${error.message}`,
+    );
+  }
+  cache = null;
 }

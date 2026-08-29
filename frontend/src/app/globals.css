@@ -352,3 +352,11 @@ select option { background: var(--bg-card); color: var(--text-primary); }
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* The completion form in Update Job Status. Two columns give a busy bench the
+   whole form at once instead of a scroll; one column below 900px, where side by
+   side would just make every field too narrow to read. */
+.complete-grid { grid-template-columns: 1fr; }
+@media (min-width: 900px) {
+  .complete-grid { grid-template-columns: 1fr 1fr; }
+}

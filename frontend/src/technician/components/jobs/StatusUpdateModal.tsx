@@ -104,7 +104,14 @@ function StatusBadge({ status }: { status: JobStatus }) {
   );
 }
 
-export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; onClose: () => void }) {
+export default function StatusUpdateModal({ job, initialNext, onClose }: {
+  job: RepairJob;
+  /** Open with this transition already chosen. The banner buttons name the
+   *  action ("Mark as Completed"), so landing on a status picker the technician
+   *  has already answered is a step that asks the same question twice. */
+  initialNext?: JobStatus;
+  onClose: () => void;
+}) {
   const { jobs, updateJob, dealers } = useRepair();
   // A device sent in by another shop has no end customer of ours to ask —
   // the dealer is who we deal with, and they already know their own quote.
@@ -114,7 +121,7 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
   const { parts: catalog } = useParts();
   const { issueWarranty } = useWarranty();
 
-  const [selectedNext, setSelectedNext] = useState<JobStatus | null>(null);
+  const [selectedNext, setSelectedNext] = useState<JobStatus | null>(initialNext ?? null);
   const [pauseReason, setPauseReason]   = useState("");
   const [completionNotes, setCompletionNotes] = useState("");
   const [cancelReason, setCancelReason] = useState("");
@@ -237,8 +244,29 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
   const needsLossAck = atALoss && chargeable;
   const approvalCaptured = apprChannel === "In-store" ? apprSig.trim() !== "" : apprRef.trim().length > 2;
 
-  const conflictJob = selectedNext === "Issued"
-    ? jobs.find(j => j.technician === technicianName && j.status === "Issued" && j.id !== job.id)
+  /**
+   * Starting a job used to pause whatever else this technician had running,
+   * unconditionally — which quietly overrode the "work on several jobs at
+   * once" permission: the rule said yes, and the bench still only ever had one
+   * live job. Now the other job is only paused when starting this one would
+   * actually breach the rule.
+   *
+   * `rules` is null while the lookup is in flight; treated as permissive, the
+   * same as everywhere else in this file, so a slow network never pauses a job
+   * it had no business pausing.
+   */
+  const myOtherActive = jobs
+    .filter(j => j.technician === technicianName && j.status === "Issued" && j.id !== job.id)
+    // Oldest first: if something has to give, it is the job that has been
+    // sitting open longest, not the one just touched.
+    .sort((a, b) => new Date(a.startedAt ?? a.createdAt).getTime() - new Date(b.startedAt ?? b.createdAt).getTime());
+
+  const activeCap = rules
+    ? (rules.allowMultipleActiveJobs ? (rules.maxActiveJobs ?? Infinity) : 1)
+    : Infinity;
+
+  const conflictJob = selectedNext === "Issued" && myOtherActive.length + 1 > activeCap
+    ? myOtherActive[0]
     : undefined;
 
   const hasDiagnostic = !!diagnostics[job.id];
@@ -327,6 +355,21 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
       setJobMeta(job.id, { completedAt: now, completionNotes, lastPausedAt: now });
       completedPatch.completedAt = now.toISOString().slice(0, 10);
       completedPatch.techRemarks = completionNotes.trim();
+
+      // Finished without ever being started in the system — a quick job the
+      // technician did in one go. Stamp a start anyway: a job with a completion
+      // date and no start breaks the Started column, the stage tables and every
+      // turnaround figure. The activity note below keeps the record honest
+      // about what actually happened.
+      if (!job.startedAt) {
+        completedPatch.startedAt = now.toISOString();
+        setJobMeta(job.id, { startedAt: now });
+        addActivity({
+          jobId: job.id,
+          type: "status_change",
+          description: "Completed directly — the job was never started in the system, so start and finish are the same moment",
+        });
+      }
       const partsList = partsUsedText.split("\n").map(s => s.trim()).filter(Boolean);
       if (partsList.length) completedPatch.partsUsed = partsList;
       if (futureFaults.trim()) completedPatch.futureFaults = futureFaults.trim();
@@ -422,7 +465,7 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
   return createPortal(
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(6px)" }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 20, padding: "28px 28px 24px", width: 520, maxHeight: "92vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 20, boxShadow: "0 24px 64px rgba(0,0,0,0.6)", fontFamily: ff }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 20, padding: "28px 28px 24px", width: "min(920px, 96vw)", maxHeight: "92vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 20, boxShadow: "0 24px 64px rgba(0,0,0,0.6)", fontFamily: ff }}>
 
         {/* Success */}
         {confirmed ? (
@@ -479,8 +522,13 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
               </div>
             </div>
 
-            {/* Transition buttons */}
-            {allowed.length > 0 && (
+            {/* Transition buttons — hidden when the caller already named the
+                action. "Mark as Completed" opening onto a list where Completed
+                is pre-ticked asks the same question twice; to switch, close and
+                press the other button. Still shown wherever the modal is opened
+                without a choice, since there the list is the only way to make
+                one. */}
+            {!initialNext && allowed.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {sec("Available Transitions")}
                 {allowed.map(next => {
@@ -521,7 +569,10 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
                 <div>
                   <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", marginBottom: 3, fontFamily: ff }}>Active Job Conflict</p>
                   <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.55, fontFamily: ff }}>
-                    <strong style={{ color: "var(--text-primary)" }}>{conflictJob.id}</strong> ({conflictJob.brand} {conflictJob.model}) is active and will be automatically <strong style={{ color: "#fbbf24" }}>paused</strong>.
+                    <strong style={{ color: "var(--text-primary)" }}>{conflictJob.id}</strong> ({conflictJob.brand} {conflictJob.model}) is active and will be automatically <strong style={{ color: "#fbbf24" }}>paused</strong>
+                    {activeCap === 1
+                      ? " — you are set to one job at a time."
+                      : ` — you are capped at ${activeCap} at a time and already have ${myOtherActive.length}.`}
                   </p>
                 </div>
               </div>
@@ -542,7 +593,13 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
 
             {/* ── Completion: work notes + functional tests + warranty ── */}
             {selectedNext === "Completed" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              /* Two columns on anything wider than a tablet. Finishing a job
+                 asks for eight separate things, and stacked in one column that
+                 is a long scroll on every repair — the cost and the completion
+                 type end up on different screens from the Complete button.
+                 Sections that carry a table or a full checklist still span both
+                 columns; only the short ones pair up. */
+              <div className="complete-grid" style={{ display: "grid", gap: 16, alignItems: "start" }}>
 
                 {/* Estimate & approval gate */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -651,7 +708,7 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
                 </div>
 
                 {/* Parts used, with what they cost the shop */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, gridColumn: "1 / -1" }}>
                   {sec("Parts Used & Cost")}
 
                   {(jobPartLines.length > 0 || labourCost > 0) && (
@@ -773,7 +830,7 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
                     rather than standing between every job and its Complete
                     button. The header carries the count, so a technician can
                     see at a glance whether anything was recorded. */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, gridColumn: "1 / -1" }}>
                   <button
                     onClick={() => setTestsOpen(o => !o)}
                     style={{
@@ -850,7 +907,7 @@ export default function StatusUpdateModal({ job, onClose }: { job: RepairJob; on
                 </div>
 
                 {/* Warranty */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, gridColumn: "1 / -1" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <Shield size={13} color="#a78bfa" />
                     {sec("Warranty")}
