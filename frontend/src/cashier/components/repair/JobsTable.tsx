@@ -13,6 +13,11 @@ import JobReceiptPrintable from "./JobReceiptPrintable";
 import JobIssuePrintable, { type IssueInvoiceData } from "./JobIssuePrintable";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import { useParts } from "@/cashier/contexts/PartsContext";
+import { useMyPermissions } from "@/lib/settings/staffRules";
+import { useAuth } from "@/lib/auth/AuthContext";
+import { postJobToCredit } from "@/lib/credit/api";
+import { useSales } from "@/cashier/contexts/SalesContext";
+import { usePersistInvoiceDocument } from "@/lib/sales/invoiceDoc";
 import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 import {
   Search, Filter, ChevronDown, MoreHorizontal,
@@ -712,6 +717,12 @@ function CancelJobModal({ job, onClose, onCancel }: {
   const [reason, setReason] = useState("");
   const [custom, setCustom] = useState("");
 
+  // Only an admin cashier can open this modal on a finished job, so reaching
+  // here in one of these states means an override is happening. It gets its own
+  // warning: the ordinary one talks about refunding an advance, which is not
+  // the risk when the customer already has the phone.
+  const isOverride = ["Completed", "Delivered"].includes(job.status);
+
   const finalReason = reason === "Other" ? custom.trim() : reason;
   const canSubmit = reason !== "" && (reason !== "Other" || custom.trim() !== "");
 
@@ -736,6 +747,17 @@ function CancelJobModal({ job, onClose, onCancel }: {
         </div>
 
         <div style={{ padding: "18px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
+          {isOverride && (
+            <div style={{ padding: "12px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)" }}>
+              <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.55 }}>
+                <strong style={{ color: "#fbbf24" }}>This job is already {job.status.toLowerCase()}.</strong>{" "}
+                {job.status === "Delivered"
+                  ? "The device has been handed over and the takings recorded against it. Cancelling now does not reverse either — settle the money and get the phone back separately."
+                  : "The repair has been done and its parts and labour are already costed against it. Cancelling now does not put the parts back on the shelf."}
+              </p>
+            </div>
+          )}
+
           <div style={{ padding: "12px 14px", borderRadius: 10, background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.2)" }}>
             <p style={{ fontSize: 12, color: "#f87171", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
               ⚠ This action will permanently cancel the job. If an advance was paid, ensure it is refunded and recorded separately.
@@ -885,12 +907,19 @@ function PickupModal({ job, onClose, onConfirm }: {
 
 // ─── Job Details Modal ────────────────────────────────────────────────────────
 
-function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, onPickup, onPrintSlip }: {
+function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, onPickup, onPrintSlip, mayCancel = true, mayCancelAny = false }: {
   job: RepairJob;
   onClose: () => void;
   onFinishJob: () => void;
   onIssueJob: () => void;
   onCancelJob: () => void;
+  /** False when this cashier is not permitted to cancel. Separate from the
+   *  component's own canCancel, which is about the job's status: one asks
+   *  whether this job CAN be cancelled, the other whether this person MAY. */
+  mayCancel?: boolean;
+  /** True for an admin cashier, who may cancel a job at any stage — including
+   *  one already completed or handed over. See canCancel below. */
+  mayCancelAny?: boolean;
   onPickup: () => void;
   onPrintSlip: () => void;
 }) {
@@ -915,7 +944,22 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
   const fieldBox: React.CSSProperties = { padding: "7px 10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", minHeight: 33, display: "flex", alignItems: "center" };
   const secHead: React.CSSProperties  = { fontSize: 10, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase" as const, marginBottom: 10, fontFamily: "'Plus Jakarta Sans', sans-serif" };
 
-  const canCancel = !["Completed", "Delivered", "Cancelled"].includes(job.status);
+  /**
+   * Whether this job is at a stage that can still be called off.
+   *
+   * An ordinary cashier gets the safe rule: once the work is Completed or the
+   * phone has been Delivered, cancelling it would contradict a repair that
+   * happened and a device that left the shop.
+   *
+   * An admin cashier can cancel any job. Those cases are real — a handover
+   * entered against the wrong job, a device returned the same afternoon, a
+   * dealer job written off after the fact — and until now the only way to fix
+   * one was to edit the database by hand. Already-Cancelled is still refused
+   * for both, because there is nothing there to do.
+   */
+  const stageAllowsCancel = !["Completed", "Delivered", "Cancelled"].includes(job.status);
+  const isOverride = mayCancelAny && !stageAllowsCancel && job.status !== "Cancelled";
+  const canCancel = job.status !== "Cancelled" && (stageAllowsCancel || mayCancelAny);
 
   if (typeof document === "undefined") return null;
   return createPortal(
@@ -951,9 +995,9 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                 <Truck size={12} strokeWidth={2.2} />Confirm Pickup
               </button>
             )}
-            {canCancel && (
-              <button onClick={onCancelJob} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, border: "1px solid rgba(248,113,113,0.4)", background: "rgba(248,113,113,0.08)", color: "#f87171", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                <Ban size={11} />Cancel
+            {canCancel && mayCancel && (
+              <button onClick={onCancelJob} title={isOverride ? `This job is ${job.status.toLowerCase()} — only an admin cashier can still cancel it` : undefined} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, border: "1px solid rgba(248,113,113,0.4)", background: "rgba(248,113,113,0.08)", color: "#f87171", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                <Ban size={11} />{isOverride ? "Cancel (override)" : "Cancel"}
               </button>
             )}
             <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1274,6 +1318,9 @@ function IssueJobModal({ job, onClose, onIssued }: {
 function RepairInvoicePreview({ data, onClose }: { data: IssueInvoiceData; onClose: () => void }) {
   const invoiceRef = useRef<HTMLDivElement>(null);
 
+  const pageCss = "@page { size: A4 portrait; margin: 15mm; }";
+  usePersistInvoiceDocument(data.invoiceNo, invoiceRef, pageCss);
+
   const handlePrint = () => {
     if (!invoiceRef.current) return;
     const printDiv = document.createElement("div");
@@ -1443,6 +1490,16 @@ interface JobsTableProps {
 export default function JobsTable({ view = "All", title, icon: Icon, description }: JobsTableProps) {
   const { addEntry } = useCashRegister();
   const { jobs: allJobs, updateJob, dealers } = useRepair();
+  // What this cashier is allowed to do at the counter — an Admin is never
+  // limited by it. Permissive while it loads, so a slow network cannot stop
+  // someone taking a payment.
+  const { can, isAdminCashier } = useMyPermissions();
+  // Issuing a job draws a real invoice number and prints an invoice, so it is a
+  // sale — it just never used to be written down as one.
+  const { addSale } = useSales();
+  // Cancelling a finished job is an override worth attributing to a person, so
+  // this stops being the literal string "Cashier".
+  const { profile } = useAuth();
   const isMobile = useIsMobile();
   // What this stage of the job is about decides which columns are worth space.
   const cols = VIEW_COLUMNS[view] ?? DEFAULT_COLS;
@@ -1506,7 +1563,7 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
       status: "Cancelled",
       cancelReason: reason,
       cancelledAt: new Date().toISOString().slice(0, 10),
-      cancelledBy: "Cashier",
+      cancelledBy: profile?.fullName?.trim() || "Cashier",
     });
     setCancelJob(null);
     setDetailsJob(null);
@@ -1535,8 +1592,30 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
         handedOverAt: nowISO,
       },
     });
+    void chargeAnyBalanceToCredit(pickupJob!.id);
     setPickupJob(null);
     setDetailsJob(null);
+  };
+
+  /**
+   * Put whatever is still owed on a handed-over job onto the holder's credit
+   * account.
+   *
+   * The database does this itself on the Delivered transition, so this call is
+   * not what makes it happen — it is what makes it visible now rather than
+   * after the next refresh. Both sides are idempotent per job, so the pair can
+   * only ever produce one charge.
+   *
+   * Never allowed to throw. The phone is going back to its owner either way; a
+   * charge that failed to appear is something to reconcile, an exception thrown
+   * mid-handover is a customer standing at the counter watching an error.
+   */
+  const chargeAnyBalanceToCredit = async (jobId: string) => {
+    try {
+      await postJobToCredit(jobId);
+    } catch {
+      /* the Delivered trigger is the backstop */
+    }
   };
 
   const openFinish    = (job: RepairJob) => { setDetailsJob(null); setFinishJob(job); };
@@ -1552,7 +1631,11 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
     const issuedISO = new Date().toISOString();
     // "Delivered", not "Issued": the internal enum uses Issued for work in
     // progress, so the old value pushed a collected job back onto the bench.
-    void updateJob(issueJobTarget!.id, {
+    //
+    // Awaited: Delivered is what makes the database raise the credit charge,
+    // and the sale recorded below is what stamps this invoice number onto it.
+    // Fire-and-forget here leaves a charge with no invoice on it.
+    await updateJob(issueJobTarget!.id, {
       status: "Delivered",
       imei: data.imei,
       jobWarranty: data.warranty,
@@ -1569,7 +1652,34 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
         handedOverAt: issuedISO,
       },
     });
-    setInvoiceData({ job: issueJobTarget!, ...data, invoiceNo, createdAt });
+    await chargeAnyBalanceToCredit(issueJobTarget!.id);
+
+    const job = issueJobTarget!;
+    addSale(
+      {
+        invoiceNo,
+        date: new Date().toISOString().slice(0, 10),
+        customer: data.name || job.customerName || "Walk-in",
+        category: "Repair",
+        items: `${job.brand} ${job.model}`.trim() || job.id,
+        // What the invoice was for, after any discount — not what was handed
+        // over at the counter. The two differ whenever a balance is left owing,
+        // and the ledger records the sale, not the cash.
+        total: Math.max(0, (job.estimatedCost ?? 0) - (data.discount ?? 0)),
+        subtotal: job.estimatedCost ?? 0,
+        discountAmount: data.discount ?? 0,
+        paid: data.paidAmount ?? 0,
+        status: "Paid",
+        paymentMethod: data.isCredit ? "Credit" : "Cash",
+        cashier: profile?.fullName?.trim() || undefined,
+      },
+      {
+        customerPhone: data.phone || job.phone || null,
+        jobIds: [job.id],
+      },
+    );
+
+    setInvoiceData({ job, ...data, invoiceNo, createdAt });
     setIssueJobTarget(null);
   };
 
@@ -1848,6 +1958,10 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
           onFinishJob={() => openFinish(detailsJob)}
           onIssueJob={() => openIssueJob(detailsJob)}
           onCancelJob={() => openCancel(detailsJob)}
+          // An admin cashier is the senior person at the counter; the switch
+          // below is for limiting the others, not them.
+          mayCancel={can("canCancelJobs") || isAdminCashier}
+          mayCancelAny={isAdminCashier}
           onPickup={() => openPickup(detailsJob)}
           onPrintSlip={() => openIntakeSlip(detailsJob)}
         />

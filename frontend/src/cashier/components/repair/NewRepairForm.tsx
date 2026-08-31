@@ -652,48 +652,98 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
             the Step 2 accordions hit; see AccordionSection). */}
         <div style={{ ...panelStyle, flex: "0 0 auto" }}>
           <div style={sectionHeaderStyle}>📱 Device Information</div>
+          <label style={{
+            display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+            marginBottom: 14, fontFamily: "'Plus Jakarta Sans', sans-serif",
+          }}>
+            <input
+              type="checkbox"
+              checked={data.modelNumberUnavailable}
+              onChange={(e) => onChange({
+                modelNumberUnavailable: e.target.checked,
+                // Clear what can no longer be seen, so a half-typed number
+                // cannot be saved against a device the cashier just said has
+                // none. Unticking gives back empty fields, not stale ones.
+                ...(e.target.checked ? { deviceModelNumber: "", deviceBrand: "" } : {}),
+              })}
+              style={{ cursor: "pointer" }}
+            />
+            <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
+              Model number not available
+              <span style={{ color: "var(--text-muted)" }}> — no readable number or brand on the device</span>
+            </span>
+          </label>
+
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(4, 1fr)", gap: 14, marginBottom: 18 }}>
-            <div>
-              <label style={labelStyle}><Hash size={11} style={{ verticalAlign: "-1px" }} /> Model Number</label>
-              <input
-                style={inputStyle}
-                value={data.deviceModelNumber}
-                onChange={(e) => handleModelNumber(e.target.value)}
-              />
-              {lookupResult && lookupResult !== "no-match" && (
-                <p style={{ fontSize: 11, color: "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
-                  <CheckCircle2 size={12} /> Identified: <strong>{lookupResult}</strong>
-                </p>
-              )}
-              {lookupResult === "no-match" && (
-                <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4 }}>
-                  Not in the local database — select or type the model below.
-                </p>
-              )}
-            </div>
+            {/* Unidentifiable device: no readable number, no brand mark. The
+                two fields that cannot be answered come away entirely, rather
+                than sitting there as blanks somebody has to argue with. */}
+            {!data.modelNumberUnavailable && (
+              <div>
+                <label style={labelStyle}><Hash size={11} style={{ verticalAlign: "-1px" }} /> Model Number</label>
+                <input
+                  style={inputStyle}
+                  value={data.deviceModelNumber}
+                  onChange={(e) => handleModelNumber(e.target.value)}
+                />
+                {lookupResult && lookupResult !== "no-match" && (
+                  <p style={{ fontSize: 11, color: "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                    <CheckCircle2 size={12} /> Identified: <strong>{lookupResult}</strong>
+                  </p>
+                )}
+                {lookupResult === "no-match" && (
+                  <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4 }}>
+                    Not in the local database — select or type the model below.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Brand before model: the brand narrows what the model list
+                offers, so asking for it second meant scrolling every model the
+                shop has ever seen to find the one you already knew the make of. */}
+            {!data.modelNumberUnavailable && (
+              <div data-field="deviceBrand" className={bad("deviceBrand") ? "field-shake" : undefined}>
+                <label style={labelStyle}>Device Brand</label>
+                <Combobox
+                  value={data.deviceBrand}
+                  options={brands}
+                  onAddOption={onAddBrand}
+                  placeholder=""
+                  inputStyle={bad("deviceBrand") ? invalidStyle : undefined}
+                  onChange={(b) => onChange({ deviceBrand: b })}
+                />
+                <FieldError show={bad("deviceBrand")}>Select or type the brand</FieldError>
+              </div>
+            )}
+
             <div data-field="deviceModel" className={bad("deviceModel") ? "field-shake" : undefined}>
-              <label style={labelStyle}>Device Model</label>
-              <Combobox
-                value={data.deviceModel}
-                options={models}
-                onAddOption={onAddModel}
-                placeholder=""
-                inputStyle={bad("deviceModel") ? invalidStyle : undefined}
-                onChange={handleDeviceModel}
-              />
-              <FieldError show={bad("deviceModel")}>Select or type the model</FieldError>
-            </div>
-            <div data-field="deviceBrand" className={bad("deviceBrand") ? "field-shake" : undefined}>
-              <label style={labelStyle}>Device Brand</label>
-              <Combobox
-                value={data.deviceBrand}
-                options={brands}
-                onAddOption={onAddBrand}
-                placeholder=""
-                inputStyle={bad("deviceBrand") ? invalidStyle : undefined}
-                onChange={(b) => onChange({ deviceBrand: b })}
-              />
-              <FieldError show={bad("deviceBrand")}>Select or type the brand</FieldError>
+              <label style={labelStyle}>
+                {data.modelNumberUnavailable ? "Device (as written on the docket)" : "Device Model"}
+              </label>
+              {data.modelNumberUnavailable ? (
+                // Free text, not the combobox: with no brand to narrow it the
+                // list is every model in the shop, and the whole reason this
+                // box exists is that the device does not match any of them.
+                <input
+                  style={{ ...inputStyle, ...(bad("deviceModel") ? invalidStyle : {}) }}
+                  value={data.deviceModel}
+                  placeholder="e.g. Chinese clone, no markings"
+                  onChange={(e) => onChange({ deviceModel: e.target.value })}
+                />
+              ) : (
+                <Combobox
+                  value={data.deviceModel}
+                  options={models}
+                  onAddOption={onAddModel}
+                  placeholder=""
+                  inputStyle={bad("deviceModel") ? invalidStyle : undefined}
+                  onChange={handleDeviceModel}
+                />
+              )}
+              <FieldError show={bad("deviceModel")}>
+                {data.modelNumberUnavailable ? "Describe the device" : "Select or type the model"}
+              </FieldError>
             </div>
             <div>
               <label style={labelStyle}>IMEI Number</label>
@@ -1192,7 +1242,7 @@ const LAST_DEALER_KEY = "mano_last_dealer";
 const INITIAL: FormData = {
   dealerId: "", jobNumber: "", autoJobNumber: true, dealerJobNo: "",
   customerName: "", customerNIC: "", customerContact: "", customerEmail: "",
-  deviceBrand: "", deviceModel: "", deviceModelNumber: "", deviceIMEI: "", receivedItems: [], faultCheckboxes: [], faultDescription: "",
+  deviceBrand: "", deviceModel: "", deviceModelNumber: "", modelNumberUnavailable: false, deviceIMEI: "", receivedItems: [], faultCheckboxes: [], faultDescription: "",
   estimatedCost: "", advancePaid: "", paymentMethod: "", jobPriority: "Normal", jobNotes: "",
   assignedRepairman: "", estimatedCompletion: "",
   condition: { front: "Good", back: "Good", frame: "Good", camera: "Good", ports: "Good", buttons: "Good" },
@@ -1234,7 +1284,7 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
   const { addJob, updateJob, dealers, jobs } = useRepair();
   // The corrected model-number reference table. Preferred over job history,
   // which learned from every typo anyone ever entered.
-  const { lookup: deviceModelLookup, reload: reloadDeviceModels } = useDeviceModelLookup();
+  const { lookup: deviceModelLookup, models: deviceModels, reload: reloadDeviceModels } = useDeviceModelLookup();
 
   /**
    * The main technician, pre-selected on Step 4 so the usual assignment is
@@ -1389,10 +1439,37 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
     () => Array.from(new Set(jobs.map(j => j.model).filter((m): m is string => !!m?.trim()))),
     [jobs],
   );
-  const modelOptions = useMemo(
-    () => Array.from(new Set([...historicalModels, ...sessionModels])).sort(),
-    [historicalModels, sessionModels],
-  );
+  /**
+   * Which models belong to which brand, from the reference table first and
+   * this shop's own history second — the same order of trust the model-number
+   * lookup uses, since history is where the wrong answers live.
+   */
+  const modelsByBrand = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    const add = (brand?: string, model?: string) => {
+      const b = (brand ?? "").trim().toLowerCase();
+      const m = (model ?? "").trim();
+      if (!b || !m || b === "other") return;
+      if (!map.has(b)) map.set(b, new Set());
+      map.get(b)!.add(m);
+    };
+    for (const d of deviceModels) add(d.brand, d.model);
+    for (const j of jobs) add(j.brand, j.model);
+    return map;
+  }, [deviceModels, jobs]);
+
+  /**
+   * Pick Samsung and the model list is Samsung's models, not all four hundred
+   * the shop has ever seen. Falls back to everything when the brand is blank,
+   * unrecognised, or has nothing recorded yet — an empty dropdown would be
+   * worse than an unfiltered one, since the cashier could not even type past it.
+   */
+  const modelOptions = useMemo(() => {
+    const all = Array.from(new Set([...historicalModels, ...sessionModels])).sort();
+    const forBrand = modelsByBrand.get(form.deviceBrand.trim().toLowerCase());
+    if (!forBrand || forBrand.size === 0) return all;
+    return Array.from(new Set([...forBrand, ...sessionModels])).sort();
+  }, [historicalModels, sessionModels, modelsByBrand, form.deviceBrand]);
   const addModel = (m: string) => {
     const v = m.trim();
     if (v && !historicalModels.includes(v) && !sessionModels.includes(v)) {
@@ -1495,6 +1572,9 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
     if (f === "customerName" || f === "customerContact") {
       if (fromAnotherShop) return false;
     }
+    // The brand field is not on screen for an unidentifiable device, so
+    // requiring it would block the wizard on a field nobody can fill in.
+    if (f === "deviceBrand" && form.modelNumberUnavailable) return false;
     // Another shop's device is billed on their own docket, not ours — the
     // cost isn't necessarily known (or ours to quote) at intake, so it isn't
     // required the way it is for a job we're estimating and charging for.
@@ -1567,7 +1647,12 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
       // Optional: blank stays undefined so the column is NULL rather than an
       // empty string, which would look like an address the send path could use.
       customerEmail: form.customerEmail.trim() || undefined,
-      brand: form.deviceBrand.trim() || detectBrand(form.deviceModel),
+      // An unidentifiable device is "Other", full stop. Left to detectBrand,
+      // a description like "Samsung clone" would be filed as a genuine Samsung
+      // — and would then teach the model lookup that too.
+      brand: form.modelNumberUnavailable
+        ? "Other"
+        : form.deviceBrand.trim() || detectBrand(form.deviceModel),
       model: form.deviceModel,
       modelNumber: form.deviceModelNumber || undefined,
       issue: issueFaults,

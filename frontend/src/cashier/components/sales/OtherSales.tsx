@@ -6,8 +6,10 @@ import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import { useSales } from "@/cashier/contexts/SalesContext";
 import { createPortal } from "react-dom";
 import { Plus, Trash2, X, Printer } from "lucide-react";
-import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
+import CreditCustomerPicker, { type POSCreditCustomer } from "./CreditCustomerPicker";
 import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
+import { usePersistInvoiceDocument } from "@/lib/sales/invoiceDoc";
+import InvoiceNoBadge from "@/cashier/components/sales/InvoiceNoBadge";
 import { QRCodeSVG } from "qrcode.react";
 import Barcode from "react-barcode";
 
@@ -144,6 +146,14 @@ function OthersPrintPreviewModal({
   const [printFormat, setPrintFormat] = useState<"A5" | "POS">("A5");
   const receiptRef = useRef<HTMLDivElement>(null);
   const today     = new Date().toLocaleDateString("en-LK", { year: "numeric", month: "long", day: "numeric" });
+
+  usePersistInvoiceDocument(
+    invoiceNo,
+    receiptRef,
+    printFormat === "POS"
+      ? "@page { size: 80mm auto; margin: 0; }"
+      : "@page { size: A5 landscape; margin: 10mm; }",
+  );
   const todayFull = new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
   const handlePrint = () => {
@@ -454,7 +464,6 @@ export default function OtherSales() {
 
   // Payment
   const [paymentMethod,          setPaymentMethod]          = useState<"" | "Cash" | "Card" | "Credit">("");
-  const [creditCustomers,        setCreditCustomers]        = useState<POSCreditCustomer[]>(INITIAL_POS_CREDIT_CUSTOMERS);
   const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<POSCreditCustomer | null>(null);
 
   // Modals
@@ -710,8 +719,9 @@ export default function OtherSales() {
           </div>
         ))}
 
-        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginBottom: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 8 }}>
+        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginBottom: 10, display: "flex", flexDirection: "column", gap: 9 }}>
+          <InvoiceNoBadge />
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
             <span style={{ color: "var(--text-secondary)" }}>Subtotal</span>
             <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{fmt(subtotal)}</span>
           </div>
@@ -743,10 +753,8 @@ export default function OtherSales() {
 
         {paymentMethod === "Credit" && (
           <CreditCustomerPicker
-            customers={creditCustomers}
             selected={selectedCreditCustomer}
             onSelect={(c) => { setSelectedCreditCustomer(c); if (c) setPaymentMethod("Credit"); }}
-            onNewCustomer={(c) => { setCreditCustomers(prev => [...prev, c]); setSelectedCreditCustomer(c); }}
           />
         )}
 

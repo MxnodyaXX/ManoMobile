@@ -6,10 +6,11 @@ import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import { useSales } from "@/cashier/contexts/SalesContext";
 import { createPortal } from "react-dom";
 import { Search, Grid3X3, List, Plus, Minus, Trash2, Eye, EyeOff, Tag, X } from "lucide-react";
-import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
+import CreditCustomerPicker, { type POSCreditCustomer } from "./CreditCustomerPicker";
 import { QRCodeSVG } from "qrcode.react";
 import Barcode from "react-barcode";
 import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
+import InvoiceNoBadge from "@/cashier/components/sales/InvoiceNoBadge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1079,7 +1080,6 @@ function Step2({
   const [sameAsPhone, setSameAsPhone] = useState(false);
   const [warranties, setWarranties]   = useState<Record<number, string>>({});
   const [printFormat, setPrintFormat] = useState<"POS" | "A5">("POS");
-  const [creditCustomers,       setCreditCustomers]       = useState<POSCreditCustomer[]>(INITIAL_POS_CREDIT_CUSTOMERS);
   const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<POSCreditCustomer | null>(null);
   const receiptRef = useRef<HTMLDivElement>(null);
 
@@ -1350,15 +1350,10 @@ function Step2({
           {/* Credit Customer Picker */}
           {payMethod === "Credit" && (
             <CreditCustomerPicker
-              customers={creditCustomers}
               selected={selectedCreditCustomer}
               onSelect={(c) => {
                 setSelectedCreditCustomer(c);
                 if (c) onPayMethod("Credit");
-              }}
-              onNewCustomer={(c) => {
-                setCreditCustomers(prev => [...prev, c]);
-                setSelectedCreditCustomer(c);
               }}
             />
           )}
@@ -1385,6 +1380,7 @@ function Step2({
 
           {/* Calculated rows */}
           <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            <InvoiceNoBadge />
             <div style={row}>
               <span style={{ color: "var(--text-secondary)" }}>Subtotal</span>
               <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Rs. {subtotal.toLocaleString()}</span>

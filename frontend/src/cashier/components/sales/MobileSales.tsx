@@ -6,8 +6,10 @@ import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import { useSales } from "@/cashier/contexts/SalesContext";
 import { createPortal } from "react-dom";
 import { Search, Trash2, Plus, Minus, X, Printer } from "lucide-react";
-import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
+import CreditCustomerPicker, { type POSCreditCustomer } from "./CreditCustomerPicker";
 import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
+import { usePersistInvoiceDocument } from "@/lib/sales/invoiceDoc";
+import InvoiceNoBadge from "@/cashier/components/sales/InvoiceNoBadge";
 import { QRCodeSVG } from "qrcode.react";
 import Barcode from "react-barcode";
 
@@ -273,6 +275,8 @@ function MobilePrintPreviewModal({
 }) {
   const receiptRef = useRef<HTMLDivElement>(null);
   const today = new Date().toLocaleDateString("en-LK", { year: "numeric", month: "long", day: "numeric" });
+
+  usePersistInvoiceDocument(invoiceNo, receiptRef, "@page { size: A4 portrait; margin: 12mm; }");
 
   const handlePrint = () => {
     if (!receiptRef.current) return;
@@ -1047,7 +1051,6 @@ export default function MobileSales() {
   const [customer,        setCustomer]        = useState({ name: "", phone: "", whatsapp: "", email: "", nic: "" });
   const [completed,              setCompleted]              = useState(false);
   const [showCardModal,          setShowCardModal]          = useState(false);
-  const [creditCustomers,        setCreditCustomers]        = useState<POSCreditCustomer[]>(INITIAL_POS_CREDIT_CUSTOMERS);
   const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<POSCreditCustomer | null>(null);
   const [showPrintPreview,       setShowPrintPreview]       = useState(false);
   const [confirmedCardRef,       setConfirmedCardRef]       = useState("");
@@ -1464,8 +1467,9 @@ export default function MobileSales() {
           </div>
         ))}
 
-        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginBottom: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 8 }}>
+        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginBottom: 10, display: "flex", flexDirection: "column", gap: 9 }}>
+          <InvoiceNoBadge />
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
             <span style={{ color: "var(--text-secondary)" }}>Subtotal</span>
             <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{fmt(subtotal)}</span>
           </div>
@@ -1503,10 +1507,8 @@ export default function MobileSales() {
         {paymentMethod === "Credit" && (
           <div style={{ marginBottom: 8 }}>
             <CreditCustomerPicker
-              customers={creditCustomers}
               selected={selectedCreditCustomer}
               onSelect={setSelectedCreditCustomer}
-              onNewCustomer={(c) => { setCreditCustomers(prev => [...prev, c]); setSelectedCreditCustomer(c); }}
             />
           </div>
         )}

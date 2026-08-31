@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Plus, Search, Edit2, X, UserCheck, UserX, AlertCircle, KeyRound } from "lucide-react";
+import StaffPermissionsEditor from "@/admin/components/permissions/StaffPermissionsEditor";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import {
   useStaff, createStaff, updateStaff,
@@ -169,6 +170,12 @@ function StaffModal({ initial, onSaved, onClose }: {
               <AlertCircle size={14} color="#f87171" style={{ flexShrink: 0, marginTop: 1 }} />
               <p style={{ fontSize: 12, color: "#f87171", fontWeight: 600 }}>{error}</p>
             </div>
+          )}
+
+          {/* Only on an existing person: permissions are keyed by profile id,
+              and a new staff member has none until they are created. */}
+          {editing && initial && (
+            <StaffPermissionsEditor profileId={initial.id} role={role} />
           )}
 
           <button

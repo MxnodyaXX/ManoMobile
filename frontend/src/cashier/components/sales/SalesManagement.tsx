@@ -56,31 +56,62 @@ export default function SalesManagement() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24, flex: 1, minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, flex: 1, minHeight: 0 }}>
 
-      {/* Page header + Sub-nav tabs */}
+      {/*
+        One header row instead of three stacked blocks.
+
+        This used to be a page title, a subtitle, and then a separate card
+        naming the section — roughly 150px of chrome above every till screen,
+        saying things the sidebar and the navbar breadcrumb already say. The
+        section card carries the identity; the tabs carry the navigation; the
+        page title was the part nobody needed.
+      */}
       <div className="fade-up" style={{
         display: "flex", flexDirection: isMobile ? "column" : "row",
         alignItems: isMobile ? "stretch" : "center",
-        justifyContent: "space-between", gap: isMobile ? 12 : 16,
+        justifyContent: "space-between", gap: isMobile ? 10 : 16,
       }}>
-        <div>
-          <h1 className="heading-xl" style={{ fontSize: 24, color: "var(--text-primary)" }}>
-            Sales Management
-          </h1>
-          <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 5 }}>
-            Process sales, manage transactions, and generate receipts.
-          </p>
+
+        {/* Which till you are at */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "10px 14px",
+          background: "var(--bg-card)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          width: isMobile ? "auto" : "fit-content",
+          flexShrink: 0,
+        }}>
+          <div style={{
+            width: 30, height: 30, borderRadius: 8,
+            background: "var(--accent-dim)",
+            border: "1px solid var(--accent-glow)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "var(--accent)", flexShrink: 0,
+          }}>
+            <ActiveIcon size={14} strokeWidth={2.2} />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <h2 className="heading" style={{ fontSize: 14, color: "var(--text-primary)" }}>
+              {active}
+            </h2>
+            {/* The description is the first thing to go when the row is tight:
+                it is orientation, and the title already gives that. */}
+            <p style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {sectionDescriptions[active]}
+            </p>
+          </div>
         </div>
 
         {/* Section tabs + held sales button, grouped on the right */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: isMobile ? "wrap" : "nowrap" }}>
-          <div className={isMobile ? "tabs-scroll" : undefined}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: isMobile ? "wrap" : "nowrap", minWidth: 0 }}>
+          <div className={isMobile ? "tabs-scroll" : undefined} style={{ minWidth: 0 }}>
             <div style={{
-              display: "flex", gap: 6,
+              display: "flex", gap: 4,
               background: "var(--bg-card)",
               border: "1px solid var(--border)",
-              borderRadius: 12, padding: 6,
+              borderRadius: 11, padding: 5,
               width: "fit-content",
             }}>
               {sections.map(({ id, icon: Icon, label }) => {
@@ -91,7 +122,7 @@ export default function SalesManagement() {
                     onClick={() => setActive(id)}
                     style={{
                       display: "flex", alignItems: "center", gap: 6,
-                      padding: "8px 12px", borderRadius: 8, fontSize: 12.5,
+                      padding: "7px 11px", borderRadius: 8, fontSize: 12.5,
                       border: isActive ? "1px solid var(--accent-glow)" : "1px solid transparent",
                       background: isActive ? "var(--accent-dim)" : "transparent",
                       color: isActive ? "var(--accent)" : "var(--text-secondary)",
@@ -113,7 +144,7 @@ export default function SalesManagement() {
                       }
                     }}
                   >
-                    <Icon size={14} strokeWidth={isActive ? 2.5 : 1.8} />
+                    <Icon size={13} strokeWidth={isActive ? 2.5 : 1.8} />
                     {label}
                   </button>
                 );
@@ -126,7 +157,7 @@ export default function SalesManagement() {
             onClick={() => setShowHeld(true)}
             style={{
               display: "flex", alignItems: "center", gap: 7,
-              padding: "8px 14px", borderRadius: 9,
+              padding: "8px 13px", borderRadius: 9,
               border: heldSales.length > 0 ? "1px solid rgba(251,191,36,0.35)" : "1px solid var(--border)",
               background: heldSales.length > 0 ? "rgba(251,191,36,0.08)" : "transparent",
               color: heldSales.length > 0 ? "#fbbf24" : "var(--text-secondary)",
@@ -149,36 +180,8 @@ export default function SalesManagement() {
         </div>
       </div>
 
-      {/* Active section card */}
-      <div className="fade-up fade-up-2" style={{
-        display: "flex", alignItems: "center", gap: 10,
-        padding: "14px 18px",
-        background: "var(--bg-card)",
-        border: "1px solid var(--border)",
-        borderRadius: 14,
-        width: "fit-content",
-      }}>
-        <div style={{
-          width: 34, height: 34, borderRadius: 9,
-          background: "var(--accent-dim)",
-          border: "1px solid var(--accent-glow)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          color: "var(--accent)",
-        }}>
-          <ActiveIcon size={15} strokeWidth={2.2} />
-        </div>
-        <div>
-          <h2 className="heading" style={{ fontSize: 15, color: "var(--text-primary)" }}>
-            {active}
-          </h2>
-          <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 1 }}>
-            {sectionDescriptions[active]}
-          </p>
-        </div>
-      </div>
-
       {/* Content */}
-      <div className="fade-up fade-up-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
+      <div className="fade-up fade-up-2" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
         {active === "Accessories Sales" && <AccessorySales />}
         {active === "Mobile Sales"      && <MobileSales />}
         {active === "Repair Sales"      && <RepairSales />}

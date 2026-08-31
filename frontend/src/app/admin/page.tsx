@@ -13,12 +13,15 @@ import Suppliers      from "@/admin/components/suppliers/Suppliers";
 import PurchaseOrders from "@/admin/components/purchaseorders/PurchaseOrders";
 import DeviceRegistry from "@/admin/components/devices/DeviceRegistry";
 import Notifications  from "@/admin/components/notifications/Notifications";
+import Appearance from "@/admin/components/appearance/Appearance";
 import SystemSettings from "@/admin/components/settings/SystemSettings";
 import { useStaffByRole } from "@/lib/staff/roster";
 import { RepairProvider } from "@/cashier/contexts/RepairContext";
 import { WarrantyProvider } from "@/cashier/contexts/WarrantyContext";
 import { InventoryProvider } from "@/cashier/contexts/InventoryContext";
 import { PartsProvider } from "@/cashier/contexts/PartsContext";
+import TabTitle from "@/lib/ui/TabTitle";
+import { useAuth } from "@/lib/auth/AuthContext";
 
 const AA = "#a78bfa";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -76,11 +79,23 @@ function AdminSelect({ onSelect }: { onSelect: (name: string) => void }) {
 }
 
 function AdminPageInner() {
-  const [adminName, setAdminName]   = useState<string | null>(null);
+  const [picked, setPicked]         = useState<string | null>(null);
   const [activePage, setActivePage] = useState<AdminPage>("Dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  if (!adminName) return <AdminSelect onSelect={setAdminName} />;
+  /**
+   * Who is running the panel.
+   *
+   * This used to be a name off a list with no password behind it, which is how
+   * the sidebar could read "admin" while every API call and RLS policy saw a
+   * cashier. A signed-in Admin is now simply themselves; the list stays only
+   * for a session that is not an Admin's, where it names the shell without
+   * pretending to authorise anything — the database still refuses the writes.
+   */
+  const { profile, signOut } = useAuth();
+  const adminName = profile?.role === "Admin" ? (profile.fullName || "Admin") : picked;
+
+  if (!adminName) return <AdminSelect onSelect={setPicked} />;
 
   return (
     <AdminProvider>
@@ -90,13 +105,14 @@ function AdminPageInner() {
     <WarrantyProvider>
     <InventoryProvider>
     <PartsProvider>
+      <TabTitle role="Admin" />
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
 
         <AdminSidebar
           activePage={activePage}
           onNavigate={setActivePage}
           adminName={adminName}
-          onLogout={() => setAdminName(null)}
+          onLogout={() => { void signOut().then(() => window.location.assign("/")); }}
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
         />
@@ -113,6 +129,7 @@ function AdminPageInner() {
             {activePage === "Purchase Orders"  && <PurchaseOrders />}
             {activePage === "Device Registry"  && <DeviceRegistry />}
             {activePage === "Notifications"    && <Notifications />}
+            {activePage === "Appearance"       && <Appearance />}
             {activePage === "System Settings"  && <SystemSettings />}
           </main>
         </div>

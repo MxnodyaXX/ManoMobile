@@ -11,6 +11,8 @@ import AccountsReceivable from "@/accounts/components/receivables/AccountsReceiv
 import AccountsPayable   from "@/accounts/components/payables/AccountsPayable";
 import FinancialReports  from "@/accounts/components/reports/FinancialReports";
 import { useStaffByRole } from "@/lib/staff/roster";
+import TabTitle from "@/lib/ui/TabTitle";
+import { useAuth } from "@/lib/auth/AuthContext";
 
 const AA = "#f59e0b";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -104,23 +106,30 @@ function AccountsSelect({ onSelect }: { onSelect: (name: string) => void }) {
 // ─── Main layout ──────────────────────────────────────────────────────────────
 
 function AccountsPageInner() {
-  const [userName, setUserName]     = useState<string | null>(null);
+  const [picked, setPicked]         = useState<string | null>(null);
   const [activePage, setActivePage] = useState<AccountsPage>("Dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Signed in as Accounts: that is who this is, no list to pick from. The
+  // picker is left for a session of another role (an Admin looking in), where
+  // it names the shell rather than granting anything.
+  const { profile, signOut } = useAuth();
+  const userName = profile?.role === "Accounts" ? (profile.fullName || "Accounts") : picked;
+
   if (!userName) {
-    return <AccountsSelect onSelect={setUserName} />;
+    return <AccountsSelect onSelect={setPicked} />;
   }
 
   return (
     <AccountsProvider accountsUser={userName}>
+      <TabTitle role="Accounts" />
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
 
         <AccountsSidebar
           activePage={activePage}
           onNavigate={setActivePage}
           userName={userName}
-          onLogout={() => setUserName(null)}
+          onLogout={() => { void signOut().then(() => window.location.assign("/")); }}
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
         />

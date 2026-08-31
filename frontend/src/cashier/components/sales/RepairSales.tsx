@@ -9,12 +9,15 @@ import {
   CreditCard, X, BookUser,
 } from "lucide-react";
 import { createPortal } from "react-dom";
-import CreditCustomerPicker, { INITIAL_POS_CREDIT_CUSTOMERS, POSCreditCustomer } from "./CreditCustomerPicker";
+import CreditCustomerPicker, { type POSCreditCustomer } from "./CreditCustomerPicker";
 import JobIssuePrintable, { type IssueInvoiceData } from "@/cashier/components/repair/JobIssuePrintable";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
 import { useRepair, findDealer, isInHouseDealer, dealerKey } from "@/cashier/contexts/RepairContext";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
+import InvoiceNoBadge from "@/cashier/components/sales/InvoiceNoBadge";
+import { usePersistInvoiceDocument } from "@/lib/sales/invoiceDoc";
+import { useAuth } from "@/lib/auth/AuthContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +78,38 @@ const inputSt: React.CSSProperties = {
   border: "1px solid var(--border)", background: "var(--bg-primary)",
   color: "var(--text-primary)", fontSize: 12.5, outline: "none",
   fontFamily: "'Plus Jakarta Sans', sans-serif", boxSizing: "border-box",
+};
+
+// A field filled from the dealer registry. Read-only rather than disabled: a
+// disabled input is skipped by the keyboard and greys the text out, and this
+// text is the answer, not an unavailable one.
+/**
+ * What an invoice was billed from, frozen at the moment it was generated.
+ *
+ * Every field here is derived from `invoiceable`, which only keeps jobs with
+ * status "Completed". Issuing the jobs moves them to "Delivered" and they all
+ * go empty or zero — so anything that runs after that point (the invoice
+ * preview, the credit confirmation, recording the sale) has to read this and
+ * never the live values.
+ */
+interface BilledSnapshot {
+  repairs: CompletedRepair[];
+  totalAdvance: number;
+  effectiveReceived: number;
+  finalDue: number;
+  grandTotal: number;
+  totalDiscount: number;
+  isCredit: boolean;
+  customerName: string;
+  customerPhone: string;
+  dealerId: number | null;
+  creditAccountId: string | null;
+}
+
+const lockedSt: React.CSSProperties = {
+  background: "var(--bg-secondary)",
+  borderColor: "var(--accent-glow)",
+  cursor: "default",
 };
 
 const labelSt: React.CSSProperties = {
@@ -226,6 +261,15 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
       createdAt,
     };
   };
+
+  // Paper size is part of the document: an in-house repair slip is A5, a dealer
+  // invoice A4. Stored alongside the markup so a reprint months later comes out
+  // the same shape rather than on whatever the reprinting screen defaults to.
+  const pageCss = `@page { size: ${isManoMobile ? "A5 landscape" : "A4 landscape"}; margin: ${isManoMobile ? "0" : "12mm"}; }`;
+
+  // Keep the invoice exactly as it was rendered here. Invoice History shows
+  // this, not a summary rebuilt from figures that may since have moved.
+  usePersistInvoiceDocument(invoiceNo, invoiceRef, pageCss);
 
   const handlePrint = () => {
     if (!invoiceRef.current) return;
@@ -418,6 +462,8 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
 export default function RepairSales() {
   const { addEntry } = useCashRegister();
   const { addSale } = useSales();
+  // Whose till the invoice came off, for the sales ledger.
+  const { profile } = useAuth();
   const { updateJob, jobs, dealers } = useRepair();
   const [view,           setView]           = useState<"search" | "invoice">("search");
   const [showIssuedMsg,  setShowIssuedMsg]  = useState(false);
@@ -429,6 +475,20 @@ export default function RepairSales() {
   const [custName,  setCustName]  = useState("");
   const [custPhone, setCustPhone] = useState("");
   const [custNic,   setCustNic]   = useState("");
+  /**
+   * Bill the dealer instead of the end customer.
+   *
+   * On a dealer job the shop's customer IS the dealer — Phone House sends the
+   * phone, Phone House pays. Their name and number were being retyped on every
+   * invoice, which is both wasted keystrokes and a source of "Phone house",
+   * "PhoneHouse" and a mistyped number ending up on three invoices for the same
+   * account. Ticking this fills the fields from the dealer registry and locks
+   * them, so all of it says the same thing.
+   */
+  const [billToDealer, setBillToDealer] = useState(false);
+  // What was typed by hand before the tick, so unticking gives it back rather
+  // than throwing away a half-entered customer.
+  const manualCustomer = useRef({ name: "", phone: "", nic: "" });
 
   // Step 3 — Terms & signature (Mano Mobile only, replaces the dealer panel)
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -438,7 +498,6 @@ export default function RepairSales() {
   const [amountReceived, setAmountReceived] = useState("");
 
   // Step 3 — Credit customer (Mano Mobile + due)
-  const [creditCustomers,        setCreditCustomers]        = useState<POSCreditCustomer[]>(INITIAL_POS_CREDIT_CUSTOMERS);
   const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<POSCreditCustomer | null>(null);
 
   // Credit record confirmation (non-Mano Mobile + due)
@@ -451,12 +510,7 @@ export default function RepairSales() {
   // them out of the live `selectedRepairs`/`grandTotal`/etc. the instant
   // status updates land, leaving InvoiceView with an empty invoice. Snapshot
   // everything before that flip so the preview keeps showing what was billed.
-  const [invoiceSnapshot, setInvoiceSnapshot] = useState<{
-    repairs: CompletedRepair[];
-    totalAdvance: number;
-    effectiveReceived: number;
-    finalDue: number;
-  } | null>(null);
+  const [invoiceSnapshot, setInvoiceSnapshot] = useState<BilledSnapshot | null>(null);
 
   // Assigned for real (from the shared invoice_no_seq sequence) only once a
   // sale is actually completed — see fetchNextInvoiceNo's own comment for why
@@ -549,6 +603,32 @@ export default function RepairSales() {
     };
   }, [selectedDealer, dealers, jobs]);
 
+  /**
+   * Fill the customer fields from the dealer registry, or hand back what was
+   * typed before.
+   *
+   * Only offered for an outside dealer. On a Mano Mobile job the "dealer" is
+   * the shop itself, so billing it to the shop would name us as our own
+   * customer.
+   */
+  const dealerRecord   = selectedDealer ? findDealer(dealers, selectedDealer) : undefined;
+  const canBillDealer  = !!selectedDealer && !isManoMobile;
+
+  const toggleBillToDealer = (on: boolean) => {
+    if (on) {
+      manualCustomer.current = { name: custName, phone: custPhone, nic: custNic };
+      setCustName(dealerRecord?.name ?? selectedDealer);
+      setCustPhone(dealerRecord?.contact ?? "");
+      // A dealer is a business; an NIC belongs to a person.
+      setCustNic("");
+    } else {
+      setCustName(manualCustomer.current.name);
+      setCustPhone(manualCustomer.current.phone);
+      setCustNic(manualCustomer.current.nic);
+    }
+    setBillToDealer(on);
+  };
+
   const showStep3 = !!selectedDealer && checkedIds.size > 0;
 
   const canGenerate = showStep3 &&
@@ -557,7 +637,7 @@ export default function RepairSales() {
 
   // Effective customer for invoice
   const invoiceCustomer = useCreditPicker && selectedCreditCustomer
-    ? { name: selectedCreditCustomer.name, phone: selectedCreditCustomer.phone, nic: selectedCreditCustomer.nic }
+    ? { name: selectedCreditCustomer.name, phone: selectedCreditCustomer.phone ?? "", nic: selectedCreditCustomer.nic ?? "" }
     : { name: custName, phone: custPhone, nic: custNic };
 
   const toggleCheck = (id: string) => {
@@ -572,6 +652,7 @@ export default function RepairSales() {
 
   const handleReset = () => {
     setSelectedDealer(""); setCheckedIds(new Set()); setSearch("");
+    setBillToDealer(false); manualCustomer.current = { name: "", phone: "", nic: "" };
     setCustName(""); setCustPhone(""); setCustNic(""); setAmountReceived("");
     setSelectedCreditCustomer(null); setShowCreditConfirm(false); setCreditRecordMade(false);
     setTermsAccepted(false); setSignature(""); setInvoiceSnapshot(null); setView("search");
@@ -580,29 +661,88 @@ export default function RepairSales() {
 
   const handleDealerChange = (val: string) => {
     setSelectedDealer(val); setCheckedIds(new Set()); setSearch("");
+    // The filled-in details belong to the dealer being left behind.
+    setBillToDealer(false); manualCustomer.current = { name: "", phone: "", nic: "" };
     setCustName(""); setCustPhone(""); setCustNic(""); setAmountReceived("");
     setSelectedCreditCustomer(null); setShowCreditConfirm(false); setCreditRecordMade(false);
     setTermsAccepted(false); setSignature(""); setInvoiceSnapshot(null);
     setInvoiceNo(null);
   };
 
-  const recordRepairSale = (no: string) => {
-    addSale({
-      invoiceNo: no,
-      date: new Date().toISOString().slice(0, 10),
-      customer: custName || selectedRepairs[0]?.customerName || "Walk-in",
-      category: "Repair",
-      items: selectedRepairs.map(r => `${r.brand} ${r.model}`).join(", ") || "Repair Invoice",
-      total: grandTotal,
-      status: "Paid",
-    });
+  /**
+   * Record the sale from a snapshot taken before the jobs were issued.
+   *
+   * It MUST NOT read selectedRepairs, grandTotal or isCredit. Those are derived
+   * from `invoiceable`, which only keeps status === "Completed" — so the moment
+   * markIssued() flips the jobs to Delivered they are all empty or zero.
+   *
+   * That is not theoretical. On the dealer-credit path this is called from the
+   * confirm modal, which renders after the flip has landed, and it was writing
+   * sales with total 0 and no jobs attached — which in turn left every credit
+   * charge with no invoice number on it, so three phones on one bill still
+   * showed as three unlinked charges.
+   */
+  const recordRepairSale = (no: string, snap: BilledSnapshot) => {
+    addSale(
+      {
+        invoiceNo: no,
+        date: new Date().toISOString().slice(0, 10),
+        customer: snap.customerName || snap.repairs[0]?.customerName || "Walk-in",
+        category: "Repair",
+        items: snap.repairs.map(r => `${r.brand} ${r.model}`).join(", ") || "Repair Invoice",
+        total: snap.grandTotal,
+        subtotal: snap.grandTotal + snap.totalDiscount,
+        discountAmount: snap.totalDiscount,
+        // Everything the customer has actually handed over against this bill:
+        // whatever was taken as an advance at intake, plus what was taken now.
+        // The rest is the balance the credit charge covers.
+        paid: snap.totalAdvance + snap.effectiveReceived,
+        status: "Paid",
+        paymentMethod: snap.isCredit ? "Credit" : "Cash",
+        cashier: profile?.fullName?.trim() || undefined,
+      },
+      // What the printed invoice cannot carry: which dealer it was billed to,
+      // whose account it landed on, and which jobs it covered. That last one is
+      // what lets a job show the invoice it was billed on, and the reverse —
+      // and what the credit charges are stamped through.
+      {
+        customerPhone: snap.customerPhone || null,
+        dealerId: snap.dealerId,
+        creditAccountId: snap.creditAccountId,
+        jobIds: snap.repairs.map(r => r.id),
+      },
+    );
   };
 
-  // Mark the selected repair jobs as issued (collected by the customer).
-  // Safe for jobs not present in the live repair list — updateJob simply no-ops.
-  const markIssued = () => {
+  /** Everything the invoice was billed from, frozen before the jobs move. */
+  const takeSnapshot = (): BilledSnapshot => ({
+    repairs: selectedRepairs,
+    totalAdvance,
+    effectiveReceived,
+    finalDue,
+    grandTotal,
+    totalDiscount,
+    isCredit,
+    customerName: invoiceCustomer.name,
+    customerPhone: invoiceCustomer.phone,
+    dealerId: dealerRecord ? Number(dealerRecord.id) : null,
+    creditAccountId: selectedCreditCustomer?.id ?? null,
+  });
+
+  /**
+   * Mark the selected repair jobs as issued (collected by the customer).
+   *
+   * Awaited, and awaited by both callers, because marking a job Delivered is
+   * what makes the database raise its credit charge. Recording the sale then
+   * stamps the invoice number onto those charges — and if the sale got there
+   * first there would be nothing to stamp, so three phones on one bill would
+   * stay three unlinked charges in the credit history instead of one invoice.
+   *
+   * Safe for jobs not present in the live repair list — updateJob simply no-ops.
+   */
+  const markIssued = async () => {
     const nowISO = new Date().toISOString();
-    selectedRepairs.forEach(r => {
+    await Promise.all(selectedRepairs.map(r =>
       updateJob(r.id, {
         status: "Delivered",
         handover: {
@@ -615,8 +755,8 @@ export default function RepairSales() {
           handedOverBy: "Cashier",
           handedOverAt: nowISO,
         },
-      });
-    });
+      }),
+    ));
   };
 
   const handleGenerateInvoice = async () => {
@@ -627,15 +767,18 @@ export default function RepairSales() {
     setInvoicing(false);
     // Snapshot before markIssued() flips these jobs to "Delivered" — see the
     // comment on invoiceSnapshot's declaration.
-    setInvoiceSnapshot({ repairs: selectedRepairs, totalAdvance, effectiveReceived, finalDue });
-    markIssued();
+    const snap = takeSnapshot();
+    setInvoiceSnapshot(snap);
+    await markIssued();
     if (!isManoMobile && isCredit) {
+      // The sale is recorded from the confirm modal, which renders after the
+      // flip — so it uses invoiceSnapshot, set just above, not live state.
       setShowCreditConfirm(true);
     } else {
       if (effectiveReceived > 0) {
         addEntry("in", `Cash — Repair Invoice ${no} (${selectedDealer})`, effectiveReceived);
       }
-      recordRepairSale(no);
+      recordRepairSale(no, snap);
       setView("invoice");
     }
   };
@@ -647,11 +790,13 @@ export default function RepairSales() {
     setInvoicing(true);
     const no = await fetchNextInvoiceNo();
     setInvoicing(false);
-    markIssued();
+    const snap = takeSnapshot();
+    setInvoiceSnapshot(snap);
+    await markIssued();
     if (effectiveReceived > 0) {
       addEntry("in", `Cash — Repair Issued ${selectedDealer}`, effectiveReceived);
     }
-    recordRepairSale(no);
+    recordRepairSale(no, snap);
     setShowIssuedMsg(true);
   };
 
@@ -767,7 +912,13 @@ export default function RepairSales() {
       {/* Step 3: Billing — only when dealer selected + repairs checked */}
       {showStep3 && (
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
-          <p style={stepLabel}>Step 3 — Billing</p>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <p style={stepLabel}>Step 3 — Billing</p>
+            {/* Refreshed on the assigned number, so once this bill is generated
+                the panel moves on instead of still offering the number it just
+                used. */}
+            <InvoiceNoBadge refreshKey={invoiceNo} />
+          </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
 
@@ -937,26 +1088,72 @@ export default function RepairSales() {
               {useCreditPicker ? (
                 /* Mano Mobile + due → Credit Customer Picker */
                 <CreditCustomerPicker
-                  customers={creditCustomers}
                   selected={selectedCreditCustomer}
                   onSelect={setSelectedCreditCustomer}
-                  onNewCustomer={(c) => { setCreditCustomers(prev => [...prev, c]); setSelectedCreditCustomer(c); }}
                 />
               ) : (
                 /* Simple customer entry */
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {canBillDealer && (
+                    <label
+                      style={{
+                        display: "flex", alignItems: "flex-start", gap: 9, cursor: "pointer",
+                        padding: "9px 11px", borderRadius: 9,
+                        background: billToDealer ? "rgba(99,85,255,0.07)" : "var(--bg-primary)",
+                        border: `1px solid ${billToDealer ? "var(--accent-glow)" : "var(--border)"}`,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={billToDealer}
+                        onChange={e => toggleBillToDealer(e.target.checked)}
+                        style={{ width: 15, height: 15, accentColor: "var(--accent)", cursor: "pointer", flexShrink: 0, marginTop: 1 }}
+                      />
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", display: "block" }}>
+                          Set as {dealerRecord?.name ?? selectedDealer}
+                        </span>
+                        <span style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
+                          Bill the dealer rather than the phone&apos;s owner — fills these fields from the dealer registry.
+                        </span>
+                      </span>
+                    </label>
+                  )}
+
                   <div>
                     <label style={labelSt}>Full Name *</label>
-                    <input value={custName} onChange={e => setCustName(e.target.value)} placeholder="Customer full name" style={inputSt} />
+                    <input
+                      value={custName}
+                      onChange={e => setCustName(e.target.value)}
+                      readOnly={billToDealer}
+                      placeholder="Customer full name"
+                      style={{ ...inputSt, ...(billToDealer ? lockedSt : null) }}
+                    />
                   </div>
                   <div>
                     <label style={labelSt}>Phone</label>
-                    <input value={custPhone} onChange={e => setCustPhone(e.target.value)} placeholder="07X XXX XXXX" style={inputSt} />
+                    <input
+                      value={custPhone}
+                      onChange={e => setCustPhone(e.target.value)}
+                      readOnly={billToDealer}
+                      placeholder={billToDealer ? "No contact number on the dealer record" : "07X XXX XXXX"}
+                      style={{ ...inputSt, ...(billToDealer ? lockedSt : null) }}
+                    />
                   </div>
-                  <div>
-                    <label style={labelSt}>NIC</label>
-                    <input value={custNic} onChange={e => setCustNic(e.target.value)} placeholder="XXXXXXXXX V" style={inputSt} />
-                  </div>
+                  {/* A dealer has no NIC, so the field goes away rather than
+                      sitting there greyed out inviting a number that would be
+                      wrong whatever was put in it. */}
+                  {!billToDealer && (
+                    <div>
+                      <label style={labelSt}>NIC</label>
+                      <input value={custNic} onChange={e => setCustNic(e.target.value)} placeholder="XXXXXXXXX V" style={inputSt} />
+                    </div>
+                  )}
+                  {billToDealer && !custPhone.trim() && (
+                    <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
+                      No contact number on this dealer&apos;s record. Add one under Admin Control → Repair Dealers.
+                    </p>
+                  )}
                   {!custName.trim() && (
                     <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                       Name is required to generate the invoice.
@@ -998,8 +1195,8 @@ export default function RepairSales() {
         <CreditRecordConfirmModal
           dealer={selectedDealer}
           dueAmount={invoiceSnapshot?.finalDue ?? finalDue}
-          onConfirm={() => { if (!invoiceNo) return; setCreditRecordMade(true); setShowCreditConfirm(false); recordRepairSale(invoiceNo); setView("invoice"); }}
-          onSkip={() => { if (!invoiceNo) return; setCreditRecordMade(false); setShowCreditConfirm(false); recordRepairSale(invoiceNo); setView("invoice"); }}
+          onConfirm={() => { if (!invoiceNo || !invoiceSnapshot) return; setCreditRecordMade(true); setShowCreditConfirm(false); recordRepairSale(invoiceNo, invoiceSnapshot); setView("invoice"); }}
+          onSkip={() => { if (!invoiceNo || !invoiceSnapshot) return; setCreditRecordMade(false); setShowCreditConfirm(false); recordRepairSale(invoiceNo, invoiceSnapshot); setView("invoice"); }}
           onCancel={() => setShowCreditConfirm(false)}
         />
       )}

@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { TrendingUp, CheckCircle, Clock, Package, AlertTriangle, FileText, ClipboardCheck, Star } from "lucide-react";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
 import { useParts } from "@/cashier/contexts/PartsContext";
+import PerformanceCharts, { RANGES, type Range } from "@/technician/components/performance/PerformanceCharts";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -49,6 +50,9 @@ export default function MyPerformance() {
   const { parts } = useParts();
 
   const myJobs = useMemo(() => jobs.filter(j => j.technician === technicianName), [jobs, technicianName]);
+  // One range control for every chart below it — a filter per card would let
+  // two charts on the same screen quietly describe two different periods.
+  const [range, setRange] = useState<Range>(30);
 
   const stats = useMemo(() => {
     const completed = myJobs.filter(j => ["Completed", "Delivered"].includes(j.status));
@@ -145,6 +149,37 @@ export default function MyPerformance() {
         <StatCard icon={ClipboardCheck} iconColor="#34d399"   label="Diagnostics Done"  value={stats.diagDone}        sub={`${stats.testsDone} post-repair tests`} />
         <StatCard icon={FileText}       iconColor="#fbbf24"   label="Repair Notes"      value={stats.totalNotes}       sub={`${stats.totalActivity} activity entries`} />
         <StatCard icon={Star}           iconColor="#f97316"   label="Total Jobs"        value={stats.total}            sub={`${stats.active} active, ${myJobs.filter(j => j.status === "Pending").length} paused`} />
+      </div>
+
+      {/* One filter row, scoping everything under it */}
+      <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <p style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          Insights
+        </p>
+        <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10 }}>
+          {RANGES.map(r => {
+            const active = range === r.id;
+            return (
+              <button
+                key={r.id}
+                onClick={() => setRange(r.id)}
+                style={{
+                  minHeight: 32, padding: "0 13px", borderRadius: 7, fontSize: 12, cursor: "pointer",
+                  fontFamily: ff, fontWeight: active ? 700 : 500,
+                  background: active ? "var(--bg-secondary)" : "transparent",
+                  border: active ? "1px solid var(--border-active)" : "1px solid transparent",
+                  color: active ? "var(--text-primary)" : "var(--text-secondary)",
+                }}
+              >
+                {r.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="fade-up">
+        <PerformanceCharts jobs={myJobs} range={range} />
       </div>
 
       {/* Two-column lower section */}

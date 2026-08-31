@@ -10,12 +10,12 @@ type CustomerSection = "All Customers" | "Credit Customers";
 
 const sections: { id: CustomerSection; icon: any; label: string }[] = [
   { id: "All Customers",    icon: Users,      label: "All Customers" },
-  { id: "Credit Customers", icon: CreditCard, label: "Credit Customers" },
+  { id: "Credit Customers", icon: CreditCard, label: "Credit Accounts" },
 ];
 
 const sectionDescriptions: Record<CustomerSection, string> = {
   "All Customers":    "View and manage all registered customers",
-  "Credit Customers": "Track outstanding credit balances and record payments",
+  "Credit Customers": "What customers and dealers owe — balances, payments and write-offs",
 };
 
 export default function CustomerManagement() {

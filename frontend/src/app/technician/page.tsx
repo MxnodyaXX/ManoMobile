@@ -10,6 +10,7 @@ import { PartsProvider } from "@/cashier/contexts/PartsContext";
 import { TechProvider }   from "@/technician/contexts/TechContext";
 import TechSidebar, { type TechPage } from "@/technician/components/layout/TechSidebar";
 import TechNavbar    from "@/technician/components/layout/TechNavbar";
+import MyBench       from "@/technician/components/bench/MyBench";
 import TechDashboard from "@/technician/components/dashboard/TechDashboard";
 import MyJobs        from "@/technician/components/jobs/MyJobs";
 import PendingCollection from "@/technician/components/collection/PendingCollection";
@@ -17,6 +18,8 @@ import PartsAvailability from "@/technician/components/parts/PartsAvailability";
 import MyPerformance from "@/technician/components/performance/MyPerformance";
 import ShiftTracker  from "@/technician/components/shift/ShiftTracker";
 import JobScanFab    from "@/cashier/components/shared/JobScanFab";
+import TabTitle       from "@/lib/ui/TabTitle";
+import { useAuth }    from "@/lib/auth/AuthContext";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -176,20 +179,33 @@ function TechPageInner() {
   const searchParams = useSearchParams();
   const urlTech = searchParams.get("tech");
 
-  const [techName, setTechName] = useState<string | null>(null);
-  const [activePage, setActivePage] = useState<TechPage>("Dashboard");
+  const [picked, setPicked] = useState<string | null>(null);
+  const [activePage, setActivePage] = useState<TechPage>("My Bench");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  /**
+   * Whose bench this is.
+   *
+   * A signed-in technician is simply themselves — they typed a password at the
+   * login screen and there is nothing left to ask. The picker below survives
+   * for the one case that still needs it: an Admin looking at somebody else's
+   * bench, who has a session but not a technician's name.
+   */
+  const { profile, signOut } = useAuth();
+  const sessionTech = profile?.role === "Technician" ? (profile.fullName || "").trim() : "";
 
   // If a name was passed in the URL, accept it once the roster has loaded.
   const { technicians } = useTechnicians();
   useEffect(() => {
     if (urlTech && technicians.some(t => t.name === urlTech)) {
-      setTechName(urlTech);
+      setPicked(urlTech);
     }
   }, [urlTech, technicians]);
 
+  const techName = sessionTech || picked;
+
   if (!techName) {
-    return <TechSelect onSelect={setTechName} />;
+    return <TechSelect onSelect={setPicked} />;
   }
   const MANAGED_PAGES: TechPage[] = ["My Jobs", "Pending Collection", "Parts & Stock", "Job History", "My Performance", "My Shift"];
   const isManaged = MANAGED_PAGES.includes(activePage);
@@ -199,13 +215,14 @@ function TechPageInner() {
     <WarrantyProvider>
     <PartsProvider>
     <TechProvider technicianName={techName}>
+      <TabTitle role="Technician" name={techName} />
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
 
         <TechSidebar
           activePage={activePage}
           onNavigate={setActivePage}
           techName={techName}
-          onLogout={() => setTechName(null)}
+          onLogout={() => { void signOut().then(() => window.location.assign("/")); }}
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
         />
@@ -221,6 +238,11 @@ function TechPageInner() {
               display: "flex", flexDirection: "column", gap: 0,
             }}
           >
+            {activePage === "My Bench"           && <MyBench />}
+            {/* Dashboard and My Jobs are what My Bench replaces. Kept
+                reachable rather than deleted, so nothing is lost if the bench
+                turns out to be missing something in daily use — nav no longer
+                offers them. */}
             {activePage === "Dashboard"          && <TechDashboard />}
             {activePage === "My Jobs"            && <MyJobs />}
             {activePage === "Pending Collection" && <PendingCollection />}

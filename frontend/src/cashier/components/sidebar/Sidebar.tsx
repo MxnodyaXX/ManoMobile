@@ -6,6 +6,45 @@ import { roleMenus } from "@/cashier/data/sidebarRoles";
 import { motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Smartphone } from "lucide-react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
+import { useMyModuleAccess } from "@/lib/settings/moduleAccess";
+import { useMyPermissions } from "@/lib/settings/staffRules";
+
+/**
+ * Which Permissions module each nav item belongs to.
+ *
+ * Items with no entry are always shown: Warranty Center rides along with
+ * Repairs and has no module of its own, and hiding it on a guess would be
+ * worse than leaving it. Reports maps to Repair Reports because that is what
+ * the screen actually shows a cashier — Sales Reports is a section inside it,
+ * and gating the whole page on the stricter of the two would hide work they
+ * are allowed to see.
+ *
+ * Admin Control is not in here. It is not gated by a module cell at all — it is
+ * the shop's settings screen, and it belongs to Admins and admin cashiers only.
+ * See ADMIN_ONLY below.
+ */
+const NAV_MODULE: Record<string, string> = {
+  "Home":                  "Dashboard",
+  "Repair Management":     "Repairs",
+  "Sales Management":      "Sales / POS",
+  "Inventory Management":  "Inventory",
+  "Customer Management":   "Customers",
+  "Reports":               "Repair Reports",
+  "Cash Register":         "Cash Register",
+  "Invoice History":       "Sales / POS",
+  "Audit Trail":           "System Settings",
+};
+
+/**
+ * Nav items only an Admin or an admin cashier ever sees.
+ *
+ * Admin Control edits categories, brands, suppliers, dealers, repair agents,
+ * the parts catalogue, the fault checklist, barcode design and the counter PIN
+ * — every one of them shop-wide. On a counter with three people on shift, three
+ * people could rewrite the catalogue between customers. Now the senior cashier
+ * can, and the others do not see the door.
+ */
+const ADMIN_ONLY = new Set(["Admin Control"]);
 
 type ActivePage = string;
 
@@ -20,10 +59,21 @@ export default function Sidebar({ activePage, onNavigate, isOpen = false, onClos
   const [collapsed, setCollapsed] = useState(false);
   const isMobile = useIsMobile();
   const userRole = "admin";
+  // What the signed-in person may actually open. Permissive until it loads and
+  // permissive on failure, matching the database — the policies are the
+  // control, this only keeps the sidebar honest about what is reachable.
+  const { canOpen } = useMyModuleAccess();
+  // False until it has loaded, so the settings screen never flashes up for
+  // somebody who is about to lose it.
+  const { isAdminCashier } = useMyPermissions();
 
-  const menuItems = sidebarData.filter((item) =>
-    roleMenus[userRole].includes(item.title)
-  );
+  const menuItems = sidebarData
+    .filter((item) => roleMenus[userRole].includes(item.title))
+    .filter((item) => !ADMIN_ONLY.has(item.title) || isAdminCashier)
+    .filter((item) => {
+      const mod = NAV_MODULE[item.title];
+      return !mod || canOpen(mod);
+    });
 
   const handleNavigate = (page: ActivePage) => {
     onNavigate(page);

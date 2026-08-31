@@ -22,6 +22,16 @@ interface AuthValue {
   /** True until the first session check resolves — render a splash, not a redirect. */
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  /**
+   * Sign in as a chosen staff profile rather than a typed email.
+   *
+   * The login screen at / lists people, not mailboxes, so it holds a profile id
+   * and a password. /api/auth/login resolves the address and verifies the
+   * password; setSession() below then writes the cookies through the ordinary
+   * browser client, so proxy.ts and every screen see the session the same way
+   * they would after a normal sign-in.
+   */
+  signInAsProfile: (profileId: string, password: string) => Promise<{ error: string | null; role: StaffRole | null }>;
   signOut: () => Promise<void>;
   /** Convenience for UI gating. RLS is still the real enforcement. */
   can: (...roles: StaffRole[]) => boolean;
@@ -32,6 +42,7 @@ const AuthContext = createContext<AuthValue>({
   profile: null,
   loading: true,
   signIn: async () => ({ error: "Auth not configured" }),
+  signInAsProfile: async () => ({ error: "Auth not configured", role: null }),
   signOut: async () => {},
   can: () => false,
 });
@@ -108,6 +119,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null };
   };
 
+  const signInAsProfile: AuthValue["signInAsProfile"] = async (profileId, password) => {
+    let payload: { ok?: boolean; error?: string; role?: StaffRole; session?: { access_token: string; refresh_token: string } };
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profileId, password }),
+      });
+      payload = await res.json();
+    } catch {
+      return { error: "Could not reach the server. Check your connection and try again.", role: null };
+    }
+
+    if (!payload.ok || !payload.session) {
+      return { error: payload.error ?? "Could not sign in.", role: null };
+    }
+
+    const supabase = getSupabaseBrowserClient();
+    const { error } = await supabase.auth.setSession(payload.session);
+    if (error) return { error: error.message, role: null };
+
+    // Read it straight back before the caller navigates. proxy.ts checks the
+    // cookie on the very next request, and a navigation that overtakes the
+    // cookie write lands back on the login screen looking like a failure.
+    const { data: check } = await supabase.auth.getUser();
+    if (!check.user) return { error: "Signed in, but the session did not stick. Check that cookies are enabled and try again.", role: null };
+
+    return { error: null, role: payload.role ?? null };
+  };
+
   const signOut = async () => {
     if (!isSupabaseConfigured()) return;
     await getSupabaseBrowserClient().auth.signOut();
@@ -118,7 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const can = (...roles: StaffRole[]) => (profile ? roles.includes(profile.role) : false);
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut, can }}>
+    <AuthContext.Provider value={{ user, profile, loading, signIn, signInAsProfile, signOut, can }}>
       {children}
     </AuthContext.Provider>
   );

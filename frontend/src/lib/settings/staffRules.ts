@@ -34,7 +34,31 @@ export interface StaffRuleOverride {
    *  setDefaultTechnician(), never by writing this field directly — only the
    *  database can swap it without briefly having two. */
   isDefaultTechnician: boolean;
+  /** A senior cashier: the only non-Admin who may open Admin Control. Unlike
+   *  the flags below this one grants rather than restricts, so it defaults
+   *  off — see migration 20260831000009. */
+  isAdminCashier: boolean;
+  /** What a cashier may do at the counter. Ignored for technicians, and an
+   *  Admin is never limited by them. */
+  canCancelJobs: boolean;
+  canDiscount: boolean;
+  canApproveParts: boolean;
+  canManageCatalogue: boolean;
+  canViewRevenue: boolean;
 }
+
+/** The counter permissions, with the wording the admin screen shows. */
+export const CASHIER_PERMISSIONS: {
+  key: "canCancelJobs" | "canDiscount" | "canApproveParts" | "canManageCatalogue" | "canViewRevenue";
+  label: string;
+  blurb: string;
+}[] = [
+  { key: "canCancelJobs",      label: "Cancel repair jobs",        blurb: "Call off a job that has been booked in." },
+  { key: "canDiscount",        label: "Settle below the agreed price", blurb: "Take less than the quoted amount at handover." },
+  { key: "canApproveParts",    label: "Approve part requests",     blurb: "Release parts to a technician, deducting stock." },
+  { key: "canManageCatalogue", label: "Edit dealers and catalogue", blurb: "Change dealers, spare parts and repair agents." },
+  { key: "canViewRevenue",     label: "See takings and profit",    blurb: "Revenue, cost and profit figures across the shop." },
+];
 
 /**
  * The technician enters their charge when they complete a job — only they know
@@ -59,6 +83,12 @@ export interface EffectiveRules extends WorkRules {
   labourCostMode: LabourCostMode;
   labourCostValue: number;
   isDefaultTechnician: boolean;
+  isAdminCashier: boolean;
+  canCancelJobs: boolean;
+  canDiscount: boolean;
+  canApproveParts: boolean;
+  canManageCatalogue: boolean;
+  canViewRevenue: boolean;
   /** True when this person has at least one explicit override. */
   hasOverrides: boolean;
 }
@@ -74,6 +104,14 @@ export const blankOverride = (profileId: string): StaffRuleOverride => ({
   labourCostMode: "none",
   labourCostValue: 0,
   isDefaultTechnician: false,
+  // The two that grant rather than restrict, and so start off: the settings
+  // screen, and giving money away.
+  isAdminCashier: false,
+  canCancelJobs: true,
+  canDiscount: false,
+  canApproveParts: true,
+  canManageCatalogue: true,
+  canViewRevenue: true,
 });
 
 interface RuleRow {
@@ -87,6 +125,12 @@ interface RuleRow {
   labour_cost_mode: LabourCostMode;
   labour_cost_value: number | string;
   is_default_technician: boolean;
+  is_admin_cashier: boolean;
+  can_cancel_jobs: boolean;
+  can_discount: boolean;
+  can_approve_parts: boolean;
+  can_manage_catalogue: boolean;
+  can_view_revenue: boolean;
 }
 
 const rowToOverride = (r: RuleRow): StaffRuleOverride => ({
@@ -101,6 +145,12 @@ const rowToOverride = (r: RuleRow): StaffRuleOverride => ({
   // numeric(12,2) arrives as a string over PostgREST.
   labourCostValue: Number(r.labour_cost_value ?? 0),
   isDefaultTechnician: !!r.is_default_technician,
+  isAdminCashier: !!r.is_admin_cashier,
+  canCancelJobs: r.can_cancel_jobs ?? true,
+  canDiscount: r.can_discount ?? false,
+  canApproveParts: r.can_approve_parts ?? true,
+  canManageCatalogue: r.can_manage_catalogue ?? true,
+  canViewRevenue: r.can_view_revenue ?? true,
 });
 
 /**
@@ -116,6 +166,12 @@ function migrationHint(message: string): string {
     ["labour_cost_mode",               "20260819000013_technician_labour_cost.sql"],
     ["labour_cost_value",              "20260819000013_technician_labour_cost.sql"],
     ["is_default_technician",          "20260825000004_default_technician.sql"],
+    ["is_admin_cashier",               "20260831000009_admin_cashier.sql"],
+    ["can_cancel_jobs",                "20260830000007_cashier_permissions.sql"],
+    ["can_discount",                   "20260830000007_cashier_permissions.sql"],
+    ["can_approve_parts",              "20260830000007_cashier_permissions.sql"],
+    ["can_manage_catalogue",           "20260830000007_cashier_permissions.sql"],
+    ["can_view_revenue",               "20260830000007_cashier_permissions.sql"],
   ];
   const hit = byColumn.find(([col]) => message.includes(col));
   if (hit) return ` — run migration ${hit[1]}.`;
@@ -128,7 +184,7 @@ function migrationHint(message: string): string {
 export async function fetchStaffRules(): Promise<StaffRuleOverride[]> {
   const { data, error } = await getSupabaseBrowserClient()
     .from("staff_work_rules")
-    .select("profile_id, allow_multiple_active_jobs, max_active_jobs, require_start_before_finish, can_claim_unassigned, can_transfer_to_agent, can_use_parts_without_approval, labour_cost_mode, labour_cost_value, is_default_technician");
+    .select("profile_id, allow_multiple_active_jobs, max_active_jobs, require_start_before_finish, can_claim_unassigned, can_transfer_to_agent, can_use_parts_without_approval, labour_cost_mode, labour_cost_value, is_default_technician, is_admin_cashier, can_cancel_jobs, can_discount, can_approve_parts, can_manage_catalogue, can_view_revenue");
 
   if (error) throw new Error(`Could not load technician permissions: ${error.message}${migrationHint(error.message)}`);
   return (data as RuleRow[]).map(rowToOverride);
@@ -148,6 +204,12 @@ export async function saveStaffRule(rule: StaffRuleOverride): Promise<void> {
       can_use_parts_without_approval: rule.canUsePartsWithoutApproval,
       labour_cost_mode: rule.labourCostMode,
       labour_cost_value: rule.labourCostValue,
+      is_admin_cashier: rule.isAdminCashier,
+      can_cancel_jobs: rule.canCancelJobs,
+      can_discount: rule.canDiscount,
+      can_approve_parts: rule.canApproveParts,
+      can_manage_catalogue: rule.canManageCatalogue,
+      can_view_revenue: rule.canViewRevenue,
       // is_default_technician is deliberately absent: writing it here could
       // leave two rows true, which the unique index rejects. It moves only
       // through setDefaultTechnician().
@@ -170,7 +232,10 @@ export function mergeRules(shop: WorkRules, override?: StaffRuleOverride | null)
     return {
       ...shop, canClaimUnassigned: true, canTransferToAgent: true,
       canUsePartsWithoutApproval: false, labourCostMode: "none", labourCostValue: 0,
-      isDefaultTechnician: false, hasOverrides: false,
+      isDefaultTechnician: false, isAdminCashier: false,
+      canCancelJobs: true, canDiscount: false, canApproveParts: true,
+      canManageCatalogue: true, canViewRevenue: true,
+      hasOverrides: false,
     };
   }
   const hasOverrides =
@@ -192,6 +257,12 @@ export function mergeRules(shop: WorkRules, override?: StaffRuleOverride | null)
     labourCostMode: override.labourCostMode,
     labourCostValue: override.labourCostValue,
     isDefaultTechnician: override.isDefaultTechnician,
+    isAdminCashier: override.isAdminCashier,
+    canCancelJobs: override.canCancelJobs,
+    canDiscount: override.canDiscount,
+    canApproveParts: override.canApproveParts,
+    canManageCatalogue: override.canManageCatalogue,
+    canViewRevenue: override.canViewRevenue,
     hasOverrides,
   };
 }
@@ -238,7 +309,10 @@ export async function rulesForTechnician(technicianName: string): Promise<Effect
     return {
       ...shop, canClaimUnassigned: true, canTransferToAgent: true,
       canUsePartsWithoutApproval: false, labourCostMode: "none", labourCostValue: 0,
-      isDefaultTechnician: false, hasOverrides: false,
+      isDefaultTechnician: false, isAdminCashier: false,
+      canCancelJobs: true, canDiscount: false, canApproveParts: true,
+      canManageCatalogue: true, canViewRevenue: true,
+      hasOverrides: false,
     };
   }
   try {
@@ -251,7 +325,10 @@ export async function rulesForTechnician(technicianName: string): Promise<Effect
       // No rate could be read, so nothing is costed — better than guessing an
       // amount and writing it onto a job as if it were agreed.
       labourCostMode: "none", labourCostValue: 0,
-      isDefaultTechnician: false, hasOverrides: false,
+      isDefaultTechnician: false, isAdminCashier: false,
+      canCancelJobs: true, canDiscount: false, canApproveParts: true,
+      canManageCatalogue: true, canViewRevenue: true,
+      hasOverrides: false,
     };
   }
 }
@@ -342,3 +419,75 @@ export async function setDefaultTechnician(profileId: string | null): Promise<vo
   }
   cache = null;
 }
+
+// ─── The signed-in person's own permissions ──────────────────────────────────
+
+/**
+ * What the person using this browser may do.
+ *
+ * The admin screens ask "what may THIS cashier do"; the cashier app asks "what
+ * may I do", which is a different question with a different answer for an
+ * Admin — who is never limited by a counter permission.
+ *
+ * Defaults to allowed while it loads. A permission check that blocks during a
+ * fetch turns a slow network into a cashier who cannot take a payment, and
+ * these are all backed by a database check or an Admin review anyway.
+ *
+ * isAdminCashier is the exception and defaults to FALSE while loading, because
+ * it grants the settings screen rather than withholding one. Showing Admin
+ * Control for a moment and then snatching it away is worse than it appearing a
+ * beat late, and the database refuses the writes behind it either way.
+ */
+export function useMyPermissions(): {
+  can: (key: CashierPermissionKey) => boolean;
+  isAdminCashier: boolean;
+  loading: boolean;
+} {
+  const [rule, setRule] = useState<StaffRuleOverride | null>(null);
+  const [role, setRole] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    (async () => {
+      try {
+        if (!isSupabaseConfigured()) return;
+        const sb = getSupabaseBrowserClient();
+        const { data: { user } } = await sb.auth.getUser();
+        if (!user) return;
+
+        const [{ data: profile }, rules] = await Promise.all([
+          sb.from("profiles").select("role").eq("id", user.id).maybeSingle(),
+          fetchStaffRules(),
+        ]);
+        if (!active) return;
+        setRole((profile as { role?: string } | null)?.role ?? null);
+        setRule(rules.find(r => r.profileId === user.id) ?? null);
+      } catch {
+        /* stays permissive; the database still refuses what matters */
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+
+    return () => { active = false; };
+  }, []);
+
+  const can = useCallback(
+    (key: CashierPermissionKey) => {
+      if (role === "Admin") return true;
+      if (!rule) return key !== "canDiscount";
+      return rule[key];
+    },
+    [role, rule],
+  );
+
+  return {
+    can,
+    isAdminCashier: role === "Admin" || !!rule?.isAdminCashier,
+    loading,
+  };
+}
+
+export type CashierPermissionKey = (typeof CASHIER_PERMISSIONS)[number]["key"];

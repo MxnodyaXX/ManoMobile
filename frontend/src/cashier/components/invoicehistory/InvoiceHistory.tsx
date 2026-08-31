@@ -7,6 +7,9 @@ import {
   FileText, Wrench, ShoppingCart, RotateCcw,
 } from "lucide-react";
 import ExportButtons from "@/cashier/components/shared/ExportButtons";
+import { useSales, type SaleTx } from "@/cashier/contexts/SalesContext";
+import { useRepair } from "@/cashier/contexts/RepairContext";
+import { useInvoiceDocument, printInvoiceDocument } from "@/lib/sales/invoiceDoc";
 import { exportToPdf, exportToExcel, exportToPng } from "@/cashier/utils/exportUtils";
 
 type InvoiceType   = "Sales" | "Repair" | "Return";
@@ -24,9 +27,65 @@ interface Invoice {
   total: number;
   paid: number;
   status: InvoiceStatus;
+  /**
+   * Who sent the work in, when it came from a dealer.
+   *
+   * Not the same question as `customer`, even though on a dealer job they are
+   * usually the same name. A walk-in repair on a dealer's account bills the
+   * customer and belongs to the dealer, and "show me everything from Phone
+   * House" has to find it either way.
+   */
+  dealer: string | null;
 }
 
-const INVOICES: Invoice[] = [];
+/**
+ * Every recorded sale, as an invoice.
+ *
+ * This screen used to read `const INVOICES: Invoice[] = []` — a literal empty
+ * array that nothing ever wrote to. It was never connected to anything, so it
+ * showed nothing no matter how many invoices the shop had issued.
+ *
+ * It reads the sales ledger now. The mapping is where the two shapes differ:
+ *
+ *   type    — the ledger records what was sold; this screen asks what kind of
+ *             document it is. A returned sale is a Return whatever it was for.
+ *   paid    — absent means it was never recorded, NOT that nothing was paid.
+ *             A sale marked Paid with no figure is paid in full; assuming zero
+ *             would show a shop full of unpaid invoices that are all settled.
+ *   status  — derived from what is actually owed, so a repair with an advance
+ *             against it reads Partial rather than being forced to one extreme.
+ */
+function toInvoice(s: SaleTx, dealerName: (id: number | null | undefined) => string | null): Invoice {
+  const type: InvoiceType =
+    s.status === "Returned" ? "Return"
+      : s.category === "Repair" ? "Repair"
+        : "Sales";
+
+  const discount = s.discountAmount ?? 0;
+  const subtotal = s.subtotal ?? s.total + discount;
+  const paid = s.paid ?? (s.status === "Paid" ? s.total : 0);
+
+  const status: InvoiceStatus =
+    s.status === "Voided" ? "Voided"
+      : paid >= s.total - 0.005 ? "Paid"
+        : paid > 0 ? "Partial"
+          : "Unpaid";
+
+  return {
+    id: s.id,
+    invoiceNo: s.invoiceNo,
+    date: s.date,
+    customer: s.customer,
+    type,
+    description: s.items || "—",
+    subtotal,
+    discount,
+    total: s.total,
+    paid,
+    status,
+    dealer: dealerName(s.dealerId),
+  };
+}
 
 const TYPE_CFG: Record<InvoiceType, { color: string; icon: any }> = {
   Sales:  { color: "#60a5fa", icon: ShoppingCart },
@@ -56,7 +115,22 @@ function InvoiceModal({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
   const statusCfg = STATUS_CFG[inv.status];
   const balance   = inv.total - inv.paid;
 
+  /**
+   * The invoice as it was actually issued, if it was kept.
+   *
+   * Invoices raised before invoice_documents existed have no stored copy, and
+   * neither do the counters that have not been wired to save one yet. Those
+   * fall back to the figures below — which is what this modal always showed,
+   * and is honest as a summary as long as it is not passed off as the document.
+   */
+  const { doc, loading: docLoading } = useInvoiceDocument(inv.invoiceNo);
+
   const handlePrint = () => {
+    // A stored document reprints itself, on the paper it was printed on.
+    // Rebuilding one from today's figures would produce a receipt the customer
+    // has never seen, which is the opposite of what a reprint is for.
+    if (doc) { printInvoiceDocument(doc); return; }
+
     const id = "__invoice_print__";
     const existing = document.getElementById(id);
     if (existing) existing.remove();
@@ -137,6 +211,33 @@ function InvoiceModal({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
           </div>
         </div>
 
+        {/* The document itself, sandboxed: it is our own markup, but it is
+            markup from the database and it gets no scripts and no reach into
+            this page either way. */}
+        {doc && (
+          <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", marginBottom: 16, background: "#fff" }}>
+            <iframe
+              title={`Invoice ${inv.invoiceNo}`}
+              sandbox=""
+              srcDoc={`<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#fff;font-family:Arial,Helvetica,sans-serif}</style></head><body>${doc.html}</body></html>`}
+              style={{ width: "100%", height: 460, border: "none", display: "block", background: "#fff" }}
+            />
+          </div>
+        )}
+
+        {docLoading && !doc && (
+          <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>Loading the printed invoice…</p>
+        )}
+
+        {!docLoading && !doc && (
+          <div style={{ display: "flex", gap: 8, padding: "10px 12px", borderRadius: 9, marginBottom: 14, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)" }}>
+            <p style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+              No printed copy was kept for this invoice — it was issued before invoices
+              were stored. The figures below are from the sales ledger.
+            </p>
+          </div>
+        )}
+
         {/* Description */}
         <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <p style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Items / Description</p>
@@ -193,24 +294,48 @@ function InvoiceModal({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
 /* ── Main Component ── */
 export default function InvoiceHistory() {
   const containerRef = useRef<HTMLDivElement>(null);
+  const { sales, loading, error } = useSales();
+  const { dealers } = useRepair();
+
+  // Names come from the dealer registry rather than being copied onto the sale,
+  // so a dealer renamed in Admin Control is renamed here too.
+  const dealerName = useMemo(() => {
+    const byId = new Map((dealers ?? []).map(d => [Number(d.id), d.name]));
+    return (id: number | null | undefined) => (id == null ? null : byId.get(Number(id)) ?? null);
+  }, [dealers]);
+
+  const invoices = useMemo(() => sales.map(s => toInvoice(s, dealerName)), [sales, dealerName]);
+
+  // Only the dealers that actually appear, so the dropdown is a list of what is
+  // there rather than every dealer the shop has ever registered.
+  const dealerOptions = useMemo(
+    () => [...new Set(invoices.map(i => i.dealer).filter((d): d is string => !!d))].sort(),
+    [invoices],
+  );
   const [search,       setSearch]       = useState("");
   const [typeFilter,   setTypeFilter]   = useState<InvoiceType | "All">("All");
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "All">("All");
+  const [dealerFilter, setDealerFilter] = useState<string>("All");
   const [dateFrom,     setDateFrom]     = useState("");
   const [dateTo,       setDateTo]       = useState("");
   const [viewInv,      setViewInv]      = useState<Invoice | null>(null);
 
   const filtered = useMemo(() => {
-    return INVOICES.filter(inv => {
+    return invoices.filter(inv => {
       const q = search.toLowerCase();
-      const matchSearch = !q || inv.invoiceNo.toLowerCase().includes(q) || inv.customer.toLowerCase().includes(q) || inv.description.toLowerCase().includes(q);
+      const matchSearch = !q
+        || inv.invoiceNo.toLowerCase().includes(q)
+        || inv.customer.toLowerCase().includes(q)
+        || inv.description.toLowerCase().includes(q)
+        || (inv.dealer ?? "").toLowerCase().includes(q);
       const matchType   = typeFilter   === "All" || inv.type   === typeFilter;
       const matchStatus = statusFilter === "All" || inv.status === statusFilter;
+      const matchDealer = dealerFilter === "All" || inv.dealer === dealerFilter;
       const matchFrom   = !dateFrom || inv.date >= dateFrom;
       const matchTo     = !dateTo   || inv.date <= dateTo;
-      return matchSearch && matchType && matchStatus && matchFrom && matchTo;
+      return matchSearch && matchType && matchStatus && matchDealer && matchFrom && matchTo;
     });
-  }, [search, typeFilter, statusFilter, dateFrom, dateTo]);
+  }, [invoices, search, typeFilter, statusFilter, dealerFilter, dateFrom, dateTo]);
 
   const totals = useMemo(() => ({
     count:    filtered.length,
@@ -226,8 +351,8 @@ export default function InvoiceHistory() {
   };
   const selectStyle: React.CSSProperties = { ...inputStyle, cursor: "pointer", appearance: "none" as const, paddingRight: 28 };
 
-  const INV_HEADERS = ["Invoice No", "Date", "Customer", "Type", "Description", "Subtotal (Rs.)", "Discount (Rs.)", "Total (Rs.)", "Paid (Rs.)", "Status"];
-  const invRows     = () => filtered.map(inv => [inv.invoiceNo, inv.date, inv.customer, inv.type, inv.description, inv.subtotal, inv.discount, inv.total, inv.paid, inv.status]);
+  const INV_HEADERS = ["Invoice No", "Date", "Customer", "Dealer", "Type", "Description", "Subtotal (Rs.)", "Discount (Rs.)", "Total (Rs.)", "Paid (Rs.)", "Status"];
+  const invRows     = () => filtered.map(inv => [inv.invoiceNo, inv.date, inv.customer, inv.dealer ?? "", inv.type, inv.description, inv.subtotal, inv.discount, inv.total, inv.paid, inv.status]);
   const invFilename = `invoices-${new Date().toISOString().slice(0, 10)}`;
 
   return (
@@ -265,7 +390,7 @@ onPng={() => {
         <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
           <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
           <input
-            placeholder="Search invoice #, customer, description…"
+            placeholder="Search invoice #, customer, dealer, description…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={{ ...inputStyle, width: "100%", paddingLeft: 32 }}
@@ -282,6 +407,17 @@ onPng={() => {
           <ChevronDown size={12} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
         </div>
 
+        {/* Only offered when there is something to choose between. */}
+        {dealerOptions.length > 0 && (
+          <div style={{ position: "relative" }}>
+            <select value={dealerFilter} onChange={e => setDealerFilter(e.target.value)} style={{ ...selectStyle, minWidth: 140 }}>
+              <option value="All">All Dealers</option>
+              {dealerOptions.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <ChevronDown size={12} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+          </div>
+        )}
+
         <div style={{ position: "relative" }}>
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} style={{ ...selectStyle, minWidth: 120 }}>
             <option value="All">All Status</option>
@@ -297,8 +433,8 @@ onPng={() => {
         <span style={{ fontSize: 12, color: "var(--text-muted)" }}>to</span>
         <input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   style={{ ...inputStyle, width: 140 }} />
 
-        {(search || typeFilter !== "All" || statusFilter !== "All" || dateFrom || dateTo) && (
-          <button onClick={() => { setSearch(""); setTypeFilter("All"); setStatusFilter("All"); setDateFrom(""); setDateTo(""); }}
+        {(search || typeFilter !== "All" || statusFilter !== "All" || dealerFilter !== "All" || dateFrom || dateTo) && (
+          <button onClick={() => { setSearch(""); setTypeFilter("All"); setStatusFilter("All"); setDealerFilter("All"); setDateFrom(""); setDateTo(""); }}
             style={{
               background: "none", border: "1px solid var(--border)", borderRadius: 8,
               padding: "8px 12px", fontSize: 12, color: "var(--text-secondary)", cursor: "pointer",
@@ -326,8 +462,16 @@ onPng={() => {
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={9} style={{ padding: "40px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
-                  No invoices match your filters.
+                <td colSpan={9} style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6 }}>
+                  {loading
+                    ? "Loading invoices…"
+                    : error
+                      ? error
+                      : invoices.length === 0
+                        // Nothing recorded at all reads very differently from a
+                        // filter that matched nothing, and the fix is different too.
+                        ? "No invoices yet. One is recorded every time a sale is completed."
+                        : "No invoices match your filters."}
                 </td>
               </tr>
             ) : filtered.map((inv, i) => {
@@ -345,7 +489,14 @@ onPng={() => {
                 >
                   <td style={{ padding: "11px 14px", fontWeight: 700, color: "var(--text-primary)", whiteSpace: "nowrap" }}>{inv.invoiceNo}</td>
                   <td style={{ padding: "11px 14px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{fmtDate(inv.date)}</td>
-                  <td style={{ padding: "11px 14px", color: "var(--text-primary)" }}>{inv.customer}</td>
+                  <td style={{ padding: "11px 14px", color: "var(--text-primary)" }}>
+                    {inv.customer}
+                    {/* Only when it adds something. On most dealer jobs the bill
+                        is in the dealer's own name and repeating it is noise. */}
+                    {inv.dealer && inv.dealer !== inv.customer && (
+                      <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>{inv.dealer}</p>
+                    )}
+                  </td>
                   <td style={{ padding: "11px 14px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                       <TypeIcon size={12} color={typeCfg.color} />

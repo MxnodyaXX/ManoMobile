@@ -1,6 +1,7 @@
 "use client";
 
-import { LayoutDashboard, Users, ShieldCheck, Truck, ShoppingCart, Smartphone, Bell, Settings, LogOut, Shield, BarChart3 } from "lucide-react";
+import {
+  Palette, LayoutDashboard, Users, ShieldCheck, Truck, ShoppingCart, Smartphone, Bell, Settings, LogOut, Shield, BarChart3 } from "lucide-react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 
 export type AdminPage =
@@ -12,7 +13,8 @@ export type AdminPage =
   | "Purchase Orders"
   | "Device Registry"
   | "Notifications"
-  | "System Settings";
+  | "System Settings"
+  | "Appearance";
 
 const NAV: { id: AdminPage; icon: any; label: string }[] = [
   { id: "Dashboard",        icon: LayoutDashboard, label: "Dashboard"         },
@@ -23,6 +25,7 @@ const NAV: { id: AdminPage; icon: any; label: string }[] = [
   { id: "Purchase Orders",  icon: ShoppingCart,    label: "Purchase Orders"   },
   { id: "Device Registry",  icon: Smartphone,      label: "Device Registry"   },
   { id: "Notifications",    icon: Bell,            label: "Notifications"     },
+  { id: "Appearance",       icon: Palette,         label: "Appearance"        },
   { id: "System Settings",  icon: Settings,        label: "Settings"          },
 ];
 

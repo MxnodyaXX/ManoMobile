@@ -13,8 +13,15 @@ import { NextResponse, type NextRequest } from "next/server";
  * single row.
  */
 
-/** Reachable without signing in: the login screen and the public job tracker. */
-const PUBLIC_PATHS = ["/login", "/track", "/auth"];
+/**
+ * Reachable without signing in.
+ *
+ * "/" is the login screen itself — role, then person, then password — so it has
+ * to be open, and so does the roster it reads to draw the person cards. /login
+ * is the older email-and-password form, kept as a way in when someone's name is
+ * not on the roster. /track is the public job lookup customers use.
+ */
+const PUBLIC_PATHS = ["/login", "/track", "/auth", "/api/auth"];
 
 export async function proxy(request: NextRequest) {
   // With Supabase unconfigured the app still runs on seeded/local data; bouncing
@@ -47,11 +54,13 @@ export async function proxy(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
-  const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  const isPublic = pathname === "/" || PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
-    url.pathname = "/login";
+    // "/" is the login screen now, so that is where an unauthenticated request
+    // goes — not /login, which would make people pick a way in twice.
+    url.pathname = "/";
     // Remember where they were headed so login can return them there.
     url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);

@@ -32,6 +32,10 @@ export interface RepairFormData {
   deviceBrand: string;
   deviceModel: string;
   deviceModelNumber: string;
+  /** Some devices carry no readable model number or brand mark — a wiped
+   *  clone, a rubbed-off back. Ticked, intake asks only for whatever the
+   *  cashier can write down about the device. */
+  modelNumberUnavailable: boolean;
   deviceIMEI: string;
   receivedItems: string[];
   faultCheckboxes: string[];

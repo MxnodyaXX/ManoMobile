@@ -1,19 +1,30 @@
 "use client";
 
-import { LayoutDashboard, ClipboardList, PackageCheck, Layers, History, LogOut, Wrench, TrendingUp, Timer } from "lucide-react";
+import { PackageCheck, Layers, History, LogOut, Wrench, TrendingUp, Timer, type LucideIcon } from "lucide-react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 
-export type TechPage = "Dashboard" | "My Jobs" | "Pending Collection" | "Parts & Stock" | "Job History" | "My Performance" | "My Shift";
+export type TechPage = "My Bench" | "Dashboard" | "My Jobs" | "Pending Collection" | "Parts & Stock" | "Job History" | "My Performance" | "My Shift";
 
-const NAV_ITEMS: { id: TechPage; icon: any; label: string }[] = [
-  { id: "Dashboard",          icon: LayoutDashboard, label: "Dashboard"          },
-  { id: "My Jobs",            icon: ClipboardList,   label: "My Jobs"            },
+/**
+ * One primary destination, everything else secondary.
+ *
+ * Seven equally-weighted sections meant the screen used every minute of the
+ * day sat in the same list as the one opened once a week. My Bench is the job;
+ * the rest are references, grouped under a heading so they read as such.
+ */
+const PRIMARY_NAV: { id: TechPage; icon: LucideIcon; label: string }[] = [
+  { id: "My Bench",           icon: Wrench,          label: "My Bench"           },
+];
+
+const SECONDARY_NAV: { id: TechPage; icon: LucideIcon; label: string }[] = [
   { id: "Pending Collection", icon: PackageCheck,    label: "Pending Collection" },
   { id: "Parts & Stock",      icon: Layers,          label: "Parts & Stock"      },
   { id: "Job History",        icon: History,         label: "Job History"        },
   { id: "My Performance",     icon: TrendingUp,      label: "My Performance"     },
   { id: "My Shift",           icon: Timer,           label: "My Shift"           },
 ];
+
+const NAV_ITEMS = [...PRIMARY_NAV, ...SECONDARY_NAV];
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -66,10 +77,22 @@ export default function TechSidebar({ activePage, onNavigate, techName, onLogout
 
         {/* Nav items */}
         <nav style={{ flex: 1, padding: "10px 10px 0", overflowY: "auto" }}>
-          {NAV_ITEMS.map(({ id, icon: Icon, label }) => {
+          {NAV_ITEMS.map(({ id, icon: Icon, label }, i) => {
             const active = activePage === id;
             const count = jobCounts[id];
+            // A heading, not a divider: the split only helps if the second
+            // group is visibly a different kind of thing.
+            const heading = i === PRIMARY_NAV.length ? (
+              <p key="more" style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
+                color: "var(--text-muted)", fontFamily: ff, padding: "16px 12px 6px",
+              }}>
+                More
+              </p>
+            ) : null;
             return (
+              <div key={`${id}-wrap`}>
+              {heading}
               <button
                 key={id}
                 onClick={() => handleNavigate(id)}
@@ -96,6 +119,7 @@ export default function TechSidebar({ activePage, onNavigate, techName, onLogout
                   </span>
                 )}
               </button>
+              </div>
             );
           })}
         </nav>

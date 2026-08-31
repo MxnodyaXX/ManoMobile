@@ -86,6 +86,17 @@ const COMPLETION_TYPES = [
   },
 ];
 
+/**
+ * The work summaries that repeat all day. Tapping one appends it, so the
+ * common case is a tap and the unusual case is still a sentence typed by hand.
+ * "Too much typing" was one of the three complaints about this screen.
+ */
+const QUICK_SUMMARIES = [
+  "Screen replaced", "Battery replaced", "Charging port replaced",
+  "Software reflashed", "Cleaned and serviced", "Camera replaced",
+  "Speaker / mic replaced", "No fault found",
+];
+
 const WARRANTY_OPTIONS = [
   { days: 0,   label: "No Warranty"  },
   { days: 7,   label: "7 Days"       },
@@ -133,6 +144,7 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
   );
   const [testNotes, setTestNotes]       = useState("");
   const [testsOpen, setTestsOpen]       = useState(false);
+  const [extrasOpen, setExtrasOpen]     = useState(false);
   const [warrantyDays, setWarrantyDays] = useState(30);
   const [completionType, setCompletionType] = useState<CompletionType>("Normal");
   // What this technician is allowed to do. Defaults are permissive, so a rules
@@ -585,6 +597,26 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                 <input list="pause-reason-list" value={pauseReason} onChange={e => setPauseReason(e.target.value)}
                   placeholder="Select a suggestion or type your own…" style={inputStyle} autoComplete="off" />
                 <datalist id="pause-reason-list">{PAUSE_REASONS.map(r => <option key={r} value={r} />)}</datalist>
+                {/* The five reasons that cover almost every pause, as one tap
+                    each — the datalist above only helps someone who already
+                    started typing the right words. */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {PAUSE_REASONS.map(r => (
+                    <button
+                      key={r}
+                      onClick={() => setPauseReason(r)}
+                      style={{
+                        minHeight: 34, padding: "0 12px", borderRadius: 17, fontSize: 12,
+                        background: pauseReason === r ? "rgba(251,191,36,0.14)" : "var(--bg-secondary)",
+                        border: `1px solid ${pauseReason === r ? "rgba(251,191,36,0.45)" : "var(--border)"}`,
+                        color: pauseReason === r ? "#b45309" : "var(--text-secondary)",
+                        cursor: "pointer", fontFamily: ff,
+                      }}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
                 <p style={{ fontSize: 11, color: pauseReason.trim().length > 3 ? TA : "var(--text-muted)", fontFamily: ff }}>
                   {pauseReason.trim().length} chars {pauseReason.trim().length > 3 ? "✓" : "(min 4)"}
                 </p>
@@ -697,6 +729,23 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                 {/* Work summary (technician remarks → printed on the Non-Issued receipt) */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {sec(completionType === "Return" ? "Reason Not Repaired * (required)" : "Job Remarks / Work Summary (optional)")}
+                  {completionType !== "Return" && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {QUICK_SUMMARIES.map(q => (
+                        <button
+                          key={q}
+                          onClick={() => setCompletionNotes(n => (n.trim() ? `${n.trim()}, ${q}` : q))}
+                          style={{
+                            minHeight: 32, padding: "0 11px", borderRadius: 16, fontSize: 11.5,
+                            background: "var(--bg-secondary)", border: "1px solid var(--border)",
+                            color: "var(--text-secondary)", cursor: "pointer", fontFamily: ff,
+                          }}
+                        >
+                          + {q}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <textarea placeholder={completionType === "Return"
                     ? "Why the repair could not be completed — what was tried, what failed…"
                     : "Describe all work performed — parts replaced, tests done, issues found…"} value={completionNotes} onChange={e => setCompletionNotes(e.target.value)} rows={3} style={inputStyle} />
@@ -818,10 +867,33 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                   <textarea placeholder="e.g. iPhone 13 Rear Camera Module" value={partsUsedText} onChange={e => setPartsUsedText(e.target.value)} rows={2} style={inputStyle} />
                 </div>
 
-                {/* Future faults the technician spotted */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {sec("Future Faults Identified (optional)")}
-                  <textarea placeholder="e.g. Battery health at 82% — may need replacement soon" value={futureFaults} onChange={e => setFutureFaults(e.target.value)} rows={2} style={inputStyle} />
+                {/* Future faults — worth recording when spotted, never worth
+                    blocking a finished job on, so it folds away with the rest
+                    of the optional detail. */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, gridColumn: "1 / -1" }}>
+                  <button
+                    onClick={() => setExtrasOpen(o => !o)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8, width: "100%",
+                      minHeight: 44, padding: "0 12px", borderRadius: 9, cursor: "pointer",
+                      fontFamily: ff, textAlign: "left",
+                      background: "var(--bg-secondary)", border: "1px solid var(--border)",
+                    }}
+                  >
+                    <span style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                      Future Faults Spotted
+                    </span>
+                    <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: futureFaults.trim() ? TA : "var(--text-muted)" }}>
+                      {futureFaults.trim() ? "Noted" : "Optional"}
+                    </span>
+                    <ChevronDown
+                      size={14}
+                      style={{ color: "var(--text-muted)", transform: extrasOpen ? "rotate(180deg)" : undefined, transition: "transform 0.18s" }}
+                    />
+                  </button>
+                  {extrasOpen && (
+                    <textarea placeholder="e.g. Battery health at 82% — may need replacement soon" value={futureFaults} onChange={e => setFutureFaults(e.target.value)} rows={2} style={inputStyle} />
+                  )}
                 </div>
 
                 {/* Functional tests — collapsed by default.

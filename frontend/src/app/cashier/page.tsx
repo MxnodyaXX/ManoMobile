@@ -48,6 +48,8 @@ import {
   AlertTriangle, CheckCircle, Clock, ArrowRight,
 } from "lucide-react";
 import { useIssuedFigures, type IssuedFigures } from "@/lib/repair/figures";
+import { useMyPermissions } from "@/lib/settings/staffRules";
+import TabTitle from "@/lib/ui/TabTitle";
 
 export type ActivePage =
   | "Home"
@@ -68,6 +70,36 @@ const MANAGED_PAGES: ActivePage[] = [
   "Admin Control", "Customer Management", "Reports",
   "Cash Register", "Invoice History", "Audit Trail",
 ];
+
+/**
+ * Admin Control, behind the admin-cashier tick.
+ *
+ * The sidebar already hides the item, but hiding a nav button is a courtesy,
+ * not a control: activePage is state, and anything that sets it — a deep link,
+ * a shortcut added later, a stale value — would render the settings screen for
+ * a cashier who should not have it. This is the check that actually holds, and
+ * the parts catalogue behind it is refused by Postgres regardless.
+ */
+function AdminControlPage() {
+  const { isAdminCashier, loading } = useMyPermissions();
+
+  if (loading) {
+    return <p style={{ fontSize: 13, color: "var(--text-muted)" }}>Checking permissions…</p>;
+  }
+  if (!isAdminCashier) {
+    return (
+      <div className="fade-up" style={{ padding: "30px 24px", borderRadius: 14, background: "var(--bg-card)", border: "1px solid var(--border)", maxWidth: 560 }}>
+        <h1 className="heading-xl" style={{ fontSize: 20, color: "var(--text-primary)", marginBottom: 8 }}>Admin Control</h1>
+        <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+          Only an admin cashier can open the shop settings — dealers, brands, suppliers,
+          the parts catalogue and the barcode design are shared by everyone on the counter.
+          Ask an Admin to mark you as an admin cashier under <strong>Permissions → Cashiers</strong>.
+        </p>
+      </div>
+    );
+  }
+  return <AdminControl />;
+}
 
 /* ── Quick-action button on the dashboard ── */
 function QuickAction({ label, sub, color, onClick }: { label: string; sub: string; color: string; onClick: () => void }) {
@@ -316,6 +348,7 @@ export default function CashierPage() {
     <HeldSalesProvider>
     <InventoryProvider>
     <PartsProvider>
+      <TabTitle role="Cashier" />
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
         <Sidebar
           activePage={activePage}
@@ -343,7 +376,7 @@ export default function CashierPage() {
             {activePage === "Warranty Center"      && <WarrantyCenter />}
             {activePage === "Sales Management"     && <SalesManagement />}
             {activePage === "Inventory Management" && <InventoryManagement />}
-            {activePage === "Admin Control"        && <AdminControl />}
+            {activePage === "Admin Control"        && <AdminControlPage />}
             {activePage === "Customer Management"  && <CustomerManagement />}
             {activePage === "Reports"              && <ReportsManagement />}
             {activePage === "Audit Trail"          && <AuditLog />}

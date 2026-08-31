@@ -1,9 +1,11 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Check, Save, RotateCcw } from "lucide-react";
 import WorkRulesCard from "@/admin/components/permissions/WorkRulesCard";
 import TechnicianPermissions from "@/admin/components/permissions/TechnicianPermissions";
+import CashierPermissions from "@/admin/components/permissions/CashierPermissions";
+import { useModuleAccessMatrix, saveModuleAccess, type Access as StoredAccess } from "@/lib/settings/moduleAccess";
 
 const AA = "#a78bfa";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -81,19 +83,91 @@ function AccessCell({ value, onChange, locked }: { value: Access; onChange: (v: 
 }
 
 export default function Permissions() {
-  const [perms, setPerms] = useState<PermMatrix>(() => JSON.parse(JSON.stringify(DEFAULT_PERMS)));
+  /**
+   * The stored grid, not a copy of the constants.
+   *
+   * This screen used to hold DEFAULT_PERMS in local state with a Save that set
+   * a flag for two seconds and wrote nothing — every change was lost on
+   * refresh and nothing read it. It now loads from role_module_access, and the
+   * same rows are what Postgres enforces.
+   */
+  const { matrix, error: permsError, reload } = useModuleAccessMatrix();
+  // Unsaved edits only. The grid on screen is the stored rows with these laid
+  // over — derived at render rather than copied into state by an effect, so
+  // there is no moment where the two disagree.
+  const [edits, setEdits] = useState<PermMatrix | null>(null);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Stored rows over the defaults, so a module added to the app but not yet in
+  // the table still shows something sensible rather than an empty column.
+  const stored = useMemo(() => {
+    const next: PermMatrix = JSON.parse(JSON.stringify(DEFAULT_PERMS));
+    for (const [module, byRole] of Object.entries(matrix)) {
+      for (const [role, access] of Object.entries(byRole)) {
+        if (next[module]) next[module][role as Role] = access as Access;
+      }
+    }
+    return next;
+  }, [matrix]);
+
+  const perms = edits ?? stored;
 
   const set = (module: string, role: Role, val: Access) => {
     if (role === "Admin") return;
-    setPerms(p => ({ ...p, [module]: { ...p[module], [role]: val } }));
+    setEdits(p => ({ ...(p ?? stored), [module]: { ...(p ?? stored)[module], [role]: val } }));
     setSaved(false);
   };
 
-  const save  = () => { setSaved(true); setTimeout(() => setSaved(false), 2500); };
-  const reset = () => { setPerms(JSON.parse(JSON.stringify(DEFAULT_PERMS))); setSaved(false); };
+  const save = async () => {
+    setBusy(true);
+    setSaveError(null);
+    try {
+      await saveModuleAccess(perms as Record<string, Record<string, StoredAccess>>);
+      await reload();
+      // Drop the draft so the grid falls back to what is actually stored.
+      setEdits(null);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Back to the shipped defaults on screen — still needs Save to be stored,
+  // so a mis-click cannot wipe the shop's settings without confirmation.
+  const reset = () => { setEdits(JSON.parse(JSON.stringify(DEFAULT_PERMS))); setSaved(false); };
 
   const groups = [...new Set(MODULES.map(m => m.group))];
+
+  /**
+   * One tab per audience.
+   *
+   * Everything used to stack on one page: shop-wide work rules, a card per
+   * technician, a card per cashier, and a seventeen-row grid. An admin who
+   * came to change one cashier scrolled past every technician to reach them.
+   *
+   * Module access keeps its own tab rather than being split across the role
+   * tabs, because it is one grid read across roles — comparing what a cashier
+   * and an accountant may open is the reason it is a grid at all.
+   */
+  const TABS = [
+    { id: "modules",     label: "Module Access" },
+    { id: "technicians", label: "Technicians"   },
+    { id: "cashiers",    label: "Cashiers"      },
+    { id: "accounts",    label: "Accounts"      },
+  ] as const;
+  type TabId = (typeof TABS)[number]["id"];
+  const SUBTITLE: Record<TabId, string> = {
+    modules:     "Role-based access control — click a cell to cycle Full / View / None",
+    technicians: "How the bench works, and where a technician differs from the shop rule",
+    cashiers:    "What each person at the counter may authorise",
+    accounts:    "Ledger access is set by module",
+  };
+  const [tab, setTab] = useState<TabId>("modules");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, fontFamily: ff }}>
@@ -101,24 +175,80 @@ export default function Permissions() {
       <div className="fade-up" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", marginBottom: 4, fontFamily: ff }}>Permissions</h1>
-          <p style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: ff }}>Role-based access control — click a cell to cycle Full / View / None</p>
+          <p style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: ff }}>{SUBTITLE[tab]}</p>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: tab === "modules" ? "flex" : "none", gap: 8 }}>
           <button onClick={reset} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 9, background: "var(--bg-card)", border: "1px solid var(--border)", cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: "var(--text-secondary)", fontFamily: ff }}>
             <RotateCcw size={13} /> Reset
           </button>
           <button onClick={save} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 9, background: saved ? "rgba(52,211,153,0.15)" : `${AA}18`, border: `1px solid ${saved ? "rgba(52,211,153,0.4)" : AA + "40"}`, cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: saved ? "#34d399" : AA, fontFamily: ff, transition: "all 0.2s" }}>
             {saved ? <Check size={13} /> : <Save size={13} />}
-            {saved ? "Saved" : "Save Changes"}
+            {busy ? "Saving…" : saved ? "Saved" : edits ? "Save Changes" : "Saved"}
           </button>
         </div>
       </div>
 
       {/* Work rules sit with permissions: both answer "what is this role allowed to do?" */}
-      <WorkRulesCard />
+      {(permsError || saveError) && (
+        <div style={{
+          display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, marginBottom: 14,
+          background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)",
+        }}>
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55, fontFamily: ff }}>
+            {saveError ?? `${permsError} — run migration 20260831000008_role_module_access.sql.`}
+          </p>
+        </div>
+      )}
 
-      {/* Then the exceptions, per person */}
-      <TechnicianPermissions />
+      {/* Tabs */}
+      <div className="fade-up" style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, width: "fit-content", flexWrap: "wrap" }}>
+        {TABS.map(t => {
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              style={{
+                minHeight: 36, padding: "0 16px", borderRadius: 7, fontSize: 12.5, cursor: "pointer",
+                fontFamily: ff, fontWeight: active ? 700 : 500,
+                background: active ? "var(--bg-secondary)" : "transparent",
+                border: active ? "1px solid var(--border-active)" : "1px solid transparent",
+                color: active ? "var(--text-primary)" : "var(--text-secondary)",
+              }}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === "technicians" && (
+        <>
+          {/* The shop-wide rule first, then the people who differ from it —
+              a per-person "Shop" setting means nothing until you can see what
+              the shop rule actually is. */}
+          <WorkRulesCard />
+          <TechnicianPermissions />
+        </>
+      )}
+
+      {tab === "cashiers" && <CashierPermissions />}
+
+      {tab === "accounts" && (
+        <div style={{ padding: "26px 20px", borderRadius: 12, background: "var(--bg-card)", border: "1px solid var(--border)" }}>
+          <p style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff, marginBottom: 6 }}>
+            Nothing to set per person yet
+          </p>
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", fontFamily: ff, lineHeight: 1.6 }}>
+            An accountant&apos;s access is defined entirely by which modules their role can open —
+            set that on the <strong>Module Access</strong> tab. Per-person rules exist for technicians
+            (how they work) and cashiers (what they may authorise); the ledger side has no equivalent
+            actions to gate yet.
+          </p>
+        </div>
+      )}
+
+      {tab === "modules" && (<>
 
       {/* Legend */}
       <div className="fade-up" style={{ display: "flex", gap: 16, padding: "10px 16px", background: "var(--bg-card)", borderRadius: 10, border: "1px solid var(--border)", width: "fit-content" }}>
@@ -182,6 +312,8 @@ export default function Permissions() {
           </table>
         </div>
       </div>
+
+      </>)}
     </div>
   );
 }

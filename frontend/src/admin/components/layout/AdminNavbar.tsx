@@ -17,6 +17,7 @@ const PAGE_SUBS: Record<AdminPage, string> = {
   "Purchase Orders": "Procurement and goods received",
   "Device Registry": "IMEI tracking and device history",
   "Notifications":   "SMS, WhatsApp and email templates",
+  "Appearance":      "Colour palette and look of every screen",
   "System Settings": "Business configuration and audit log",
 };
 

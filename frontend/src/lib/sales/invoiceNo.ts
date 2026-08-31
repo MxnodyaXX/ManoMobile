@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 /**
@@ -32,4 +33,44 @@ export async function fetchNextInvoiceNo(): Promise<string> {
   if (!isSupabaseConfigured()) return fallbackInvoiceNo();
   const { data, error } = await getSupabaseBrowserClient().rpc("next_invoice_no");
   return !error && typeof data === "string" && data ? data : fallbackInvoiceNo();
+}
+
+/**
+ * The number the next sale would get, WITHOUT taking it.
+ *
+ * fetchNextInvoiceNo above assigns; this one only looks. The distinction is the
+ * whole reason both exist: a cashier needs to see the invoice number while they
+ * are still billing — to write it in a book, to quote it to a customer — but
+ * reserving it the moment a billing panel opens would burn a number every time
+ * somebody opened a sale and walked away, leaving gaps in an invoice book that
+ * has to be explainable.
+ *
+ * So this is a preview and the UI says so. Two cashiers billing at once both
+ * see INV-000124; whoever finalises first gets it, the other gets 125.
+ */
+export async function peekNextInvoiceNo(): Promise<string | null> {
+  if (!isSupabaseConfigured()) return null;
+  const { data, error } = await getSupabaseBrowserClient().rpc("peek_next_invoice_no");
+  return !error && typeof data === "string" && data ? data : null;
+}
+
+/**
+ * The preview, for a billing panel.
+ *
+ * `refreshKey` re-reads it — pass something that changes when a sale completes,
+ * so the panel does not keep showing a number that has just been handed out.
+ */
+export function useNextInvoiceNo(refreshKey?: unknown): string | null {
+  const [next, setNext] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    peekNextInvoiceNo()
+      .then(n => { if (active) setNext(n); })
+      // No number is better than a wrong one: the panel simply shows nothing.
+      .catch(() => { if (active) setNext(null); });
+    return () => { active = false; };
+  }, [refreshKey]);
+
+  return next;
 }
