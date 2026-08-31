@@ -119,6 +119,27 @@ export async function createStaff(input: NewStaffInput): Promise<{ ok: boolean; 
   }
 }
 
+/**
+ * Set a staff member's password.
+ *
+ * Passwords are not in `profiles` and must never be — Supabase Auth holds them
+ * as bcrypt hashes in auth.users, and only the service-role key can change
+ * another user's, so this goes through the server like createStaff does.
+ */
+export async function setStaffPassword(profileId: string, password: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/staff/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profileId, password }),
+    });
+    const json = (await res.json()) as { ok?: boolean; error?: string };
+    return res.ok && json.ok ? { ok: true } : { ok: false, error: json.error ?? `Failed (HTTP ${res.status}).` };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export function useStaff() {
   const configured = isSupabaseConfigured();
   const [staff, setStaff] = useState<StaffProfile[]>([]);

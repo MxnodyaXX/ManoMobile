@@ -9,6 +9,7 @@ import {
   type StaffProfile, type StaffRoleName, type StaffStatusName,
 } from "@/lib/staff/api";
 import { useToast } from "@/lib/ui/toast";
+import { setStaffPassword } from "@/lib/staff/api";
 
 const AA = "#a78bfa";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -133,10 +134,20 @@ function StaffModal({ initial, onSaved, onClose }: {
               <input value={phone} onChange={e => setPhone(e.target.value)} style={inp} placeholder="071 234 5678" />
             </div>
 
+            {/* Only when creating. Changing an existing password is its own
+                action, from the key button on the staff row — see PasswordModal
+                for why it does not belong in a routine edit. */}
             {!editing && (
               <div style={{ gridColumn: "1 / -1" }}>
                 <label style={lbl}>Password * (minimum 8 characters)</label>
-                <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={inp} placeholder="Set their first password" />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  style={inp}
+                  autoComplete="new-password"
+                  placeholder="Set their first password"
+                />
               </div>
             )}
 
@@ -196,6 +207,137 @@ function StaffModal({ initial, onSaved, onClose }: {
   );
 }
 
+/**
+ * Change one person's password.
+ *
+ * Separate from the edit modal on purpose. Editing a staff member is routine —
+ * a phone number, a speciality, a role — and burying a password field in it
+ * means the person doing that routine edit is one stray keystroke away from
+ * locking a technician out mid-shift. This is its own deliberate action, from
+ * its own button, naming the person it will affect.
+ *
+ * Nothing here can read the existing password: Supabase Auth stores bcrypt
+ * hashes in auth.users and there is no way back from one. This replaces.
+ */
+function PasswordModal({ staff, onClose }: { staff: StaffProfile; onClose: () => void }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
+
+  const tooShort = password.length > 0 && password.length < 8;
+  const mismatch = confirm.length > 0 && confirm !== password;
+  const valid = password.length >= 8 && confirm === password;
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    const res = await setStaffPassword(staff.id, password);
+    setBusy(false);
+    if (!res.ok) { setError(res.error ?? "Could not set the password."); return; }
+    toast.dialog(
+      "success",
+      "Password changed",
+      `${staff.fullName} signs in with the new password from now on. Their current sessions stay open until they sign out.`,
+    );
+    onClose();
+  };
+
+  return (
+    <>
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 70 }} onClick={onClose} />
+      <div style={{
+        position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+        width: "min(440px, calc(100vw - 24px))", background: "var(--bg-card)",
+        borderRadius: 16, border: "1px solid var(--border)", zIndex: 71,
+        boxShadow: "0 24px 64px rgba(0,0,0,0.5)", fontFamily: ff, overflow: "hidden",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            <div style={{ width: 30, height: 30, borderRadius: 8, background: `${AA}14`, border: `1px solid ${AA}35`, display: "flex", alignItems: "center", justifyContent: "center", color: AA, flexShrink: 0 }}>
+              <KeyRound size={14} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>Change Password</p>
+              <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {staff.fullName} · {staff.role}{staff.email ? ` · ${staff.email}` : ""}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <X size={14} />
+          </button>
+        </div>
+
+        <div style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <label style={lbl}>New password (minimum 8 characters)</label>
+            <input
+              type={show ? "text" : "password"}
+              value={password}
+              autoFocus
+              autoComplete="new-password"
+              onChange={e => setPassword(e.target.value)}
+              style={{ ...inp, borderColor: tooShort ? "#f87171" : "var(--border)" }}
+            />
+          </div>
+
+          <div>
+            <label style={lbl}>Type it again</label>
+            <input
+              type={show ? "text" : "password"}
+              value={confirm}
+              autoComplete="new-password"
+              onChange={e => setConfirm(e.target.value)}
+              style={{ ...inp, borderColor: mismatch ? "#f87171" : "var(--border)" }}
+            />
+            {/* Confirmed rather than revealed by default: the Admin has to hand
+                this password to somebody, and a typo they cannot see locks that
+                person out with no way to find out what was actually set. */}
+            {mismatch && <p style={{ fontSize: 11, color: "#f87171", marginTop: 5 }}>The two do not match.</p>}
+          </div>
+
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-secondary)", cursor: "pointer" }}>
+            <input type="checkbox" checked={show} onChange={e => setShow(e.target.checked)} style={{ width: 14, height: 14, accentColor: AA, cursor: "pointer" }} />
+            Show what I am typing
+          </label>
+
+          <div style={{ display: "flex", gap: 8, padding: "10px 12px", borderRadius: 9, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)" }}>
+            <AlertCircle size={14} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+            <p style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+              Write it down before you save — nobody can look it up afterwards, not even you.
+              Passwords are stored as one-way hashes by Supabase Auth, so the only thing anyone
+              can ever do is replace them.
+            </p>
+          </div>
+
+          {error && <p style={{ fontSize: 11.5, color: "#f87171", lineHeight: 1.5 }}>{error}</p>}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "12px 18px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
+          <button onClick={onClose} style={{ padding: "8px 16px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: ff }}>
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={!valid || busy}
+            style={{
+              padding: "8px 16px", borderRadius: 8, fontSize: 12.5, fontWeight: 700,
+              border: `1px solid ${AA}`, background: AA, color: "#0b0b0f",
+              cursor: valid && !busy ? "pointer" : "not-allowed",
+              opacity: valid && !busy ? 1 : 0.45, fontFamily: ff,
+            }}
+          >
+            {busy ? "Saving…" : "Change Password"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function StaffManagement() {
   const { staff, loading, error, reload, configured } = useStaff();
   const toast = useToast();
@@ -203,6 +345,7 @@ export default function StaffManagement() {
   const [query, setQuery] = useState("");
   const [roleFilter, setRole] = useState<StaffRoleName | "All">("All");
   const [modal, setModal] = useState<"add" | StaffProfile | null>(null);
+  const [pwTarget, setPwTarget] = useState<StaffProfile | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const filtered = staff.filter(s =>
@@ -325,6 +468,13 @@ export default function StaffManagement() {
                         <Edit2 size={12} />
                       </button>
                       <button
+                        onClick={() => setPwTarget(s)}
+                        title={`Change ${s.fullName}'s password`}
+                        style={{ width: 30, height: 30, borderRadius: 7, border: "1px solid rgba(96,165,250,0.3)", background: "rgba(96,165,250,0.1)", color: "#60a5fa", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                      >
+                        <KeyRound size={12} />
+                      </button>
+                      <button
                         onClick={() => setStatus(s, s.status === "Active" ? "Suspended" : "Active")}
                         title={s.status === "Active" ? "Suspend — they keep their history but cannot sign in or take jobs" : "Reactivate"}
                         style={{
@@ -345,6 +495,7 @@ export default function StaffManagement() {
         </table>
       </div>
 
+      {pwTarget && <PasswordModal staff={pwTarget} onClose={() => setPwTarget(null)} />}
       {modal === "add" && <StaffModal onSaved={reload} onClose={() => setModal(null)} />}
       {modal && modal !== "add" && <StaffModal initial={modal} onSaved={reload} onClose={() => setModal(null)} />}
     </div>
