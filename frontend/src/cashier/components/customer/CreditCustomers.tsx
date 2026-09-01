@@ -1,11 +1,10 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { createPortal } from "react-dom";
 import {
   Search, CreditCard, AlertCircle, CheckCircle,
-  X, DollarSign, TrendingDown, Wallet, Store,
+  X, DollarSign, Wallet, Store,
   History, Plus, Sparkles, Loader2, Undo2, FileText, ChevronDown,
 } from "lucide-react";
 import {
@@ -52,6 +51,35 @@ const statusConfig: Record<CreditStatus, { color: string; bg: string; border: st
 };
 
 const ff = "'Plus Jakarta Sans', sans-serif";
+
+/**
+ * The app's pill: a colour, its wash at 0.08, its edge at 0.2.
+ *
+ * Every chip, badge and soft button in this product is built that way — job
+ * statuses, priorities, permission badges. Buttons here follow it too rather
+ * than being filled or bare, so an action reads as the same kind of thing as
+ * the status beside it.
+ *
+ * `fg` is a theme token so it stays readable on the light theme; the washes are
+ * fixed rgba because a CSS variable cannot carry an alpha suffix, and a tint
+ * that faint looks the same in both themes anyway.
+ */
+const TONE = {
+  success: { fg: "var(--success)", bg: "rgba(74,222,128,0.08)",  border: "rgba(74,222,128,0.2)"  },
+  danger:  { fg: "var(--danger)",  bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.2)" },
+  warning: { fg: "var(--warning)", bg: "rgba(251,191,36,0.08)",  border: "rgba(251,191,36,0.2)"  },
+  accent:  { fg: "var(--accent)",  bg: "var(--accent-dim)",      border: "var(--accent-glow)"    },
+  muted:   { fg: "var(--text-muted)", bg: "var(--bg-secondary)", border: "var(--border)"         },
+} as const;
+
+/** A soft pill button, the shape used for every tinted control in the app. */
+const pill = (t: { fg: string; bg: string; border: string }, wide = false): React.CSSProperties => ({
+  display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+  height: 28, width: wide ? undefined : 28, padding: wide ? "0 11px" : 0,
+  borderRadius: 7, border: `1px solid ${t.border}`, background: t.bg, color: t.fg,
+  fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+  fontFamily: ff, transition: "all 0.15s",
+});
 
 const labelSt: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: "var(--text-muted)",
@@ -135,8 +163,8 @@ function RecordPaymentModal({ account, onClose, onDone }: {
       <div style={{ margin: "14px 18px 0", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
         {[
           { label: "Total Charged", val: rs(account.totalCharged), color: "var(--text-primary)" },
-          { label: "Total Paid",    val: rs(account.totalPaid),    color: "#4ade80" },
-          { label: "Balance Due",   val: rs(account.balance),      color: "#f87171" },
+          { label: "Total Paid",    val: rs(account.totalPaid),    color: "var(--success)" },
+          { label: "Balance Due",   val: rs(account.balance),      color: "var(--danger)" },
         ].map(r => (
           <div key={r.label} style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", borderRadius: 9, padding: "9px 12px", textAlign: "center" }}>
             <p style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase", fontFamily: ff, marginBottom: 4 }}>{r.label}</p>
@@ -153,9 +181,9 @@ function RecordPaymentModal({ account, onClose, onDone }: {
               type="number" min={1} step="0.01" autoFocus
               value={amount} onChange={e => setAmount(e.target.value)}
               placeholder={`Max ${rs(account.balance)}`}
-              style={{ ...inputSt, border: over ? "1px solid #f87171" : "1px solid var(--border)" }}
+              style={{ ...inputSt, border: over ? "1px solid var(--danger)" : "1px solid var(--border)" }}
             />
-            {over && <p style={{ fontSize: 10.5, color: "#f87171", marginTop: 4 }}>More than the outstanding balance</p>}
+            {over && <p style={{ fontSize: 10.5, color: "var(--danger)", marginTop: 4 }}>More than the outstanding balance</p>}
           </div>
           <div>
             <label style={labelSt}>Payment Method</label>
@@ -177,14 +205,14 @@ function RecordPaymentModal({ account, onClose, onDone }: {
             <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff }}>
               {newBal === 0 ? "Account will be fully settled" : "Remaining balance after payment"}
             </span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: newBal === 0 ? "#4ade80" : "#60a5fa" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: newBal === 0 ? "var(--success)" : "var(--accent)" }}>
               {newBal === 0 ? "SETTLED ✓" : rs(newBal)}
             </span>
           </div>
         )}
 
         {error && (
-          <p style={{ fontSize: 11.5, color: "#f87171", lineHeight: 1.5, fontFamily: ff }}>{error}</p>
+          <p style={{ fontSize: 11.5, color: "var(--danger)", lineHeight: 1.5, fontFamily: ff }}>{error}</p>
         )}
       </div>
 
@@ -273,12 +301,12 @@ function WriteOffModal({ account, onClose, onDone }: {
             </p>
           </div>
         )}
-        {error && <p style={{ fontSize: 11.5, color: "#f87171", lineHeight: 1.5, fontFamily: ff }}>{error}</p>}
+        {error && <p style={{ fontSize: 11.5, color: "var(--danger)", lineHeight: 1.5, fontFamily: ff }}>{error}</p>}
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "12px 18px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
         <button onClick={onClose} style={{ padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: ff }}>Cancel</button>
         <button onClick={save} disabled={!canSave}
-          style={{ padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "1px solid #fbbf24", background: "rgba(251,191,36,0.15)", color: "#fbbf24", cursor: canSave ? "pointer" : "not-allowed", opacity: canSave ? 1 : 0.45, fontFamily: ff }}>
+          style={{ padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "1px solid var(--warning)", background: "rgba(251,191,36,0.12)", color: "var(--warning)", cursor: canSave ? "pointer" : "not-allowed", opacity: canSave ? 1 : 0.45, fontFamily: ff }}>
           {busy ? "Writing off…" : "Write Off"}
         </button>
       </div>
@@ -326,10 +354,10 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
     return jobIds.length > 0 ? SOURCE_LABEL.Repair : null;
   };
 
-  const tone: Record<string, { color: string; icon: typeof Wallet; sign: string }> = {
-    "Charge":    { color: "#f87171", icon: CreditCard, sign: "+" },
-    "Payment":   { color: "#4ade80", icon: Wallet,     sign: "−" },
-    "Write-off": { color: "#fbbf24", icon: Undo2,      sign: "−" },
+  const tone: Record<string, { color: string; tint: string; edge: string; icon: typeof Wallet; sign: string }> = {
+    "Charge":    { color: "var(--danger)",  tint: "rgba(248,113,113,0.10)", edge: "rgba(248,113,113,0.30)", icon: CreditCard, sign: "+" },
+    "Payment":   { color: "var(--success)", tint: "rgba(52,211,153,0.10)",  edge: "rgba(52,211,153,0.30)",  icon: Wallet,     sign: "−" },
+    "Write-off": { color: "var(--warning)", tint: "rgba(251,191,36,0.10)",  edge: "rgba(251,191,36,0.30)",  icon: Undo2,      sign: "−" },
   };
 
   return (
@@ -343,7 +371,7 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
         </p>
       </div>
         {loading && <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff }}>Loading…</p>}
-        {error && <p style={{ fontSize: 12, color: "#f87171", fontFamily: ff, lineHeight: 1.5 }}>{error}</p>}
+        {error && <p style={{ fontSize: 12, color: "var(--danger)", fontFamily: ff, lineHeight: 1.5 }}>{error}</p>}
         {!loading && !error && groups.length === 0 && (
           <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff, padding: "16px 0", textAlign: "center" }}>
             Nothing on this account yet.
@@ -360,7 +388,7 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
           return (
             <div key={g.key} style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 13px" }}>
-                <div style={{ width: 30, height: 30, borderRadius: 8, background: `${t.color}14`, border: `1px solid ${t.color}33`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <div style={{ width: 30, height: 30, borderRadius: 8, background: t.tint, border: `1px solid ${t.edge}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   <Icon size={13} color={t.color} />
                 </div>
 
@@ -544,7 +572,7 @@ function OpenAccountModal({ onClose, onDone }: { onClose: () => void; onDone: ()
           was approved — the account can still carry what is owed, it just reads as over limit.
         </p>
 
-        {error && <p style={{ fontSize: 11.5, color: "#f87171", lineHeight: 1.5, fontFamily: ff }}>{error}</p>}
+        {error && <p style={{ fontSize: 11.5, color: "var(--danger)", lineHeight: 1.5, fontFamily: ff }}>{error}</p>}
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "12px 18px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
@@ -561,7 +589,6 @@ function OpenAccountModal({ onClose, onDone }: { onClose: () => void; onDone: ()
 // ─── The screen ───────────────────────────────────────────────────────────────
 
 export default function CreditCustomers() {
-  const isMobile = useIsMobile();
   const { accounts, loading, error, reload, configured } = useCreditAccounts();
   // Opening an account and writing off a balance are both decisions about how
   // much the shop is willing to lose. Taking a payment is not, so it stays open
@@ -595,10 +622,10 @@ export default function CreditCustomers() {
   const overLimit = accounts.filter(isOverLimit).length;
 
   const stats = [
-    { label: "Total Outstanding", value: rs(outstanding),   color: "#f87171", icon: TrendingDown },
-    { label: "Overdue Value",     value: rs(overdueValue),  color: "#fbbf24", icon: AlertCircle },
-    { label: "Accounts",          value: String(accounts.length), color: "#60a5fa", icon: CreditCard },
-    { label: "Over Limit",        value: String(overLimit), color: overLimit > 0 ? "#f87171" : "#4ade80", icon: overLimit > 0 ? AlertCircle : CheckCircle },
+    { label: "Outstanding", value: rs(outstanding),         tone: TONE.danger },
+    { label: "Overdue",     value: rs(overdueValue),        tone: overdueValue > 0 ? TONE.warning : TONE.muted },
+    { label: "Accounts",    value: String(accounts.length), tone: TONE.accent },
+    { label: "Over limit",  value: String(overLimit),       tone: overLimit > 0 ? TONE.danger : TONE.success },
   ];
 
   const refresh = () => { void reload(); setPayTarget(null); setOffTarget(null); setShowAdd(false); };
@@ -608,29 +635,27 @@ export default function CreditCustomers() {
 
       {(!configured || error) && (
         <div style={{ display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)" }}>
-          <AlertCircle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+          <AlertCircle size={15} color="var(--warning)" style={{ flexShrink: 0, marginTop: 1 }} />
           <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55, fontFamily: ff }}>
             {!configured ? "Connect Supabase to track credit." : error}
           </p>
         </div>
       )}
 
-      {/* Stats row */}
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 12 }}>
-        {stats.map(s => {
-          const Icon = s.icon;
-          return (
-            <div key={s.label} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 9, background: `${s.color}14`, border: `1px solid ${s.color}33`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <Icon size={16} color={s.color} strokeWidth={2} />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <p style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.07em", textTransform: "uppercase", fontFamily: ff }}>{s.label}</p>
-                <p style={{ fontSize: 17, fontWeight: 700, color: s.color, marginTop: 2 }}>{s.value}</p>
-              </div>
-            </div>
-          );
-        })}
+      {/* Summary chips — same shape as Invoice History's */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        {stats.map(s => (
+          <div key={s.label} style={{
+            background: "var(--bg-card)", border: "1px solid var(--border)",
+            borderRadius: 10, padding: "8px 14px", display: "flex", alignItems: "center", gap: 8,
+          }}>
+            {/* The dot the repair header's chips use — colour without a block
+                of it, which is what makes those rows readable at a glance. */}
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: s.tone.fg, flexShrink: 0 }} />
+            <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff }}>{s.label}</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: s.tone.fg, fontFamily: ff }}>{s.value}</span>
+          </div>
+        ))}
       </div>
 
       {/* Toolbar */}
@@ -660,10 +685,14 @@ export default function CreditCustomers() {
         <div style={{ display: "flex", gap: 6, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, padding: 5 }}>
           {(["All", "Active", "Overdue", "Settled"] as const).map(s => {
             const active = statusFilter === s;
-            const color = s === "All" ? "var(--accent)" : statusConfig[s as CreditStatus].color;
+            // The tints come from the same palette as the badges, so a pill
+            // and the rows it filters to are visibly the same thing.
+            const cfg = s === "All"
+              ? { color: "var(--accent)", bg: "var(--accent-dim)", border: "var(--accent-glow)" }
+              : statusConfig[s as CreditStatus];
             return (
               <button key={s} onClick={() => setStatusFilter(s)}
-                style={{ padding: "5px 12px", borderRadius: 7, fontSize: 12, fontWeight: active ? 700 : 400, border: active ? `1px solid ${color}44` : "1px solid transparent", background: active ? `${color}14` : "transparent", color: active ? color : "var(--text-muted)", cursor: "pointer", fontFamily: ff }}>
+                style={{ padding: "6px 13px", borderRadius: 7, fontSize: 12.5, fontWeight: active ? 700 : 500, border: `1px solid ${active ? cfg.border : "transparent"}`, background: active ? cfg.bg : "transparent", color: active ? cfg.color : "var(--text-muted)", cursor: "pointer", fontFamily: ff }}>
                 {s}
               </button>
             );
@@ -725,9 +754,17 @@ export default function CreditCustomers() {
                 >
                   <td style={{ padding: "14px 16px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      {a.holderKind === "Dealer"
-                        ? <Store size={13} style={{ color: "#f59e0b", flexShrink: 0 }} />
-                        : <CreditCard size={13} style={{ color: "var(--text-muted)", flexShrink: 0 }} />}
+                      {/* Dealers and walk-ins are settled in different ways, so
+                          they are worth telling apart before reading the name. */}
+                      <span style={{
+                        width: 26, height: 26, borderRadius: 7, flexShrink: 0,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        background: a.holderKind === "Dealer" ? TONE.warning.bg : TONE.accent.bg,
+                        border: `1px solid ${a.holderKind === "Dealer" ? TONE.warning.border : TONE.accent.border}`,
+                        color: a.holderKind === "Dealer" ? TONE.warning.fg : TONE.accent.fg,
+                      }}>
+                        {a.holderKind === "Dealer" ? <Store size={12} /> : <CreditCard size={12} />}
+                      </span>
                       <div style={{ minWidth: 0 }}>
                         <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff }}>{a.name}</p>
                         <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1, fontFamily: ff, display: "flex", alignItems: "center", gap: 5 }}>
@@ -736,7 +773,7 @@ export default function CreditCustomers() {
                               person — the shop is owed money it never agreed to
                               lend, which is worth seeing at a glance. */}
                           {a.autoOpened && (
-                            <span title="Opened automatically to hold an unpaid handover" style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "#fbbf24" }}>
+                            <span title="Opened automatically to hold an unpaid handover" style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "var(--warning)" }}>
                               <Sparkles size={9} /> auto
                             </span>
                           )}
@@ -750,24 +787,26 @@ export default function CreditCustomers() {
                   </td>
                   <td style={{ padding: "14px 16px", fontSize: 13, color: "var(--text-primary)", fontFamily: ff }}>{rs(a.totalCharged)}</td>
                   <td style={{ padding: "14px 16px" }}>
-                    <p style={{ fontSize: 13, color: "#4ade80", fontWeight: 500, fontFamily: ff }}>{rs(a.totalPaid)}</p>
+                    {/* Green means money came in. Painting a zero green made
+                        every untouched account look like it had been settled. */}
+                    <p style={{ fontSize: 13.5, fontWeight: a.totalPaid > 0 ? 700 : 500, color: a.totalPaid > 0 ? "var(--success)" : "var(--text-muted)", fontFamily: ff }}>{rs(a.totalPaid)}</p>
                     <div style={{ width: 72, height: 3, background: "var(--border)", borderRadius: 4, marginTop: 4 }}>
-                      <div style={{ width: `${pct}%`, height: "100%", background: "#4ade80", borderRadius: 4, transition: "width 0.3s" }} />
+                      <div style={{ width: `${pct}%`, height: "100%", background: "var(--success)", borderRadius: 4, transition: "width 0.3s" }} />
                     </div>
                   </td>
                   <td style={{ padding: "14px 16px" }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: a.balance > 0 ? "#f87171" : "#4ade80", fontFamily: ff }}>
+                    <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em", color: a.balance > 0 ? "var(--danger)" : "var(--success)", fontFamily: ff }}>
                       {a.balance > 0 ? rs(a.balance) : "—"}
                     </span>
                     {a.totalWrittenOff > 0 && (
-                      <p style={{ fontSize: 10.5, color: "#fbbf24", marginTop: 2, fontFamily: ff }}>{rs(a.totalWrittenOff)} written off</p>
+                      <p style={{ fontSize: 10.5, color: "var(--warning)", marginTop: 2, fontFamily: ff }}>{rs(a.totalWrittenOff)} written off</p>
                     )}
                   </td>
                   <td style={{ padding: "14px 16px" }}>
-                    <span style={{ fontSize: 12.5, color: over ? "#f87171" : "var(--text-secondary)", fontWeight: over ? 700 : 400, fontFamily: ff }}>
+                    <span style={{ fontSize: 12.5, color: over ? "var(--danger)" : "var(--text-secondary)", fontWeight: over ? 700 : 400, fontFamily: ff }}>
                       {a.creditLimit > 0 ? rs(a.creditLimit) : "none"}
                     </span>
-                    {over && <p style={{ fontSize: 10.5, color: "#f87171", marginTop: 2, fontFamily: ff }}>over limit</p>}
+                    {over && <p style={{ fontSize: 10.5, color: "var(--danger)", marginTop: 2, fontFamily: ff }}>over limit</p>}
                   </td>
                   <td style={{ padding: "14px 16px" }}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, background: sc.bg, border: `1px solid ${sc.border}`, color: sc.color, fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap", fontFamily: ff }}>
@@ -780,27 +819,22 @@ export default function CreditCustomers() {
                         onClick={() => setOpenHistory(open ? null : a.id)}
                         title={open ? "Hide credit history" : "Show credit history"}
                         aria-expanded={open}
-                        style={{
-                          display: "flex", alignItems: "center", gap: 5, height: 30, padding: "0 9px", borderRadius: 7,
-                          border: `1px solid ${open ? "var(--accent-glow)" : "var(--border)"}`,
-                          background: open ? "var(--accent-dim)" : "transparent",
-                          color: open ? "var(--accent)" : "var(--text-muted)",
-                          cursor: "pointer", fontFamily: ff,
-                        }}
+                        style={{ ...pill(open ? TONE.accent : TONE.muted, true), gap: 3, padding: "0 9px" }}
                       >
-                        <History size={13} />
-                        <ChevronDown size={12} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.18s" }} />
+                        <History size={12} />
+                        <ChevronDown size={11} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.18s" }} />
                       </button>
+                      {/* The one action a cashier comes here to take, so it
+                          keeps a label — but in the accent, like "view details"
+                          in the jobs table, not in green. */}
                       {a.balance > 0 && (
-                        <button onClick={() => setPayTarget(a)} title="Record payment"
-                          style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", borderRadius: 7, border: "1px solid rgba(74,222,128,0.35)", background: "rgba(74,222,128,0.07)", color: "#4ade80", fontSize: 11.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", fontFamily: ff }}>
-                          <DollarSign size={11} strokeWidth={2.5} />Pay
+                        <button onClick={() => setPayTarget(a)} title="Record payment" style={{ ...pill(TONE.success, true), fontWeight: 700 }}>
+                          <DollarSign size={11} strokeWidth={2.4} />Pay
                         </button>
                       )}
                       {a.balance > 0 && isAdminCashier && (
-                        <button onClick={() => setOffTarget(a)} title="Write off"
-                          style={{ width: 30, height: 30, borderRadius: 7, border: "1px solid rgba(251,191,36,0.35)", background: "rgba(251,191,36,0.07)", color: "#fbbf24", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          <Undo2 size={13} />
+                        <button onClick={() => setOffTarget(a)} title="Write off as bad debt" style={pill(TONE.warning)}>
+                          <Undo2 size={12} />
                         </button>
                       )}
                     </div>

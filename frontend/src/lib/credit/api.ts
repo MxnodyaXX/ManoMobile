@@ -433,10 +433,20 @@ export function groupCreditEntries(entries: CreditEntry[]): CreditEntryGroup[] {
 
 /* ── shared presentation ─────────────────────────────────────────────────── */
 
+/**
+ * Status colours, in the shape every pill in this app uses: a colour, a wash of
+ * it at 0.08, and an edge at 0.2. Same alphas as statusConfig in the jobs
+ * table, so a badge here and a badge there are visibly the same component.
+ *
+ * The text colour is the theme token rather than the fixed hex. The hue is the
+ * same family; the token simply carries the readable version of it per theme
+ * (#059669 on light, #34d399 on dark) instead of a neon that was chosen against
+ * a black background.
+ */
 export const STATUS_COLOURS: Record<CreditStatus, { color: string; bg: string; border: string }> = {
-  Active:  { color: "#60a5fa", bg: "rgba(96,165,250,0.08)",  border: "rgba(96,165,250,0.25)" },
-  Overdue: { color: "#f87171", bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.25)" },
-  Settled: { color: "#4ade80", bg: "rgba(74,222,128,0.08)",  border: "rgba(74,222,128,0.25)" },
+  Active:  { color: "var(--accent)",  bg: "var(--accent-dim)",      border: "var(--accent-glow)"    },
+  Overdue: { color: "var(--danger)",  bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.2)" },
+  Settled: { color: "var(--success)", bg: "rgba(74,222,128,0.08)",  border: "rgba(74,222,128,0.2)"  },
 };
 
 /** How much more they may run up. A zero limit means none was ever approved,

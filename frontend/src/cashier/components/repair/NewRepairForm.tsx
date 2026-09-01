@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { previewNextJobNo, checkDealerJobNo, type DealerJobNoCheck } from "@/lib/repair/api";
@@ -1432,13 +1432,24 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
   // Shown in the job-number box so the cashier can see what will be assigned.
   // Advisory only — the sequence, not this value, decides on save.
   const [nextJobNo, setNextJobNo] = useState<string | null>(null);
-  useEffect(() => {
+
+  /**
+   * Re-read what the next number will be.
+   *
+   * Has to be callable, not a mount-only effect. After a job is saved the
+   * wizard resets to Step 1 for the next device, and a number fetched once on
+   * mount still showed the one that had just been used — so the cashier was
+   * looking at RM-044 while the sequence was already on RM-045.
+   */
+  const refreshNextJobNo = useCallback(() => {
     let active = true;
     previewNextJobNo()
       .then(v => { if (active) setNextJobNo(v); })
       .catch(() => { /* the box just shows a placeholder instead */ });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => refreshNextJobNo(), [refreshNextJobNo]);
   const { technicians, loading: techLoading } = useTechnicians();
   const toast = useToast();
   const { warranties } = useWarranty();
@@ -1855,6 +1866,8 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
     // mid-session must not leave the form pointing at nothing.
     const stillExists = dealers.some(d => String(d.id) === lastDealerId);
     setForm({ ...INITIAL, dealerId: stillExists ? lastDealerId : "" });
+    // The job just saved moved the sequence on; the box has to follow it.
+    refreshNextJobNo();
     setStep(1);
     setCreatedJob(null);
     setErrors([]);
