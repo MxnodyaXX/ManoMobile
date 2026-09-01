@@ -21,7 +21,7 @@ export interface SaleTx {
   returnedAmount?: number;
   returnReason?: string;
   returnDate?: string;
-  paymentMethod?: "Cash" | "Card" | "Credit" | "Split";
+  paymentMethod?: "Cash" | "Card" | "Bank Transfer" | "Credit" | "Split";
   cashAmount?: number;
   cardAmount?: number;
   cardRef?: string;
@@ -32,6 +32,10 @@ export interface SaleTx {
   /** How much of it has been settled. Absent means never recorded — read the
    *  status instead, never assume zero. */
   paid?: number;
+  /** Written off as uncollectable. Derived from credit write-offs that name
+   *  this invoice — never entered by hand, so it cannot drift from the ledger
+   *  it summarises. */
+  badDebt?: number;
   discountPct?: number;
   taxPct?: number;
   taxAmount?: number;

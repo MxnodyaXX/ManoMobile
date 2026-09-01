@@ -207,10 +207,18 @@ function WriteOffModal({ account, onClose, onDone }: {
   onDone: () => void;
 }) {
   const toast = useToast();
+  const { entries } = useCreditEntries(account.id);
   const [amount, setAmount] = useState(String(Math.round(account.balance)));
   const [note, setNote] = useState("");
+  const [invoiceNo, setInvoiceNo] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The invoices this account was actually charged on, largest first — the one
+  // being written off is usually the big old one.
+  const invoices = groupCreditEntries(entries)
+    .filter(g => g.kind === "Charge" && g.invoiceNo)
+    .map(g => ({ no: g.invoiceNo as string, amount: g.amount, on: g.occurredOn }));
 
   const amt = parseFloat(amount) || 0;
   const canSave = amt > 0 && amt <= account.balance && note.trim() !== "" && !busy;
@@ -218,7 +226,7 @@ function WriteOffModal({ account, onClose, onDone }: {
   const save = async () => {
     setBusy(true); setError(null);
     try {
-      await writeOff(account.id, amt, note);
+      await writeOff(account.id, amt, note, invoiceNo || undefined);
       toast.success(`${rs(amt)} written off ${account.name}`);
       onDone();
     } catch (e) {
@@ -245,6 +253,26 @@ function WriteOffModal({ account, onClose, onDone }: {
           <label style={labelSt}>Reason *</label>
           <input value={note} onChange={e => setNote(e.target.value)} placeholder="Why is this being written off?" style={inputSt} />
         </div>
+
+        {invoices.length > 0 && (
+          <div>
+            <label style={labelSt}>Against which invoice? (optional)</label>
+            <select value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} style={{ ...inputSt, cursor: "pointer" }}>
+              <option value="">The account as a whole</option>
+              {invoices.map(i => (
+                <option key={i.no} value={i.no}>{i.no} · {rs(i.amount)} · {i.on}</option>
+              ))}
+            </select>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5, lineHeight: 1.5, fontFamily: ff }}>
+              {/* Both are valid. Naming one is what makes bad debt readable per
+                  sale later; leaving it on the account is honest when the debt
+                  is not traceable to a single bill. */}
+              Naming an invoice records this as bad debt against that sale, so reports can
+              show which jobs went uncollected. Leave it on the account when the debt does
+              not belong to one bill.
+            </p>
+          </div>
+        )}
         {error && <p style={{ fontSize: 11.5, color: "#f87171", lineHeight: 1.5, fontFamily: ff }}>{error}</p>}
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "12px 18px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)" }}>

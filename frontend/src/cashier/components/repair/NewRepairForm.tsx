@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { previewNextJobNo, checkDealerJobNo, type DealerJobNoCheck } from "@/lib/repair/api";
 import { useRepair, isInHouseDealer, IN_HOUSE_DEALER, type ConditionGrade, type DeviceConditionMap, type JobPriority, type RepairJob, type RepairDealer } from "@/cashier/contexts/RepairContext";
+import { useAuth } from "@/lib/auth/AuthContext";
 import { useWarranty, effectiveStatus } from "@/cashier/contexts/WarrantyContext";
 import { useRepairDrafts, newDraftId, fmtSaved, type RepairDraft, type RepairFormData as FormData } from "@/cashier/hooks/useRepairDrafts";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
@@ -846,12 +847,52 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
 // Unlock and Terms & Conditions stay unfolded: the former is short enough
 // not to need hiding, the latter is what the final step blocks on.
 
+/**
+ * "Ready in how long?" is the question the counter actually asks.
+ *
+ * The field is a date picker, so answering "three days" meant working out what
+ * date that is and clicking through a calendar — dozens of times a day, for an
+ * answer that is nearly always one of five spans.
+ *
+ * Dates are built in local time. Adding days to an ISO string built from
+ * toISOString() is off by a day for half of every day in Sri Lanka (UTC+5:30),
+ * and "ready tomorrow" landing on today is exactly the kind of promise the shop
+ * cannot keep.
+ */
+const ETA_SHORTCUTS: { label: string; days: number }[] = [
+  { label: "1 day",  days: 1 },
+  { label: "2 days", days: 2 },
+  { label: "3 days", days: 3 },
+  { label: "5 days", days: 5 },
+  { label: "1 week", days: 7 },
+];
+
+function isoLocalDate(d: Date): string {
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+function etaFromToday(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return isoLocalDate(d);
+}
+
 function Step2({ data, onChange, isMobile, errors, dealers, technicians, techLoading }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; errors: RequiredField[]; dealers: RepairDealer[]; technicians: Technician[]; techLoading: boolean }) {
   const bad = (f: RequiredField) => errors.includes(f);
   // Only one of the accordions below is ever open at a time — opening one
   // closes whichever else was open, so the list doesn't grow tall with
   // several expanded sections at once.
   const [openAccordion, setOpenAccordion] = useState<string | null>(null);
+  /**
+   * Which shortcut is showing as chosen.
+   *
+   * Held here rather than derived by comparing the date against today. Working
+   * out "is this date three days away" needs today's date during render, which
+   * is exactly the impure read React's rules forbid — and a module-level
+   * constant would quietly go stale on a till left open overnight.
+   */
+  const [etaPick, setEtaPick] = useState<number | "unsure" | null>(null);
   const toggleAccordion = (id: string) => setOpenAccordion(o => o === id ? null : id);
   const estimated = parseFloat(data.estimatedCost) || 0;
   const advance = parseFloat(data.advancePaid) || 0;
@@ -923,8 +964,60 @@ function Step2({ data, onChange, isMobile, errors, dealers, technicians, techLoa
               type="date"
               style={inputStyle}
               value={data.estimatedCompletion}
-              onChange={(e) => onChange({ estimatedCompletion: e.target.value })}
+              onChange={(e) => { setEtaPick(null); onChange({ estimatedCompletion: e.target.value }); }}
             />
+
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 7 }}>
+              {ETA_SHORTCUTS.map(({ label, days }) => {
+                const active = etaPick === days;
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => { setEtaPick(days); onChange({ estimatedCompletion: etaFromToday(days) }); }}
+                    style={{
+                      minHeight: 28, padding: "0 10px", borderRadius: 7, fontSize: 11.5,
+                      fontWeight: active ? 700 : 500, cursor: "pointer",
+                      fontFamily: "'Plus Jakarta Sans', sans-serif",
+                      border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
+                      background: active ? "var(--accent-dim)" : "transparent",
+                      color: active ? "var(--accent)" : "var(--text-secondary)",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+
+              {/*
+                Not the same as leaving the field blank by accident, which is
+                why it is a button you press. A device that has to be opened
+                before anyone can say how long it will take is a real and common
+                answer, and pretending otherwise puts a date on the customer's
+                slip that the shop never meant to promise.
+              */}
+              <button
+                type="button"
+                onClick={() => { setEtaPick("unsure"); onChange({ estimatedCompletion: "" }); }}
+                style={{
+                  minHeight: 28, padding: "0 10px", borderRadius: 7, fontSize: 11.5,
+                  fontWeight: etaPick === "unsure" ? 700 : 500, cursor: "pointer",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  border: `1px solid ${etaPick === "unsure" ? "#fbbf24" : "var(--border)"}`,
+                  background: etaPick === "unsure" ? "rgba(251,191,36,0.1)" : "transparent",
+                  color: etaPick === "unsure" ? "#fbbf24" : "var(--text-secondary)",
+                }}
+              >
+                Not sure yet
+              </button>
+            </div>
+
+            {etaPick === "unsure" && (
+              <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6, lineHeight: 1.5, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                No date goes on the job or the customer&apos;s slip. Set one once the technician
+                has looked at it.
+              </p>
+            )}
           </div>
           <div>
             <label style={labelStyle}>Advance Received (LKR)</label>
@@ -1282,6 +1375,21 @@ const BRAND_OPTIONS = ["Apple", "Samsung", "Xiaomi", "OPPO", "OnePlus", "Realme"
  */
 export default function NewRepairForm({ onClose, initialDraft, onStepChange }: { onClose?: () => void; initialDraft?: RepairDraft | null; onStepChange?: (step: number) => void }) {
   const { addJob, updateJob, dealers, jobs } = useRepair();
+
+  /**
+   * Whether this account can actually book a job in.
+   *
+   * Postgres refuses the insert for anyone who is not a Cashier or an Admin
+   * (see jobs_insert, migration 20260831000008), and it refuses at the very
+   * end — after four steps of typing, an IMEI, a fault checklist and a
+   * signature. Saying so at the top is the difference between a two-second
+   * correction and a lost intake.
+   *
+   * Only a warning, not a block: the database is the control, and a role that
+   * cannot be read must not stop a counter from working.
+   */
+  const { profile } = useAuth();
+  const wrongRole = !!profile && profile.role !== "Cashier" && profile.role !== "Admin";
   // The corrected model-number reference table. Preferred over job history,
   // which learned from every typo anyone ever entered.
   const { lookup: deviceModelLookup, models: deviceModels, reload: reloadDeviceModels } = useDeviceModelLookup();
@@ -1666,7 +1774,11 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
       originalEstimate: parseFloat(form.estimatedCost) || 0,
       advancePaid: parseFloat(form.advancePaid) || 0,
       createdAt: new Date().toISOString().slice(0, 10),
-      estimatedCompletion: form.estimatedCompletion || new Date().toISOString().slice(0, 10),
+      // Empty stays empty. It used to fall back to today, which turned "we do
+      // not know yet" into "ready today" on the job card and the customer's
+      // slip — a promise nobody made. Every date formatter already renders an
+      // empty value as a dash.
+      estimatedCompletion: form.estimatedCompletion,
       imei: form.deviceIMEI || undefined,
       dealer: dealer?.name ?? IN_HOUSE_DEALER,
       dealerId: dealer?.id,
@@ -1758,6 +1870,21 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
         fontFamily: "'Plus Jakarta Sans', sans-serif",
       }}
     >
+
+
+      {wrongRole && (
+        <div style={{
+          display: "flex", gap: 10, padding: "12px 15px", borderRadius: 11,
+          background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.4)",
+        }}>
+          <AlertCircle size={16} color="#f87171" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.55, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            <strong style={{ color: "#f87171" }}>You are signed in as {profile?.role}.</strong>{" "}
+            Only a Cashier or an Admin can book in a repair — the database will refuse this job when
+            you try to save it. Sign out and back in as the counter account first.
+          </p>
+        </div>
+      )}
       {/* Active-warranty alert — surfaced once IMEI / phone is known */}
       {existingWarranty && (
         <div style={{ margin: "0 0 10px", display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 14px", borderRadius: 10, background: "rgba(167,139,250,0.08)", border: "1px solid rgba(167,139,250,0.3)" }}>

@@ -23,6 +23,20 @@ const INTAKE_BUCKET = "repair-intake";
 /** What the technician column holds until somebody takes the job on. */
 export const UNASSIGNED_TECHNICIAN = "Unassigned";
 
+/**
+ * Is this job nobody's yet?
+ *
+ * There are two ways a job says so and both are in the data: intake writes the
+ * literal "Unassigned", while jobs created elsewhere leave the column empty.
+ * Checking only one of them is how the technician bench came to show an empty
+ * claim list while the counter listed two unassigned repairs — so the question
+ * is asked in exactly one place.
+ */
+export function isUnassigned(technician?: string | null): boolean {
+  const t = (technician ?? "").trim();
+  return t === "" || t.toLowerCase() === UNASSIGNED_TECHNICIAN.toLowerCase();
+}
+
 // ─── Row shapes ──────────────────────────────────────────────────────────────
 
 interface JobRow {
@@ -40,6 +54,7 @@ interface JobRow {
   priority: RepairJob["priority"];
   estimated_cost: number | string;
   advance_paid: number | string;
+  written_off: number | string | null;
   original_estimate: number | string | null;
   revised_estimate: number | string | null;
   dealer: string | null;
@@ -107,6 +122,8 @@ export function rowToJob(row: JobRow): RepairJob {
     priority: row.priority,
     estimatedCost: num(row.estimated_cost),
     advancePaid: num(row.advance_paid),
+    // Part of the bill forgiven at handover — see migration 20260901000017.
+    writtenOff: num(row.written_off),
     originalEstimate: optNum(row.original_estimate),
     revisedEstimate: optNum(row.revised_estimate),
     dealer: opt(row.dealer),
@@ -160,6 +177,7 @@ export function jobToRow(job: Partial<RepairJob>): Record<string, unknown> {
   set("priority", job.priority);
   set("estimated_cost", job.estimatedCost);
   set("advance_paid", job.advancePaid);
+  set("written_off", job.writtenOff);
   set("original_estimate", job.originalEstimate);
   set("revised_estimate", job.revisedEstimate);
   set("dealer", job.dealer);
@@ -350,6 +368,15 @@ export async function insertJob(job: Omit<RepairJob, "id"> & { id?: string }): P
       if (explicitId) {
         throw new Error(`Job number "${explicitId}" is already used by another repair.`);
       }
+    }
+    // 42501 is a row-level security refusal. Postgres phrases it as "new row
+    // violates row-level security policy", which tells a shop nothing about
+    // what to do — and the answer here is almost always "you are signed in as
+    // the wrong person", not "something is broken".
+    if (error.code === "42501" || /row-level security/i.test(error.message)) {
+      throw new Error(
+        "Only a Cashier or an Admin can book in a repair. You are signed in under a different role — sign out and back in as the counter account.",
+      );
     }
     throw new Error(`Could not create the repair job: ${error.message}`);
   }

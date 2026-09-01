@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Wrench, ChevronDown } from "lucide-react";
 import { useRepair, type RepairJob, type JobStatus } from "@/cashier/contexts/RepairContext";
+import { useTechnicianRates } from "@/lib/settings/staffRules";
+import { isUnassigned } from "@/lib/repair/api";
 import { useTech } from "@/technician/contexts/TechContext";
 import { useParts } from "@/cashier/contexts/PartsContext";
 import BenchCard, { type BenchAction } from "@/technician/components/bench/BenchCard";
@@ -37,9 +39,9 @@ const ff = "'Plus Jakarta Sans', sans-serif";
 
 type ModalKind = Exclude<BenchAction, "start" | "resume">;
 
-type SectionKey = "progress" | "todo" | "waiting" | "ready";
+type SectionKey = "progress" | "todo" | "pool" | "waiting" | "ready";
 
-interface Buckets { inProgress: RepairJob[]; toDo: RepairJob[]; waiting: RepairJob[]; ready: RepairJob[] }
+interface Buckets { inProgress: RepairJob[]; toDo: RepairJob[]; pool: RepairJob[]; waiting: RepairJob[]; ready: RepairJob[] }
 
 const COLUMNS: {
   key: SectionKey; title: string; tint?: string; empty: string;
@@ -47,6 +49,10 @@ const COLUMNS: {
 }[] = [
   { key: "progress", title: "In progress", tint: "#34d399", empty: "Nothing started",     pick: b => b.inProgress },
   { key: "todo",     title: "To start",    tint: undefined, empty: "Nothing waiting",     pick: b => b.toDo },
+  // Work belonging to nobody. It sits between the technician's own untouched
+  // jobs and their paused ones because that is when it gets picked up: after
+  // you have seen your own queue and found room in it.
+  { key: "pool",     title: "Available to claim", tint: "#a78bfa", empty: "Nothing unassigned", pick: b => b.pool },
   { key: "waiting",  title: "Waiting",     tint: "#fbbf24", empty: "Nothing on hold",     pick: b => b.waiting },
   { key: "ready",    title: "Finished",    tint: "#60a5fa", empty: "Nothing to collect",  pick: b => b.ready },
 ];
@@ -66,15 +72,20 @@ export default function MyBench() {
   // Finished work starts folded: it is the only section the technician has
   // nothing left to do about, and on a busy bench it is also the longest.
   const [sectionOpen, setSectionOpen] = useState<Record<SectionKey, boolean>>({
-    progress: true, todo: true, waiting: true, ready: false,
+    progress: true, todo: true, pool: true, waiting: true, ready: false,
   });
   // One filter per section. Shared state would mean narrowing "to start" also
   // quietly hid jobs in a section the technician was not even looking at.
   const [filters, setFilters] = useState<Record<SectionKey, BenchFilter>>({
-    progress: EMPTY_FILTER, todo: EMPTY_FILTER, waiting: EMPTY_FILTER, ready: EMPTY_FILTER,
+    progress: EMPTY_FILTER, todo: EMPTY_FILTER, pool: EMPTY_FILTER, waiting: EMPTY_FILTER, ready: EMPTY_FILTER,
   });
 
   const mine = jobs.filter(j => j.technician === technicianName);
+
+  // Permissive until the rules load and if they cannot be read at all — the
+  // bench must not quietly hide available work because of a slow fetch.
+  const ratesFor = useTechnicianRates();
+  const canClaim = ratesFor(technicianName)?.canClaimUnassigned ?? true;
   const byOldest = (a: RepairJob, b: RepairJob) =>
     new Date(a.startedAt ?? a.createdAt).getTime() - new Date(b.startedAt ?? b.createdAt).getTime();
 
@@ -90,6 +101,25 @@ export default function MyBench() {
    */
   const isFinished = (j: RepairJob) =>
     j.status === "Completed" || j.status === "Delivered" || (!!j.completedAt && !!j.completionType);
+
+  /**
+   * Repairs with no technician on them.
+   *
+   * The bench only ever showed `j.technician === me`, so a job booked in
+   * without an assignment was invisible to every technician in the shop — it
+   * sat in the system waiting for somebody who was never told it existed. The
+   * empty state even pointed at a "Job Pool" screen that does not exist.
+   *
+   * Hidden entirely from anyone whose permissions say they may not self-assign,
+   * rather than shown and refused: a queue you can look at but never take from
+   * is worse than one you cannot see.
+   */
+  const unassigned = canClaim
+    ? jobs
+        .filter(j => isUnassigned(j.technician))
+        .filter(j => j.status !== "Cancelled" && !isFinished(j))
+        .sort(byOldest)
+    : [];
 
   const inProgress = mine.filter(j => j.status === "Issued"     && !isFinished(j)).sort(byOldest);
   const toDo       = mine.filter(j => j.status === "Non-Issued" && !isFinished(j)).sort(byOldest);
@@ -112,6 +142,34 @@ export default function MyBench() {
    * knows the rules — none of that logic is reimplemented here.
    */
   const handle = async (action: BenchAction, job: RepairJob) => {
+    /**
+     * Take an unassigned job.
+     *
+     * Assignment only — it does not start the clock. A technician picking a
+     * phone off the pile has taken responsibility for it; whether they begin
+     * now or after lunch is the Start button's business, and conflating the
+     * two would show work as in progress that nobody has touched.
+     */
+    if (action === "claim") {
+      setBusyId(job.id);
+      const result = await updateJob(job.id, {
+        technician: technicianName,
+        assignmentSource: "Self-Taken",
+      });
+      setBusyId(null);
+
+      if (!result.ok) {
+        setNotice(result.error ?? "That job could not be claimed.");
+        return;
+      }
+      addActivity({
+        jobId: job.id, type: "status_change",
+        description: `Claimed by ${technicianName}`,
+      });
+      setNotice(`${job.id} is yours — it has moved to "To start".`);
+      return;
+    }
+
     if (action === "start" || action === "resume") {
       setBusyId(job.id);
       const now = new Date();
@@ -144,7 +202,9 @@ export default function MyBench() {
   const pendingFor = (jobId: string) =>
     partRequests.filter(r => r.jobId === jobId && r.status === "Pending").length;
 
-  const nothingAtAll = mine.length === 0;
+  // "Nothing at all" has to mean nothing to claim either, or the screen tells
+  // a technician their bench is empty while unassigned work sits below it.
+  const nothingAtAll = mine.length === 0 && unassigned.length === 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 26, fontFamily: ff }}>
@@ -189,7 +249,9 @@ export default function MyBench() {
           <Wrench size={30} color="var(--text-muted)" style={{ marginBottom: 12 }} />
           <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-secondary)", marginBottom: 4 }}>Nothing on your bench</p>
           <p style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
-            Unassigned repairs are in the Job Pool, under More.
+            {canClaim
+              ? "Nothing is waiting to be claimed either."
+              : "You are not set up to claim unassigned repairs — a job has to be assigned to you."}
           </p>
         </div>
       )}
@@ -201,7 +263,7 @@ export default function MyBench() {
       {!nothingAtAll && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {COLUMNS.map(col => {
-            const all  = col.pick({ inProgress, toDo, waiting, ready });
+            const all  = col.pick({ inProgress, toDo, pool: unassigned, waiting, ready });
             const f    = filters[col.key];
             const list = applyBenchFilter(all, f);
             const open = sectionOpen[col.key];

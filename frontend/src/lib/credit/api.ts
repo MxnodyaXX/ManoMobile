@@ -256,10 +256,18 @@ export const recordPayment = (accountId: string, amount: number, method: string,
 export const addCharge = (accountId: string, amount: number, note?: string, invoiceNo?: string) =>
   addEntry({ accountId, kind: "Charge", amount, note, invoiceNo });
 
-/** Give up on a balance. Deliberately not a payment: rolled together, the
- *  takings would include money nobody paid. */
-export const writeOff = (accountId: string, amount: number, note?: string) =>
-  addEntry({ accountId, kind: "Write-off", amount, note });
+/**
+ * Give up on a balance. Deliberately not a payment: rolled together, the
+ * takings would include money nobody paid.
+ *
+ * Naming the invoice is optional but worth doing. A write-off against the
+ * account tells you a dealer cost the shop money; a write-off against an
+ * invoice tells you which jobs went bad, which is the figure that says whether
+ * a job type, a dealer or a price point is the problem. When one is named, a
+ * trigger rolls it onto sales.bad_debt — see migration 20260901000016.
+ */
+export const writeOff = (accountId: string, amount: number, note?: string, invoiceNo?: string) =>
+  addEntry({ accountId, kind: "Write-off", amount, note, invoiceNo });
 
 /**
  * Charge a delivered job's unpaid balance to whoever is collecting.

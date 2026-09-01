@@ -26,6 +26,9 @@ interface Invoice {
   discount: number;
   total: number;
   paid: number;
+  /** Written off as uncollectable against this invoice. Rolled up from credit
+   *  write-offs that name it, so it is the ledger's number, not a typed one. */
+  badDebt: number;
   status: InvoiceStatus;
   /**
    * Who sent the work in, when it came from a dealer.
@@ -82,6 +85,7 @@ function toInvoice(s: SaleTx, dealerName: (id: number | null | undefined) => str
     discount,
     total: s.total,
     paid,
+    badDebt: s.badDebt ?? 0,
     status,
     dealer: dealerName(s.dealerId),
   };
@@ -341,6 +345,10 @@ export default function InvoiceHistory() {
     count:    filtered.length,
     revenue:  filtered.filter(i => i.status !== "Voided").reduce((a, b) => a + b.total, 0),
     unpaid:   filtered.filter(i => i.status === "Unpaid" || i.status === "Partial").reduce((a, b) => a + (b.total - b.paid), 0),
+    // Separate from unpaid on purpose: unpaid is money still expected, bad debt
+    // is money the shop has already decided it will not see. Adding them
+    // together would overstate what is still collectable.
+    badDebt:  filtered.reduce((a, b) => a + b.badDebt, 0),
     voided:   filtered.filter(i => i.status === "Voided").length,
   }), [filtered]);
 
@@ -351,8 +359,8 @@ export default function InvoiceHistory() {
   };
   const selectStyle: React.CSSProperties = { ...inputStyle, cursor: "pointer", appearance: "none" as const, paddingRight: 28 };
 
-  const INV_HEADERS = ["Invoice No", "Date", "Customer", "Dealer", "Type", "Description", "Subtotal (Rs.)", "Discount (Rs.)", "Total (Rs.)", "Paid (Rs.)", "Status"];
-  const invRows     = () => filtered.map(inv => [inv.invoiceNo, inv.date, inv.customer, inv.dealer ?? "", inv.type, inv.description, inv.subtotal, inv.discount, inv.total, inv.paid, inv.status]);
+  const INV_HEADERS = ["Invoice No", "Date", "Customer", "Dealer", "Type", "Description", "Subtotal (Rs.)", "Discount (Rs.)", "Total (Rs.)", "Paid (Rs.)", "Bad Debt (Rs.)", "Status"];
+  const invRows     = () => filtered.map(inv => [inv.invoiceNo, inv.date, inv.customer, inv.dealer ?? "", inv.type, inv.description, inv.subtotal, inv.discount, inv.total, inv.paid, inv.badDebt, inv.status]);
   const invFilename = `invoices-${new Date().toISOString().slice(0, 10)}`;
 
   return (
@@ -364,6 +372,7 @@ export default function InvoiceHistory() {
           { label: "Invoices",     value: totals.count,          color: "var(--accent)" },
           { label: "Total Billed", value: fmtRs(totals.revenue), color: "#4ade80" },
           { label: "Outstanding",  value: fmtRs(totals.unpaid),  color: "#f87171" },
+          { label: "Bad Debt",     value: fmtRs(totals.badDebt), color: "#fbbf24" },
           { label: "Voided",       value: totals.voided,         color: "#94a3b8" },
         ].map(c => (
           <div key={c.label} style={{
@@ -450,7 +459,7 @@ onPng={() => {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
-              {["Invoice #", "Date", "Customer", "Type", "Description", "Total", "Paid", "Status", ""].map(h => (
+              {["Invoice #", "Date", "Customer", "Type", "Description", "Total", "Paid", "Bad Debt", "Status", ""].map(h => (
                 <th key={h} style={{
                   padding: "11px 14px", textAlign: "left", fontWeight: 600,
                   fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase",
@@ -462,7 +471,7 @@ onPng={() => {
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={9} style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6 }}>
+                <td colSpan={10} style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6 }}>
                   {loading
                     ? "Loading invoices…"
                     : error
@@ -514,6 +523,9 @@ onPng={() => {
                     {fmtRs(inv.total)}
                   </td>
                   <td style={{ padding: "11px 14px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{fmtRs(inv.paid)}</td>
+                  <td style={{ padding: "11px 14px", whiteSpace: "nowrap", color: inv.badDebt > 0 ? "#fbbf24" : "var(--text-muted)", fontWeight: inv.badDebt > 0 ? 700 : 400 }}>
+                    {inv.badDebt > 0 ? fmtRs(inv.badDebt) : "—"}
+                  </td>
                   <td style={{ padding: "11px 14px" }}>
                     <span style={{
                       fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 6,

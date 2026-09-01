@@ -6,18 +6,18 @@ import { useSales } from "@/cashier/contexts/SalesContext";
 import {
   Search, ArrowLeft, Printer, ChevronDown,
   Building2, CheckCircle, Clock, Wrench, TrendingUp, AlertCircle,
-  CreditCard, X, BookUser,
+  CreditCard, X, BookUser, Undo2,
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import CreditCustomerPicker, { type POSCreditCustomer } from "./CreditCustomerPicker";
 import JobIssuePrintable, { type IssueInvoiceData } from "@/cashier/components/repair/JobIssuePrintable";
-import SignaturePad from "@/cashier/components/shared/SignaturePad";
 import { useRepair, findDealer, isInHouseDealer, dealerKey } from "@/cashier/contexts/RepairContext";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 import InvoiceNoBadge from "@/cashier/components/sales/InvoiceNoBadge";
 import { usePersistInvoiceDocument } from "@/lib/sales/invoiceDoc";
 import { useAuth } from "@/lib/auth/AuthContext";
+import { useMyPermissions } from "@/lib/settings/staffRules";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -68,7 +68,7 @@ const stepLabel: React.CSSProperties = {
 };
 
 const cardHead: React.CSSProperties = {
-  fontSize: 10, fontWeight: 700, color: "var(--text-muted)",
+  fontSize: 11, fontWeight: 700, color: "var(--text-muted)",
   letterSpacing: "0.1em", textTransform: "uppercase",
   fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 12,
 };
@@ -99,6 +99,11 @@ interface BilledSnapshot {
   finalDue: number;
   grandTotal: number;
   totalDiscount: number;
+  lineDiscounts: number;
+  invoiceDiscount: number;
+  badDebt: number;
+  payMethod: "Cash" | "Card" | "Bank Transfer";
+  cardRef: string;
   isCredit: boolean;
   customerName: string;
   customerPhone: string;
@@ -194,7 +199,7 @@ function CreditRecordConfirmModal({ dealer, dueAmount, onConfirm, onSkip, onCanc
 
 // ─── Invoice View ─────────────────────────────────────────────────────────────
 
-function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountReceivedNow, dueAmount, totalAdvance, creditRecordMade, repairs, onBack }: {
+function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountReceivedNow, dueAmount, totalAdvance, invoiceDiscount = 0, creditRecordMade, repairs, onBack }: {
   invoiceNo: string;
   createdAt: string;
   dealer: string;
@@ -203,13 +208,16 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
   amountReceivedNow: number;
   dueAmount: number;
   totalAdvance: number;
+  /** Taken off the bill as a whole, on top of any per-line discounts. */
+  invoiceDiscount?: number;
   creditRecordMade: boolean;
   repairs: CompletedRepair[];
   onBack: () => void;
 }) {
   const { dealers } = useRepair();
   const invoiceRef = useRef<HTMLDivElement>(null);
-  const grandTotal  = repairs.reduce((s, r) => s + r.unitPrice - r.discount, 0);
+  const lineTotals  = repairs.reduce((s, r) => s + r.unitPrice - r.discount, 0);
+  const grandTotal  = Math.max(0, lineTotals - invoiceDiscount);
   const paidAmount  = totalAdvance + amountReceivedNow;
   const paymentType = isCredit ? "CREDIT" : "CASH / FULL";
   // Mano Mobile's own customers get the job-receipt template; external dealers get a sales invoice.
@@ -402,6 +410,20 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
 
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
             <div style={{ width: 280, display: "flex", flexDirection: "column", gap: 3 }}>
+              {/* Named on the invoice rather than folded into the total, so the
+                  customer can see the concession they were given. */}
+              {invoiceDiscount > 0 && (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                    <span style={{ color: "#555" }}>Sub Total</span>
+                    <span style={{ fontWeight: 600 }}>Rs. {lineTotals.toLocaleString()}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                    <span style={{ color: "#555" }}>Invoice Discount</span>
+                    <span style={{ fontWeight: 600 }}>− Rs. {invoiceDiscount.toLocaleString()}</span>
+                  </div>
+                </>
+              )}
               <div style={{ borderTop: "2px solid #000", paddingTop: 5, display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700 }}>
                 <span>TOTAL</span><span>Rs. {grandTotal.toLocaleString()}</span>
               </div>
@@ -462,6 +484,15 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
 export default function RepairSales() {
   const { addEntry } = useCashRegister();
   const { addSale } = useSales();
+  /**
+   * May this person settle below the agreed price?
+   *
+   * The one permission that defaults OFF, because it is the one that costs the
+   * shop money. Without it the Discount column stays read-only text — the
+   * cashier can see what was taken off, they just cannot take it off.
+   */
+  const { can: mayDo } = useMyPermissions();
+  const mayDiscount = mayDo("canDiscount");
   // Whose till the invoice came off, for the sales ledger.
   const { profile } = useAuth();
   const { updateJob, jobs, dealers } = useRepair();
@@ -490,9 +521,15 @@ export default function RepairSales() {
   // than throwing away a half-entered customer.
   const manualCustomer = useRef({ name: "", phone: "", nic: "" });
 
-  // Step 3 — Terms & signature (Mano Mobile only, replaces the dealer panel)
-  const [termsAccepted, setTermsAccepted] = useState(false);
-  const [signature,     setSignature]     = useState("");
+  /**
+   * How the money came in.
+   *
+   * Every other till in the app asks this; the repair counter recorded "Cash"
+   * on everything, so a card-paid repair was indistinguishable from a cash one
+   * in the sales ledger and in the day's takings.
+   */
+  const [payMethod, setPayMethod] = useState<"Cash" | "Card" | "Bank Transfer">("Cash");
+  const [cardRef,   setCardRef]   = useState("");
 
   // Step 3 — Amount received now
   const [amountReceived, setAmountReceived] = useState("");
@@ -503,6 +540,38 @@ export default function RepairSales() {
   // Credit record confirmation (non-Mano Mobile + due)
   const [showCreditConfirm,  setShowCreditConfirm]  = useState(false);
   const [creditRecordMade,   setCreditRecordMade]   = useState(false);
+  /**
+   * Money taken off a line, keyed by job.
+   *
+   * Held here rather than written onto the job, because a discount is a fact
+   * about this invoice, not about the repair. The job keeps recording what it
+   * was quoted at — which is also what the handover credit charge is computed
+   * from — so lowering a price at the counter can never leave the invoice and
+   * the customer's balance disagreeing about the same job.
+   */
+  const [rowDiscounts, setRowDiscounts] = useState<Record<string, number>>({});
+  /**
+   * Forgive the residual instead of putting it on account.
+   *
+   * Rs. 200 left on a Rs. 700 repair is not worth opening a credit account for,
+   * and doing so leaves a customer on the ledger owing money nobody will ever
+   * chase. Ticking this settles the job and records the gap as bad debt, so the
+   * shop still sees what it gave away.
+   */
+  const [writeOffBalance, setWriteOffBalance] = useState(false);
+  /**
+   * A discount on the bill as a whole, on top of anything taken off individual
+   * jobs.
+   *
+   * The two are different concessions and both happen: Rs. 100 off a screen
+   * because the part came cheaper, and then Rs. 200 off the whole invoice
+   * because it is a regular customer with four phones in. Folding the second
+   * into the first would spread it across lines it was never about, and the
+   * printed invoice would no longer match what was actually agreed.
+   */
+  const [invDiscount, setInvDiscount] = useState("");
+  const [invDiscountMode, setInvDiscountMode] = useState<"Rs" | "%">("Rs");
+  const [custMatchOpen, setCustMatchOpen] = useState(false);
 
   // A frozen copy of the billing figures at the moment the invoice is
   // generated. markIssued() flips the selected jobs' status to "Delivered",
@@ -544,11 +613,19 @@ export default function RepairSales() {
         warranty: j.jobWarranty || "NO WARRANTY [NORMAL]",
         advance: j.advancePaid,
         unitPrice: j.estimatedCost,
-        discount: 0,
+        // Was hard-coded 0, so the column rendered a dash on every row and
+        // sales.discount recorded "none given" whatever happened at the counter.
+        // Applied here so grandTotal, totalDiscount, netDue and the invoice all
+        // follow from one place.
+        discount: Math.min(rowDiscounts[j.id] ?? 0, j.estimatedCost),
       }));
     const liveIds = new Set(live.map(r => r.id));
-    return [...live, ...COMPLETED_REPAIRS.filter(r => !liveIds.has(r.id))];
-  }, [jobs, dealers]);
+    return [
+      ...live,
+      ...COMPLETED_REPAIRS.filter(r => !liveIds.has(r.id))
+        .map(r => ({ ...r, discount: Math.min(rowDiscounts[r.id] ?? r.discount, r.unitPrice) })),
+    ];
+  }, [jobs, dealers, rowDiscounts]);
 
   const q = search.toLowerCase();
   const dealerRepairs = invoiceable.filter(r =>
@@ -563,9 +640,25 @@ export default function RepairSales() {
   const selectedRepairs = invoiceable.filter(r => checkedIds.has(r.id));
 
   // Billing calculations
-  const grandTotal    = selectedRepairs.reduce((s, r) => s + r.unitPrice - r.discount, 0);
+  const lineSubtotal  = selectedRepairs.reduce((s, r) => s + r.unitPrice, 0);
+  const lineDiscounts = selectedRepairs.reduce((s, r) => s + r.discount, 0);
+  // What the lines come to before anything is taken off the bill as a whole.
+  const afterLines    = lineSubtotal - lineDiscounts;
+
+  // Clamped to the bill: a percentage cannot exceed 100 and an amount cannot
+  // exceed what is left, or the invoice ends up owing the customer money.
+  const invDiscountAmt = Math.max(0, Math.min(
+    invDiscountMode === "%"
+      ? Math.round(afterLines * Math.min(100, parseFloat(invDiscount) || 0)) / 100
+      : parseFloat(invDiscount) || 0,
+    afterLines,
+  ));
+
+  const grandTotal    = afterLines - invDiscountAmt;
   const totalAdvance  = selectedRepairs.reduce((s, r) => s + r.advance, 0);
-  const totalDiscount = selectedRepairs.reduce((s, r) => s + r.discount, 0);
+  // Everything the customer was let off, whichever level it was given at —
+  // this is what sales.discount records and what the margin reports read.
+  const totalDiscount = lineDiscounts + invDiscountAmt;
   const netDue        = Math.max(0, grandTotal - totalAdvance);
 
   // Amount received now — empty defaults to full net due (no credit)
@@ -574,7 +667,9 @@ export default function RepairSales() {
   const finalDue          = Math.max(0, netDue - effectiveReceived);
   const isCredit          = finalDue > 0;
   const isManoMobile      = isInHouseDealer(dealers, selectedDealer);
-  const useCreditPicker   = isManoMobile && isCredit;
+  // Written off means nothing goes on account, so there is no account to pick
+  // — the customer section goes back to plain name and number.
+  const useCreditPicker   = isManoMobile && isCredit && !writeOffBalance;
 
   // Identity comes from the Admin Control registry; the stats come from live
   // jobs, falling back to the canned figures for the demo-only dealers.
@@ -629,11 +724,46 @@ export default function RepairSales() {
     setBillToDealer(on);
   };
 
+  /**
+   * Everyone the shop has taken a repair from.
+   *
+   * There is no customers table — a customer exists as a name and a number on
+   * each job — so this is built from the jobs themselves, one entry per phone
+   * number with the most recent spelling of the name. Without it a returning
+   * customer is retyped every visit, which is both slower and how one person
+   * ends up on the books three times under three spellings.
+   */
+  const knownCustomers = useMemo(() => {
+    const byPhone = new Map<string, { name: string; phone: string; email?: string; jobs: number }>();
+    // Oldest first, so the newest spelling of a name wins.
+    for (const j of [...jobs].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+      const phone = (j.phone ?? "").replace(/\D/g, "");
+      const name = (j.customerName ?? "").trim();
+      if (!phone || !name) continue;
+      const prev = byPhone.get(phone);
+      byPhone.set(phone, {
+        name,
+        phone: j.phone,
+        email: j.customerEmail || prev?.email,
+        jobs: (prev?.jobs ?? 0) + 1,
+      });
+    }
+    return [...byPhone.values()];
+  }, [jobs]);
+
+  // Matched on whichever field is being typed. Hidden once the name is already
+  // filled in from a match, so it does not hover over a finished form.
+  const custQuery = `${custName} ${custPhone}`.trim().toLowerCase();
+  const custMatches = custQuery.length < 3 ? [] : knownCustomers.filter(c =>
+    c.name.toLowerCase().includes(custName.trim().toLowerCase() || "\u0000") ||
+    (custPhone.trim() && c.phone.replace(/\D/g, "").includes(custPhone.replace(/\D/g, ""))),
+  ).slice(0, 5);
+
   const showStep3 = !!selectedDealer && checkedIds.size > 0;
 
   const canGenerate = showStep3 &&
     (useCreditPicker ? !!selectedCreditCustomer : !!custName.trim()) &&
-    (!isManoMobile || (termsAccepted && signature.trim() !== ""));
+    true;
 
   // Effective customer for invoice
   const invoiceCustomer = useCreditPicker && selectedCreditCustomer
@@ -654,8 +784,10 @@ export default function RepairSales() {
     setSelectedDealer(""); setCheckedIds(new Set()); setSearch("");
     setBillToDealer(false); manualCustomer.current = { name: "", phone: "", nic: "" };
     setCustName(""); setCustPhone(""); setCustNic(""); setAmountReceived("");
+    setRowDiscounts({}); setWriteOffBalance(false); setInvDiscount("");
+    setPayMethod("Cash"); setCardRef("");
     setSelectedCreditCustomer(null); setShowCreditConfirm(false); setCreditRecordMade(false);
-    setTermsAccepted(false); setSignature(""); setInvoiceSnapshot(null); setView("search");
+    setInvoiceSnapshot(null); setView("search");
     setInvoiceNo(null);
   };
 
@@ -664,8 +796,10 @@ export default function RepairSales() {
     // The filled-in details belong to the dealer being left behind.
     setBillToDealer(false); manualCustomer.current = { name: "", phone: "", nic: "" };
     setCustName(""); setCustPhone(""); setCustNic(""); setAmountReceived("");
+    setRowDiscounts({}); setWriteOffBalance(false); setInvDiscount("");
+    setPayMethod("Cash"); setCardRef("");
     setSelectedCreditCustomer(null); setShowCreditConfirm(false); setCreditRecordMade(false);
-    setTermsAccepted(false); setSignature(""); setInvoiceSnapshot(null);
+    setInvoiceSnapshot(null);
     setInvoiceNo(null);
   };
 
@@ -693,12 +827,19 @@ export default function RepairSales() {
         total: snap.grandTotal,
         subtotal: snap.grandTotal + snap.totalDiscount,
         discountAmount: snap.totalDiscount,
+        // What was billed and then forgiven, as opposed to what was knocked off
+        // the price before billing. Different decisions, different reporting.
+        badDebt: snap.badDebt,
         // Everything the customer has actually handed over against this bill:
         // whatever was taken as an advance at intake, plus what was taken now.
         // The rest is the balance the credit charge covers.
         paid: snap.totalAdvance + snap.effectiveReceived,
         status: "Paid",
-        paymentMethod: snap.isCredit ? "Credit" : "Cash",
+        // Credit describes where the balance went, not how the money arrived,
+        // so it only wins when there is actually a balance going on account.
+        paymentMethod: snap.isCredit && snap.badDebt === 0 ? "Credit" : snap.payMethod,
+        cardRef: snap.cardRef || undefined,
+        cardAmount: snap.payMethod === "Card" ? snap.effectiveReceived : undefined,
         cashier: profile?.fullName?.trim() || undefined,
       },
       // What the printed invoice cannot carry: which dealer it was billed to,
@@ -722,6 +863,11 @@ export default function RepairSales() {
     finalDue,
     grandTotal,
     totalDiscount,
+    lineDiscounts,
+    invoiceDiscount: invDiscountAmt,
+    badDebt: writeOffBalance ? finalDue : 0,
+    payMethod,
+    cardRef,
     isCredit,
     customerName: invoiceCustomer.name,
     customerPhone: invoiceCustomer.phone,
@@ -742,15 +888,28 @@ export default function RepairSales() {
    */
   const markIssued = async () => {
     const nowISO = new Date().toISOString();
-    await Promise.all(selectedRepairs.map(r =>
+    // Spread across the jobs on the invoice, largest first, so a multi-job bill
+    // writes off against real lines rather than dumping it all on the first.
+    const remaining = { left: writeOffBalance ? finalDue : 0 };
+    const forgiven = (r: CompletedRepair) => {
+      if (remaining.left <= 0) return 0;
+      const owed = Math.max(0, (r.unitPrice - r.discount) - r.advance);
+      const take = Math.min(owed, remaining.left);
+      remaining.left -= take;
+      return take;
+    };
+    await Promise.all([...selectedRepairs]
+      .sort((a, b) => (b.unitPrice - b.discount - b.advance) - (a.unitPrice - a.discount - a.advance))
+      .map(r =>
       updateJob(r.id, {
+        writtenOff: forgiven(r),
         status: "Delivered",
         handover: {
           collectedBy: invoiceCustomer.name || r.customerName,
           relationship: "Owner",
           idVerified: true,
           balanceSettled: effectiveReceived,
-          handoverSignature: isManoMobile ? signature : "",
+          handoverSignature: "",
           warrantyCardIssued: false,
           handedOverBy: "Cashier",
           handedOverAt: nowISO,
@@ -770,7 +929,7 @@ export default function RepairSales() {
     const snap = takeSnapshot();
     setInvoiceSnapshot(snap);
     await markIssued();
-    if (!isManoMobile && isCredit) {
+    if (!isManoMobile && isCredit && !writeOffBalance) {
       // The sale is recorded from the confirm modal, which renders after the
       // flip — so it uses invoiceSnapshot, set just above, not live state.
       setShowCreditConfirm(true);
@@ -811,6 +970,7 @@ export default function RepairSales() {
         amountReceivedNow={invoiceSnapshot.effectiveReceived}
         dueAmount={invoiceSnapshot.finalDue}
         totalAdvance={invoiceSnapshot.totalAdvance}
+        invoiceDiscount={invoiceSnapshot.invoiceDiscount}
         creditRecordMade={creditRecordMade}
         repairs={invoiceSnapshot.repairs}
         onBack={() => setView("search")}
@@ -869,10 +1029,15 @@ export default function RepairSales() {
               No completed repairs found
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 800 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 940 }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
-                  {["", "Job ID", "Customer", "Brand / Model", "IMEI No.", "Warranty", "Unit Price", "Discount", "Line Total"].map(h => (
+                  {/* Advance and Balance sit after the line total because that
+                      is the order the money moved: what the job was billed at,
+                      what the customer already put down at intake, and what is
+                      left to collect at the counter now. Without them, deciding
+                      what to charge meant opening every job. */}
+                  {["", "Job ID", "Customer", "Brand / Model", "IMEI No.", "Warranty", "Unit Price", "Discount", "Line Total", "Advance Paid", "Balance"].map(h => (
                     <th key={h} style={{ padding: "9px 14px", textAlign: h === "" ? "center" : "left", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.06em", textTransform: "uppercase" as const, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -881,6 +1046,10 @@ export default function RepairSales() {
                 {dealerRepairs.map((r, i) => {
                   const checked   = checkedIds.has(r.id);
                   const lineTotal = r.unitPrice - r.discount;
+                  // Never negative: an advance larger than the final bill is a
+                  // refund, not a balance, and showing it as "− Rs. 200 to
+                  // collect" would read as money owed to the shop.
+                  const balance   = Math.max(0, lineTotal - r.advance);
                   return (
                     <tr
                       key={r.id}
@@ -898,13 +1067,58 @@ export default function RepairSales() {
                       <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "monospace" }}>{r.imei}</span></td>
                       <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 11.5, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.warranty}</span></td>
                       <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 12, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Rs. {r.unitPrice.toLocaleString()}</span></td>
-                      <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 12, color: r.discount > 0 ? "#f87171" : "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.discount > 0 ? `− Rs. ${r.discount.toLocaleString()}` : "—"}</span></td>
+                      <td style={{ padding: "11px 14px" }} onClick={e => { if (mayDiscount) e.stopPropagation(); }}>
+                        {mayDiscount ? (
+                          <input
+                            type="number"
+                            min={0}
+                            max={r.unitPrice}
+                            value={rowDiscounts[r.id] ?? ""}
+                            placeholder="0"
+                            onChange={e => {
+                              const v = Math.max(0, Math.min(parseFloat(e.target.value) || 0, r.unitPrice));
+                              setRowDiscounts(d => {
+                                if (v === 0) { const rest = { ...d }; delete rest[r.id]; return rest; }
+                                return { ...d, [r.id]: v };
+                              });
+                            }}
+                            style={{
+                              width: 92, padding: "5px 8px", borderRadius: 7, fontSize: 12,
+                              border: `1px solid ${r.discount > 0 ? "rgba(248,113,113,0.45)" : "var(--border)"}`,
+                              background: "var(--bg-primary)",
+                              color: r.discount > 0 ? "#f87171" : "var(--text-primary)",
+                              fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none",
+                            }}
+                          />
+                        ) : (
+                          <span style={{ fontSize: 12, color: r.discount > 0 ? "#f87171" : "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                            {r.discount > 0 ? `− Rs. ${r.discount.toLocaleString()}` : "—"}
+                          </span>
+                        )}
+                      </td>
                       <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Rs. {lineTotal.toLocaleString()}</span></td>
+                      <td style={{ padding: "11px 14px" }}>
+                        <span style={{ fontSize: 12, color: r.advance > 0 ? "#4ade80" : "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                          {r.advance > 0 ? `Rs. ${r.advance.toLocaleString()}` : "—"}
+                        </span>
+                      </td>
+                      <td style={{ padding: "11px 14px" }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: balance > 0 ? "var(--text-primary)" : "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                          {balance > 0 ? `Rs. ${balance.toLocaleString()}` : "Settled"}
+                        </span>
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+          )}
+
+          {!mayDiscount && dealerRepairs.length > 0 && (
+            <p style={{ fontSize: 11.5, color: "var(--text-muted)", padding: "10px 14px 0", lineHeight: 1.55, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              Discounts are locked for your account. An Admin can grant{" "}
+              <strong>Settle below the agreed price</strong> under Permissions → Cashiers.
+            </p>
           )}
         </div>
       </div>
@@ -920,101 +1134,199 @@ export default function RepairSales() {
             <InvoiceNoBadge refreshKey={invoiceNo} />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))", gap: 16, alignItems: "start" }}>
 
             {/* ── Bill Info ── */}
-            <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 0 }}>
+            <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 0 }}>
               <div style={cardHead}>Bill Info</div>
 
               {/* Selected items */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 13 }}>
                 {selectedRepairs.map(r => (
-                  <div key={r.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                  <div key={r.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                     <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "60%" }}>{r.id} · {r.brand} {r.model}</span>
                     <span style={{ fontWeight: 600, color: "var(--text-primary)", flexShrink: 0 }}>Rs. {(r.unitPrice - r.discount).toLocaleString()}</span>
                   </div>
                 ))}
               </div>
 
-              <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                 {[
-                  { label: "Subtotal",       value: fmtRs(selectedRepairs.reduce((s, r) => s + r.unitPrice, 0)), color: "var(--text-primary)" },
-                  { label: "Total Discount", value: totalDiscount > 0 ? `− Rs. ${totalDiscount.toLocaleString()}` : "—", color: totalDiscount > 0 ? "#f87171" : "var(--text-muted)" },
-                  { label: "Net Total",      value: fmtRs(grandTotal), color: "var(--text-primary)" },
+                  { label: "Subtotal",        value: fmtRs(lineSubtotal), color: "var(--text-primary)" },
+                  // Shown apart, not summed, because they answer different
+                  // questions later: what was conceded on the work, and what
+                  // was conceded on the relationship.
+                  { label: "Line Discounts",  value: lineDiscounts > 0 ? `− Rs. ${lineDiscounts.toLocaleString()}` : "—", color: lineDiscounts > 0 ? "#f87171" : "var(--text-muted)" },
+                  { label: "Invoice Discount", value: invDiscountAmt > 0 ? `− Rs. ${invDiscountAmt.toLocaleString()}` : "—", color: invDiscountAmt > 0 ? "#f87171" : "var(--text-muted)" },
+                  { label: "Net Total",       value: fmtRs(grandTotal), color: "var(--text-primary)" },
                   { label: "Advance Paid",   value: totalAdvance > 0 ? `− Rs. ${totalAdvance.toLocaleString()}` : "—", color: totalAdvance > 0 ? "#4ade80" : "var(--text-muted)" },
-                ].map(row => (
-                  <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                    <span style={{ color: "var(--text-muted)" }}>{row.label}</span>
-                    <span style={{ fontWeight: 600, color: row.color }}>{row.value}</span>
+                ].map(row => {
+                  const lead = row.label === "Net Total";
+                  return (
+                    <div key={row.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: lead ? 14 : 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                      <span style={{ color: lead ? "var(--text-secondary)" : "var(--text-muted)", fontWeight: lead ? 600 : 400 }}>{row.label}</span>
+                      <span style={{ fontWeight: lead ? 800 : 600, color: row.color }}>{row.value}</span>
+                    </div>
+                  );
+                })}
+
+                {/* Discount on the whole bill */}
+                {mayDiscount && (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 6, marginBottom: 2 }}>
+                    <span style={{ color: "var(--text-muted)" }}>Discount whole invoice</span>
+                    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                      <div style={{ display: "flex", gap: 2, background: "var(--bg-primary)", border: "1px solid var(--border)", borderRadius: 6, padding: 2 }}>
+                        {(["Rs", "%"] as const).map(m => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setInvDiscountMode(m)}
+                            style={{
+                              padding: "4px 9px", borderRadius: 5, fontSize: 12, cursor: "pointer",
+                              border: "none", fontFamily: "'Plus Jakarta Sans', sans-serif",
+                              fontWeight: invDiscountMode === m ? 700 : 500,
+                              background: invDiscountMode === m ? "var(--accent-dim)" : "transparent",
+                              color: invDiscountMode === m ? "var(--accent)" : "var(--text-muted)",
+                            }}
+                          >
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        max={invDiscountMode === "%" ? 100 : afterLines}
+                        value={invDiscount}
+                        placeholder="0"
+                        onChange={e => setInvDiscount(e.target.value)}
+                        style={{ width: 86, padding: "6px 9px", borderRadius: 7, border: `1px solid ${invDiscountAmt > 0 ? "rgba(248,113,113,0.45)" : "var(--border)"}`, background: "var(--bg-primary)", color: invDiscountAmt > 0 ? "#f87171" : "var(--text-primary)", fontSize: 13, outline: "none", textAlign: "right", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+                      />
+                    </div>
                   </div>
-                ))}
+                )}
 
                 {/* Balance after advance */}
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif", paddingTop: 6, borderTop: "1px solid var(--border)", marginTop: 2 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 16, fontWeight: 800, fontFamily: "'Plus Jakarta Sans', sans-serif", paddingTop: 10, borderTop: "1px solid var(--border)", marginTop: 8 }}>
                   <span style={{ color: "var(--text-secondary)" }}>Balance Due</span>
                   <span style={{ color: "var(--text-primary)" }}>Rs. {netDue.toLocaleString()}</span>
                 </div>
+              </div>
+            </div>
+
+            {/* ── Payment ── */}
+            <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={cardHead}>Payment</div>
+
+              <div>
+                <label style={labelSt}>Method</label>
+                <div style={{ display: "flex", gap: 5 }}>
+                  {(["Cash", "Card", "Bank Transfer"] as const).map(m => {
+                    const on = payMethod === m;
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setPayMethod(m)}
+                        style={{
+                          flex: 1, minHeight: 34, borderRadius: 8, fontSize: 11.5, cursor: "pointer",
+                          fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: on ? 700 : 500,
+                          border: `1px solid ${on ? "var(--accent)" : "var(--border)"}`,
+                          background: on ? "var(--accent-dim)" : "var(--bg-primary)",
+                          color: on ? "var(--accent)" : "var(--text-secondary)",
+                          whiteSpace: "nowrap", padding: "0 6px",
+                        }}
+                      >
+                        {m === "Bank Transfer" ? "Transfer" : m}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {payMethod !== "Cash" && (
+                <div>
+                  <label style={labelSt}>{payMethod === "Card" ? "Card reference / last 4" : "Transfer reference"}</label>
+                  <input value={cardRef} onChange={e => setCardRef(e.target.value)} placeholder="Optional" style={inputSt} />
+                </div>
+              )}
+
 
                 {/* Amount received now — editable */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4 }}>
-                  <span style={{ color: "var(--text-muted)" }}>Amount Received Now</span>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4 }}>
+                  <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>Amount Received Now</span>
                   <input
                     type="number" min={0} max={netDue}
                     value={receivedDisplay}
                     onChange={e => setAmountReceived(e.target.value)}
-                    style={{ width: 110, padding: "4px 8px", borderRadius: 6, border: `1px solid ${isCredit ? "rgba(251,191,36,0.5)" : "rgba(74,222,128,0.4)"}`, background: "var(--bg-primary)", color: "var(--text-primary)", fontSize: 12, outline: "none", textAlign: "right", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+                    style={{ width: 120, padding: "7px 10px", borderRadius: 7, border: `1px solid ${isCredit ? "rgba(251,191,36,0.5)" : "rgba(74,222,128,0.4)"}`, background: "var(--bg-primary)", color: "var(--text-primary)", fontSize: 14, fontWeight: 700, outline: "none", textAlign: "right", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
                   />
                 </div>
 
+                {/* Offered only when there is something left to forgive, and only
+                    to somebody trusted to take money off a bill — it is the same
+                    decision as a discount, made after billing instead of before. */}
+                {isCredit && mayDiscount && (
+                  <label style={{
+                    display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer",
+                    marginTop: 8, padding: "8px 10px", borderRadius: 8,
+                    background: writeOffBalance ? "rgba(251,191,36,0.08)" : "var(--bg-primary)",
+                    border: `1px solid ${writeOffBalance ? "rgba(251,191,36,0.4)" : "var(--border)"}`,
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={writeOffBalance}
+                      onChange={e => setWriteOffBalance(e.target.checked)}
+                      style={{ width: 14, height: 14, accentColor: "#fbbf24", cursor: "pointer", flexShrink: 0, marginTop: 1 }}
+                    />
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", display: "block" }}>
+                        Write off Rs. {finalDue.toLocaleString()} as bad debt
+                      </span>
+                      <span style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
+                        Nothing goes on account and no credit record is opened. The job settles here.
+                      </span>
+                    </span>
+                  </label>
+                )}
+
                 <div style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 8 }}>
-                  {isCredit ? (
+                  {isCredit && writeOffBalance ? (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        <Undo2 size={12} color="#fbbf24" />
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#fbbf24", letterSpacing: "0.04em" }}>WRITTEN OFF</span>
+                      </div>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: "#fbbf24" }}>Rs. {finalDue.toLocaleString()}</span>
+                    </div>
+                  ) : isCredit ? (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.3)" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                         <CreditCard size={12} color="#fbbf24" />
-                        <span style={{ fontSize: 11, fontWeight: 700, color: "#fbbf24", letterSpacing: "0.04em" }}>CREDIT DUE</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#fbbf24", letterSpacing: "0.04em" }}>CREDIT DUE</span>
                       </div>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#fbbf24" }}>Rs. {finalDue.toLocaleString()}</span>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: "#fbbf24" }}>Rs. {finalDue.toLocaleString()}</span>
                     </div>
                   ) : (
                     <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", borderRadius: 8, background: "rgba(74,222,128,0.07)", border: "1px solid rgba(74,222,128,0.25)" }}>
                       <CheckCircle size={12} color="#4ade80" />
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "#4ade80" }}>FULLY SETTLED</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 700, color: "#4ade80" }}>FULLY SETTLED</span>
                     </div>
                   )}
                 </div>
 
-                {isCredit && (
-                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 6, lineHeight: 1.5 }}>
+                {isCredit && !writeOffBalance && (
+                  <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 8, lineHeight: 1.55 }}>
                     {isManoMobile
                       ? "Due amount will be credited to the selected customer's credit profile."
                       : "Due amount will be logged against the dealer's outstanding balance."}
                   </p>
                 )}
-              </div>
             </div>
 
-            {/* ── Dealer Info  OR  Terms & Signature (Mano Mobile) ── */}
-            {isManoMobile ? (
-              <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={cardHead}>Terms &amp; Signature</div>
-                <div style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
-                  <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.65, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                    <li>I have received the device(s) in working order.</li>
-                    <li>Warranty applies only to the repair work listed on this receipt.</li>
-                    <li>The shop is not liable for any data loss during repair.</li>
-                    <li>Devices uncollected after 90 days may be disposed of to recover costs.</li>
-                  </ul>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9, cursor: "pointer" }}>
-                    <div onClick={() => setTermsAccepted(v => !v)} style={{ width: 17, height: 17, borderRadius: 5, border: `2px solid ${termsAccepted ? "var(--accent)" : "var(--border)"}`, background: termsAccepted ? "var(--accent)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      {termsAccepted && <span style={{ color: "var(--accent-fg)", fontSize: 10, fontWeight: 700 }}>✓</span>}
-                    </div>
-                    <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Customer accepts the terms above</span>
-                  </label>
-                </div>
-                <SignaturePad value={signature} onChange={setSignature} label="Customer Signature *" height={120} />
-              </div>
-            ) : (
-            <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+            {/* ── Dealer Info ── */}
+            {!isManoMobile && (
+            <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={cardHead}>Dealer Info</div>
 
               {/* Dealer identity */}
@@ -1079,7 +1391,7 @@ export default function RepairSales() {
             )}
 
             {/* ── Customer Info ── */}
-            <div style={{ background: "var(--bg-secondary)", border: `1px solid ${useCreditPicker ? "rgba(251,191,36,0.3)" : "var(--border)"}`, borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ background: "var(--bg-secondary)", border: `1px solid ${useCreditPicker ? "rgba(251,191,36,0.3)" : "var(--border)"}`, borderRadius: 10, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 11 }}>
               <div style={{ ...cardHead, color: useCreditPicker ? "#fbbf24" : "var(--text-muted)" }}>
                 Customer Info
                 {useCreditPicker && <span style={{ marginLeft: 6, fontSize: 9, color: "#fbbf24" }}>· CREDIT REQUIRED</span>}
@@ -1120,21 +1432,65 @@ export default function RepairSales() {
                     </label>
                   )}
 
-                  <div>
+                  <div style={{ position: "relative" }}>
                     <label style={labelSt}>Full Name *</label>
                     <input
                       value={custName}
-                      onChange={e => setCustName(e.target.value)}
+                      onChange={e => { setCustName(e.target.value); setCustMatchOpen(true); }}
+                      onFocus={() => setCustMatchOpen(true)}
+                      // A blur that fires before the click on a suggestion would
+                      // close the list out from under the pointer.
+                      onBlur={() => setTimeout(() => setCustMatchOpen(false), 150)}
                       readOnly={billToDealer}
                       placeholder="Customer full name"
+                      autoComplete="off"
                       style={{ ...inputSt, ...(billToDealer ? lockedSt : null) }}
                     />
+
+                    {!billToDealer && custMatchOpen && custMatches.length > 0 && (
+                      <div style={{
+                        position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20, marginTop: 4,
+                        background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 9,
+                        boxShadow: "0 12px 32px rgba(0,0,0,0.35)", overflow: "hidden",
+                      }}>
+                        {custMatches.map(c => (
+                          <button
+                            key={c.phone}
+                            type="button"
+                            onMouseDown={e => e.preventDefault()}
+                            onClick={() => {
+                              setCustName(c.name);
+                              setCustPhone(c.phone);
+                              setCustMatchOpen(false);
+                            }}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 10, width: "100%",
+                              padding: "8px 11px", background: "transparent", border: "none",
+                              borderBottom: "1px solid var(--border)", cursor: "pointer", textAlign: "left",
+                              fontFamily: "'Plus Jakarta Sans', sans-serif",
+                            }}
+                            onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-card-hover)"}
+                            onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = "transparent"}
+                          >
+                            <BookUser size={12} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                            <span style={{ flex: 1, minWidth: 0 }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block" }}>{c.name}</span>
+                              <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>
+                                {c.phone} · {c.jobs} {c.jobs === 1 ? "repair" : "repairs"}
+                              </span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label style={labelSt}>Phone</label>
                     <input
                       value={custPhone}
-                      onChange={e => setCustPhone(e.target.value)}
+                      onChange={e => { setCustPhone(e.target.value); setCustMatchOpen(true); }}
+                      onFocus={() => setCustMatchOpen(true)}
+                      onBlur={() => setTimeout(() => setCustMatchOpen(false), 150)}
                       readOnly={billToDealer}
                       placeholder={billToDealer ? "No contact number on the dealer record" : "07X XXX XXXX"}
                       style={{ ...inputSt, ...(billToDealer ? lockedSt : null) }}

@@ -4,10 +4,11 @@ import { useState } from "react";
 import { sidebarData } from "@/cashier/data/sidebarData";
 import { roleMenus } from "@/cashier/data/sidebarRoles";
 import { motion } from "framer-motion";
-import { ChevronLeft, ChevronRight, Smartphone } from "lucide-react";
+import { ChevronLeft, ChevronRight, Smartphone, LogOut } from "lucide-react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useMyModuleAccess } from "@/lib/settings/moduleAccess";
 import { useMyPermissions } from "@/lib/settings/staffRules";
+import { useAuth } from "@/lib/auth/AuthContext";
 
 /**
  * Which Permissions module each nav item belongs to.
@@ -66,6 +67,16 @@ export default function Sidebar({ activePage, onNavigate, isOpen = false, onClos
   // False until it has loaded, so the settings screen never flashes up for
   // somebody who is about to lose it.
   const { isAdminCashier } = useMyPermissions();
+  /**
+   * Who is at this till, and the way out.
+   *
+   * The technician, admin and accounts shells all end their sidebar with this;
+   * the cashier one ended at the collapse toggle, so the only person who could
+   * not sign out was the one whose shift actually changes hands mid-day. A
+   * till nobody can hand over is a till that stays signed in as whoever opened
+   * the shop.
+   */
+  const { profile, signOut } = useAuth();
 
   const menuItems = sidebarData
     .filter((item) => roleMenus[userRole].includes(item.title))
@@ -216,6 +227,72 @@ export default function Sidebar({ activePage, onNavigate, isOpen = false, onClos
             );
           })}
         </nav>
+
+        {/* Who is signed in, and the way out */}
+        {profile && (
+          <div style={{ padding: "12px 12px 0" }}>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: collapsed && !isMobile ? "10px 0" : "10px",
+              justifyContent: collapsed && !isMobile ? "center" : "flex-start",
+              background: "var(--bg-card)", borderRadius: 10, border: "1px solid var(--border)",
+            }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: 9, flexShrink: 0,
+                background: "var(--accent-dim)", border: "1px solid var(--accent-glow)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 14, fontWeight: 800, color: "var(--accent)",
+              }}>
+                {(profile.fullName || profile.email || "?").charAt(0).toUpperCase()}
+              </div>
+
+              {(!collapsed || isMobile) && (
+                <>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {profile.fullName || profile.email}
+                    </p>
+                    {/* The role, not the shell. The tab already says "Cashier"
+                        for anyone standing here; what matters is which account
+                        the database is actually seeing. */}
+                    <p style={{ fontSize: 10, color: "var(--text-muted)" }}>{profile.role}</p>
+                  </div>
+
+                  <button
+                    onClick={() => { void signOut().then(() => window.location.assign("/")); }}
+                    title="Log out"
+                    style={{
+                      background: "none", border: "none", cursor: "pointer", padding: 5,
+                      borderRadius: 6, color: "var(--text-muted)", flexShrink: 0,
+                      transition: "color 0.15s, background 0.15s",
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = "#f87171"; (e.currentTarget as HTMLButtonElement).style.background = "rgba(248,113,113,0.1)"; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = "var(--text-muted)"; (e.currentTarget as HTMLButtonElement).style.background = "none"; }}
+                  >
+                    <LogOut size={14} />
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* Collapsed to an icon rail, the row above has no room for a
+                button — so the sign-out becomes the whole tile. */}
+            {collapsed && !isMobile && (
+              <button
+                onClick={() => { void signOut().then(() => window.location.assign("/")); }}
+                title={`Log out ${profile.fullName || ""}`.trim()}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: "100%", marginTop: 6, padding: "8px 0", borderRadius: 8,
+                  background: "transparent", border: "1px solid var(--border)",
+                  color: "var(--text-muted)", cursor: "pointer",
+                }}
+              >
+                <LogOut size={14} />
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Collapse toggle (desktop only) */}
         {!isMobile && (

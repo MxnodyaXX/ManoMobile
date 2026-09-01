@@ -18,12 +18,13 @@ import { useAuth } from "@/lib/auth/AuthContext";
 import { postJobToCredit } from "@/lib/credit/api";
 import { useSales } from "@/cashier/contexts/SalesContext";
 import { usePersistInvoiceDocument } from "@/lib/sales/invoiceDoc";
+import { useTechnicians } from "@/lib/repair/technicians";
 import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 import {
   Search, Filter, ChevronDown, MoreHorizontal,
   CheckCircle, Clock, AlertCircle, XCircle, Wrench,
   X, CheckSquare, Send, Printer, ShieldCheck, CreditCard,
-  Truck, Ban, FileText, Package, Tag, Info,
+  Truck, Ban, FileText, Package, Tag, Info, Save, Pencil,
 } from "lucide-react";
 
 interface FinishJobData {
@@ -907,7 +908,7 @@ function PickupModal({ job, onClose, onConfirm }: {
 
 // ─── Job Details Modal ────────────────────────────────────────────────────────
 
-function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, onPickup, onPrintSlip, mayCancel = true, mayCancelAny = false }: {
+function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, onPickup, onPrintSlip, mayCancel = true, mayCancelAny = false, mayEdit = false, onSave }: {
   job: RepairJob;
   onClose: () => void;
   onFinishJob: () => void;
@@ -920,12 +921,181 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
   /** True for an admin cashier, who may cancel a job at any stage — including
    *  one already completed or handed over. See canCancel below. */
   mayCancelAny?: boolean;
+  /** May this person correct the booked-in details? Admin-cashier plus the
+   *  "Correct job details" permission. Ctrl+E does nothing without it. */
+  mayEdit?: boolean;
+  onSave?: (patch: Partial<RepairJob>) => Promise<void> | void;
   onPickup: () => void;
   onPrintSlip: () => void;
 }) {
   const isMobile = useIsMobile();
   const { dealers } = useRepair();
   const dealerRecord = findDealer(dealers, job);
+  // The same roster intake and the bench read (profiles where role =
+  // Technician), so a name picked here is always one their queue recognises.
+  // Typed by hand it was not: a job assigned to "Wijaya kumar" belongs to
+  // nobody, because a queue is jobs.filter(j => j.technician === me).
+  const { technicians } = useTechnicians();
+
+  /**
+   * Correcting what was booked in.
+   *
+   * Deliberately behind a keystroke rather than a button. This modal is opened
+   * dozens of times a day to read a job — the customer is on the phone asking
+   * where their device is — and a visible Edit button on a record the customer
+   * signed invites a stray click into a field nobody meant to touch. Ctrl+E is
+   * something you have to mean.
+   *
+   * The draft is separate from the job until Save, so abandoning an edit leaves
+   * the record exactly as it was.
+   */
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Partial<RepairJob>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!mayEdit) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "e") {
+        // The browser has its own Ctrl+E on some platforms (search bar focus).
+        e.preventDefault();
+        setEditing(v => {
+          if (v) { setDraft({}); setSaveError(null); }
+          return !v;
+        });
+      }
+      if (e.key === "Escape" && editing) { setEditing(false); setDraft({}); setSaveError(null); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mayEdit, editing]);
+
+  const val = <K extends keyof RepairJob>(k: K): RepairJob[K] =>
+    (k in draft ? draft[k] : job[k]) as RepairJob[K];
+  const set = <K extends keyof RepairJob>(k: K, v: RepairJob[K]) =>
+    setDraft(d => ({ ...d, [k]: v }));
+
+  const dirty = Object.keys(draft).length > 0;
+
+  const commit = async () => {
+    if (!onSave || !dirty) { setEditing(false); setDraft({}); return; }
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onSave(draft);
+      setEditing(false);
+      setDraft({});
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /**
+   * The same, as a dropdown.
+   *
+   * A value that is not in the list is kept as an option of its own. These
+   * selects are bound to what a job was recorded with, and rosters change —
+   * a technician leaves, a dealer is removed. Dropping the current value
+   * because it is no longer on offer would silently blank the field and, on
+   * save, quietly reassign somebody else's job.
+   */
+  const choice = (label: string, k: keyof RepairJob, options: { value: string; text: string }[], grow?: boolean) => {
+    const shown = String(val(k) ?? "");
+    if (shown && !options.some(o => o.value === shown)) {
+      options = [{ value: shown, text: `${shown} (no longer listed)` }, ...options];
+    }
+    return (
+      <div key={String(k)} style={grow ? { gridColumn: "1 / -1" } : undefined}>
+        <label style={labelSt}>{label}</label>
+        {editing ? (
+          <select
+            value={shown}
+            onChange={e => set(k, e.target.value as RepairJob[typeof k])}
+            style={{ ...fieldBox, width: "100%", boxSizing: "border-box", background: "var(--bg-primary)", borderColor: "var(--accent-glow)", cursor: "pointer", outline: "none" }}
+          >
+            <option value="">— none —</option>
+            {options.map(o => <option key={o.value} value={o.value}>{o.text}</option>)}
+          </select>
+        ) : (
+          <div style={{ ...fieldBox, color: "var(--text-secondary)" }}>
+            {options.find(o => o.value === shown)?.text || shown || "—"}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  /**
+   * The intake tick-lists, bound to receivedItems.
+   *
+   * These were four hard-coded checkboxes that were always disabled, always
+   * unchecked, and connected to nothing — so an accessory handed in with the
+   * device was never actually recorded here. They read from the job now, and
+   * in edit mode they write to it.
+   */
+  const items: string[] = (val("receivedItems") as string[] | undefined) ?? [];
+  const toggleItem = (item: string) =>
+    set("receivedItems", (items.includes(item) ? items.filter(i => i !== item) : [...items, item]) as RepairJob["receivedItems"]);
+
+  /**
+   * The fault tick-list.
+   *
+   * There is no faults column — a job carries one free-text `issue`, and this
+   * grid has always been "does the text mention this word". Editing keeps that
+   * honest: ticking appends the fault name, unticking removes it, and the free
+   * text stays the record. Anything else would need a schema change to hold
+   * faults properly, which is a bigger decision than a checkbox.
+   */
+  const issueText = String(val("issue") ?? "");
+  const hasFault = (f: string) => issueText.toLowerCase().includes(f.toLowerCase());
+  const toggleFault = (f: string) => {
+    if (hasFault(f)) {
+      const cleaned = issueText
+        .split(/\s*,\s*/)
+        .filter(part => part.trim().toLowerCase() !== f.toLowerCase())
+        .join(", ");
+      set("issue", cleaned as RepairJob["issue"]);
+    } else {
+      set("issue", (issueText.trim() ? `${issueText.trim()}, ${f}` : f) as RepairJob["issue"]);
+    }
+  };
+
+  /**
+   * A field that reads as text until edit mode, then becomes an input.
+   *
+   * A function returning JSX, called inline — deliberately not a component.
+   * Declared inside render, a component is a new type on every pass, so React
+   * remounts it and the input loses focus after each keystroke.
+   */
+  const field = (label: string, k: keyof RepairJob, opts: { mono?: boolean; type?: string; grow?: boolean } = {}) => {
+    const { mono, type = "text", grow } = opts;
+    const shown = val(k);
+    return (
+      <div key={String(k)} style={grow ? { gridColumn: "1 / -1" } : undefined}>
+        <label style={labelSt}>{label}</label>
+        {editing ? (
+          <input
+            type={type}
+            value={(shown as string | number | undefined) ?? ""}
+            onChange={e => set(k, (type === "number" ? Number(e.target.value) : e.target.value) as RepairJob[typeof k])}
+            style={{
+              ...fieldBox, width: "100%", boxSizing: "border-box",
+              background: "var(--bg-primary)", borderColor: "var(--accent-glow)",
+              fontFamily: mono ? "monospace" : "'Plus Jakarta Sans', sans-serif",
+              outline: "none",
+            }}
+          />
+        ) : (
+          <div style={{ ...fieldBox, ...(mono ? { fontFamily: "monospace" } : null), color: "var(--text-secondary)" }}>
+            {(shown as string | number | undefined) || "—"}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const sc      = statusConfig[job.status];
   const StatusIcon = sc.icon;
@@ -1000,11 +1170,56 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                 <Ban size={11} />{isOverride ? "Cancel (override)" : "Cancel"}
               </button>
             )}
+            {editing && (
+              <>
+                <button
+                  onClick={() => { setEditing(false); setDraft({}); setSaveError(null); }}
+                  style={{ padding: "6px 12px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+                >
+                  Discard
+                </button>
+                <button
+                  onClick={commit}
+                  disabled={saving || !dirty}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5, padding: "6px 14px", borderRadius: 7,
+                    fontSize: 11.5, fontWeight: 700, border: "1px solid var(--accent)",
+                    background: "var(--accent)", color: "var(--accent-fg)",
+                    cursor: saving || !dirty ? "not-allowed" : "pointer",
+                    opacity: saving || !dirty ? 0.5 : 1,
+                    fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  }}
+                >
+                  <Save size={11} />{saving ? "Saving…" : "Save changes"}
+                </button>
+              </>
+            )}
             <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <X size={14} />
             </button>
           </div>
         </div>
+
+        {/* How to unlock it, and what it means once unlocked. Shown only to
+            somebody who can actually do it — telling everyone else about a
+            shortcut that does nothing is worse than saying nothing. */}
+        {mayEdit && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8, padding: "8px 20px",
+            borderBottom: "1px solid var(--border)",
+            background: editing ? "rgba(167,139,250,0.08)" : "var(--bg-secondary)",
+          }}>
+            <Pencil size={11} style={{ color: editing ? "var(--accent)" : "var(--text-muted)", flexShrink: 0 }} />
+            <p style={{ fontSize: 11.5, color: editing ? "var(--accent)" : "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
+              {editing
+                ? "Editing the intake record. Esc or Ctrl+E to discard."
+                : <>Press <strong>Ctrl+E</strong> to correct these details.</>}
+            </p>
+            {saveError && (
+              <p style={{ fontSize: 11.5, color: "#f87171", marginLeft: "auto", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{saveError}</p>
+            )}
+          </div>
+        )}
 
         {/* Body */}
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
@@ -1016,8 +1231,26 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
               <div style={secHead}>Job details</div>
               <div style={{ marginBottom: 8 }}>
                 <label style={labelSt}>Dealer</label>
-                <div style={{ ...fieldBox, color: "var(--text-secondary)" }}>{dealerRecord?.name || job.dealer || IN_HOUSE_DEALER}</div>
-                {dealerRecord && (dealerRecord.address || dealerRecord.contact) && (
+                {editing ? (
+                  <select
+                    value={String(val("dealerId") ?? "")}
+                    onChange={e => {
+                      const d = (dealers ?? []).find(x => String(x.id) === e.target.value);
+                      // Both, together. The name is what gets printed on slips
+                      // and the id is what everything else joins on; changing
+                      // one without the other leaves a job that says one dealer
+                      // and reports as another.
+                      setDraft(prev => ({ ...prev, dealerId: d ? Number(d.id) : undefined, dealer: d?.name ?? IN_HOUSE_DEALER }));
+                    }}
+                    style={{ ...fieldBox, width: "100%", boxSizing: "border-box", background: "var(--bg-primary)", borderColor: "var(--accent-glow)", cursor: "pointer", outline: "none" }}
+                  >
+                    <option value="">{IN_HOUSE_DEALER}</option>
+                    {(dealers ?? []).map(d => <option key={d.id} value={String(d.id)}>{d.name}</option>)}
+                  </select>
+                ) : (
+                  <div style={{ ...fieldBox, color: "var(--text-secondary)" }}>{dealerRecord?.name || job.dealer || IN_HOUSE_DEALER}</div>
+                )}
+                {!editing && dealerRecord && (dealerRecord.address || dealerRecord.contact) && (
                   <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                     {[dealerRecord.address, dealerRecord.contact].filter(Boolean).join(" · ")}
                   </p>
@@ -1028,28 +1261,27 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                   <label style={labelSt}>Internal number</label>
                   <div style={{ ...fieldBox, color: "var(--accent)", fontWeight: 600 }}>{job.id}</div>
                 </div>
-                <div>
-                  <label style={labelSt}>Dealer Job number</label>
-                  <div style={{ ...fieldBox, color: "var(--text-muted)", fontStyle: "italic" }}>—</div>
-                </div>
+                {/* This showed a hard-coded dash — the dealer's own docket
+                    number was stored and never displayed. */}
+                {field("Dealer Job number", "dealerJobNo")}
               </div>
-              <div>
-                <label style={labelSt}>Agent</label>
-                <div style={{ ...fieldBox, color: "var(--text-secondary)" }}>{job.technician}</div>
-              </div>
+              {choice(
+                "Agent",
+                "technician",
+                technicians.map(t => ({
+                  value: t.name,
+                  // Suspended staff stay pickable — they may still be holding
+                  // the job — but the list says so rather than hiding it.
+                  text: t.available ? t.name : `${t.name} (inactive)`,
+                })),
+              )}
             </div>
 
             <div>
               <div style={secHead}>Owner data</div>
               <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
-                <div>
-                  <label style={labelSt}>Name</label>
-                  <div style={{ ...fieldBox, fontWeight: 600 }}>{job.customerName}</div>
-                </div>
-                <div>
-                  <label style={labelSt}>Contact no.</label>
-                  <div style={{ ...fieldBox, color: "var(--text-secondary)" }}>{job.phone}</div>
-                </div>
+                {field("Name", "customerName")}
+                {field("Contact no.", "phone")}
               </div>
             </div>
 
@@ -1058,33 +1290,69 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                 <label style={labelSt}>Accepted date</label>
                 <div style={{ ...fieldBox, color: "var(--text-secondary)" }}>{dayName}, {monthName} {d.getDate()}, {d.getFullYear()}</div>
               </div>
-              <div>
-                <label style={labelSt}>Model</label>
-                <div style={{ ...fieldBox, fontWeight: 600 }}>{job.brand} {job.model}</div>
-              </div>
+              {editing ? (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  {field("Brand", "brand")}
+                  {field("Model", "model")}
+                </div>
+              ) : (
+                <div>
+                  <label style={labelSt}>Model</label>
+                  <div style={{ ...fieldBox, fontWeight: 600 }}>{job.brand} {job.model}</div>
+                </div>
+              )}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
+              {/* Not editable, and not because it is protected: nothing is
+                  stored behind it. repair_jobs records created_by as a uuid
+                  with no display name resolved anywhere. */}
               <div>
                 <label style={labelSt}>Accepted by</label>
                 <div style={{ ...fieldBox, color: "var(--text-muted)", fontStyle: "italic" }}>—</div>
               </div>
-              <div>
-                <label style={labelSt}>IMEI no.</label>
-                <div style={{ ...fieldBox, color: "var(--text-secondary)", fontFamily: "monospace" }}>{job.imei || "—"}</div>
-              </div>
+              {field("IMEI no.", "imei", { mono: true })}
             </div>
 
             {job.cancelReason && (
               <div style={{ padding: "10px 14px", borderRadius: 10, background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.2)" }}>
                 <p style={{ fontSize: 10, fontWeight: 700, color: "#f87171", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>Cancellation Reason</p>
-                <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{job.cancelReason}</p>
+                {editing ? (
+                  <input
+                    value={String(val("cancelReason") ?? "")}
+                    onChange={e => set("cancelReason", e.target.value as RepairJob["cancelReason"])}
+                    style={{ ...fieldBox, width: "100%", boxSizing: "border-box", background: "var(--bg-primary)", borderColor: "rgba(248,113,113,0.4)", outline: "none" }}
+                  />
+                ) : (
+                  <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{job.cancelReason}</p>
+                )}
               </div>
             )}
 
-            <div>
-              <label style={labelSt}>Select repair warranty (Optional)</label>
-              <div style={{ ...fieldBox, color: job.jobWarranty ? "var(--text-primary)" : "var(--text-muted)" }}>{job.jobWarranty || "— SELECT —"}</div>
-            </div>
+            {editing ? (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
+                  {field("Model number", "modelNumber", { mono: true })}
+                  {field("Customer email", "customerEmail", { type: "email" })}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
+                  {choice("Priority", "priority", ["Low", "Normal", "High", "Urgent"].map(v => ({ value: v, text: v })))}
+                  {field("Estimated completion", "estimatedCompletion", { type: "date" })}
+                </div>
+                {field("Reported fault", "issue", { grow: true })}
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
+                  {field("Estimated cost (Rs.)", "estimatedCost", { type: "number" })}
+                  {field("Advance paid (Rs.)", "advancePaid", { type: "number" })}
+                </div>
+                {field("Repair warranty", "jobWarranty")}
+                {field("Technician remarks", "techRemarks", { grow: true })}
+                {field("Future faults noted", "futureFaults", { grow: true })}
+              </>
+            ) : (
+              <div>
+                <label style={labelSt}>Select repair warranty (Optional)</label>
+                <div style={{ ...fieldBox, color: job.jobWarranty ? "var(--text-primary)" : "var(--text-muted)" }}>{job.jobWarranty || "— SELECT —"}</div>
+              </div>
+            )}
 
             <div>
               <div style={secHead}>Submission details</div>
@@ -1092,8 +1360,8 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                 <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: isMobile ? 8 : 18, flexWrap: "wrap", marginBottom: 8, alignItems: isMobile ? "flex-start" : "center" }}>
                   <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
                     {["Equipment", "Antenna", "Back cover", "Other issue"].map(item => (
-                      <label key={item} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text-secondary)", cursor: "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                        <input type="checkbox" disabled readOnly style={{ accentColor: "var(--accent)" }} />{item}
+                      <label key={item} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: items.includes(item) ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: items.includes(item) ? 600 : 400, cursor: editing ? "pointer" : "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                        <input type="checkbox" checked={items.includes(item)} disabled={!editing} onChange={() => toggleItem(item)} style={{ accentColor: "var(--accent)" }} />{item}
                       </label>
                     ))}
                   </div>
@@ -1108,8 +1376,8 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                 </div>
                 <div style={{ display: "flex", gap: 18 }}>
                   {["Battery", "Charger", "SIM card"].map(item => (
-                    <label key={item} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text-secondary)", cursor: "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                      <input type="checkbox" disabled readOnly style={{ accentColor: "var(--accent)" }} />{item}
+                    <label key={item} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: items.includes(item) ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: items.includes(item) ? 600 : 400, cursor: editing ? "pointer" : "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                      <input type="checkbox" checked={items.includes(item)} disabled={!editing} onChange={() => toggleItem(item)} style={{ accentColor: "var(--accent)" }} />{item}
                     </label>
                   ))}
                 </div>
@@ -1122,10 +1390,10 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                 {faultRows.map((row, ri) => (
                   <div key={ri} style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                     {row.map(fault => {
-                      const checked = job.issue.toLowerCase().includes(fault.toLowerCase());
+                      const checked = hasFault(fault);
                       return (
-                        <label key={fault} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: checked ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: checked ? 600 : 400, cursor: "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                          <input type="checkbox" disabled readOnly checked={checked} style={{ accentColor: "var(--accent)" }} />{fault}
+                        <label key={fault} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: checked ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: checked ? 600 : 400, cursor: editing ? "pointer" : "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                          <input type="checkbox" checked={checked} disabled={!editing} onChange={() => toggleFault(fault)} style={{ accentColor: "var(--accent)" }} />{fault}
                         </label>
                       );
                     })}
@@ -1962,6 +2230,13 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
           // below is for limiting the others, not them.
           mayCancel={can("canCancelJobs") || isAdminCashier}
           mayCancelAny={isAdminCashier}
+          // Both gates: the admin-cashier tick, and the permission that can be
+          // taken away from one person without taking Admin Control with it.
+          mayEdit={isAdminCashier && can("canEditJobs")}
+          onSave={async patch => {
+            const res = await updateJob(detailsJob.id, patch);
+            if (!res.ok) throw new Error(res.error ?? "Could not save the changes.");
+          }}
           onPickup={() => openPickup(detailsJob)}
           onPrintSlip={() => openIntakeSlip(detailsJob)}
         />

@@ -38,6 +38,7 @@ const toSale = (r: Row): SaleTx => ({
   subtotal: num(r.subtotal),
   discountAmount: Number(r.discount ?? 0),
   paid: num(r.paid),
+  badDebt: Number(r.bad_debt ?? 0),
   status: r.status as TxStatus,
   returnedAmount: num(r.returned_amount),
   returnReason: (r.return_reason as string | null) ?? undefined,

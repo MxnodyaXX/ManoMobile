@@ -90,6 +90,9 @@ export interface RepairJob {
    *  from another shop. Unique per dealer, not globally — our own `id` stays
    *  the key everything else points at. */
   dealerJobNo?: string;
+  /** Part of the bill the shop gave up on at handover. Reduces what is owed
+    *  without pretending it was paid or that the price was lower. */
+  writtenOff?: number;
   cancelReason?: string;
   cancelledAt?: string;          // ISO date the job was cancelled
   cancelledBy?: string;          // who requested / actioned the cancellation

@@ -45,11 +45,13 @@ export interface StaffRuleOverride {
   canApproveParts: boolean;
   canManageCatalogue: boolean;
   canViewRevenue: boolean;
+  /** Correct a booked-in job's details. Needs the admin-cashier tick too. */
+  canEditJobs: boolean;
 }
 
 /** The counter permissions, with the wording the admin screen shows. */
 export const CASHIER_PERMISSIONS: {
-  key: "canCancelJobs" | "canDiscount" | "canApproveParts" | "canManageCatalogue" | "canViewRevenue";
+  key: "canCancelJobs" | "canDiscount" | "canApproveParts" | "canManageCatalogue" | "canViewRevenue" | "canEditJobs";
   label: string;
   blurb: string;
 }[] = [
@@ -58,6 +60,7 @@ export const CASHIER_PERMISSIONS: {
   { key: "canApproveParts",    label: "Approve part requests",     blurb: "Release parts to a technician, deducting stock." },
   { key: "canManageCatalogue", label: "Edit dealers and catalogue", blurb: "Change dealers, spare parts and repair agents." },
   { key: "canViewRevenue",     label: "See takings and profit",    blurb: "Revenue, cost and profit figures across the shop." },
+  { key: "canEditJobs",        label: "Correct job details",       blurb: "Fix a mistyped name, number, model or IMEI after intake. Admin cashiers only." },
 ];
 
 /**
@@ -89,6 +92,7 @@ export interface EffectiveRules extends WorkRules {
   canApproveParts: boolean;
   canManageCatalogue: boolean;
   canViewRevenue: boolean;
+  canEditJobs: boolean;
   /** True when this person has at least one explicit override. */
   hasOverrides: boolean;
 }
@@ -112,6 +116,7 @@ export const blankOverride = (profileId: string): StaffRuleOverride => ({
   canApproveParts: true,
   canManageCatalogue: true,
   canViewRevenue: true,
+  canEditJobs: true,
 });
 
 interface RuleRow {
@@ -131,6 +136,7 @@ interface RuleRow {
   can_approve_parts: boolean;
   can_manage_catalogue: boolean;
   can_view_revenue: boolean;
+  can_edit_jobs: boolean;
 }
 
 const rowToOverride = (r: RuleRow): StaffRuleOverride => ({
@@ -151,6 +157,7 @@ const rowToOverride = (r: RuleRow): StaffRuleOverride => ({
   canApproveParts: r.can_approve_parts ?? true,
   canManageCatalogue: r.can_manage_catalogue ?? true,
   canViewRevenue: r.can_view_revenue ?? true,
+  canEditJobs: r.can_edit_jobs ?? true,
 });
 
 /**
@@ -172,6 +179,7 @@ function migrationHint(message: string): string {
     ["can_approve_parts",              "20260830000007_cashier_permissions.sql"],
     ["can_manage_catalogue",           "20260830000007_cashier_permissions.sql"],
     ["can_view_revenue",               "20260830000007_cashier_permissions.sql"],
+    ["can_edit_jobs",                  "20260901000015_edit_jobs_permission.sql"],
   ];
   const hit = byColumn.find(([col]) => message.includes(col));
   if (hit) return ` — run migration ${hit[1]}.`;
@@ -184,7 +192,7 @@ function migrationHint(message: string): string {
 export async function fetchStaffRules(): Promise<StaffRuleOverride[]> {
   const { data, error } = await getSupabaseBrowserClient()
     .from("staff_work_rules")
-    .select("profile_id, allow_multiple_active_jobs, max_active_jobs, require_start_before_finish, can_claim_unassigned, can_transfer_to_agent, can_use_parts_without_approval, labour_cost_mode, labour_cost_value, is_default_technician, is_admin_cashier, can_cancel_jobs, can_discount, can_approve_parts, can_manage_catalogue, can_view_revenue");
+    .select("profile_id, allow_multiple_active_jobs, max_active_jobs, require_start_before_finish, can_claim_unassigned, can_transfer_to_agent, can_use_parts_without_approval, labour_cost_mode, labour_cost_value, is_default_technician, is_admin_cashier, can_cancel_jobs, can_discount, can_approve_parts, can_manage_catalogue, can_view_revenue, can_edit_jobs");
 
   if (error) throw new Error(`Could not load technician permissions: ${error.message}${migrationHint(error.message)}`);
   return (data as RuleRow[]).map(rowToOverride);
@@ -210,6 +218,7 @@ export async function saveStaffRule(rule: StaffRuleOverride): Promise<void> {
       can_approve_parts: rule.canApproveParts,
       can_manage_catalogue: rule.canManageCatalogue,
       can_view_revenue: rule.canViewRevenue,
+      can_edit_jobs: rule.canEditJobs,
       // is_default_technician is deliberately absent: writing it here could
       // leave two rows true, which the unique index rejects. It moves only
       // through setDefaultTechnician().
@@ -234,7 +243,7 @@ export function mergeRules(shop: WorkRules, override?: StaffRuleOverride | null)
       canUsePartsWithoutApproval: false, labourCostMode: "none", labourCostValue: 0,
       isDefaultTechnician: false, isAdminCashier: false,
       canCancelJobs: true, canDiscount: false, canApproveParts: true,
-      canManageCatalogue: true, canViewRevenue: true,
+      canManageCatalogue: true, canViewRevenue: true, canEditJobs: true,
       hasOverrides: false,
     };
   }
@@ -263,6 +272,7 @@ export function mergeRules(shop: WorkRules, override?: StaffRuleOverride | null)
     canApproveParts: override.canApproveParts,
     canManageCatalogue: override.canManageCatalogue,
     canViewRevenue: override.canViewRevenue,
+    canEditJobs: override.canEditJobs,
     hasOverrides,
   };
 }
@@ -311,7 +321,7 @@ export async function rulesForTechnician(technicianName: string): Promise<Effect
       canUsePartsWithoutApproval: false, labourCostMode: "none", labourCostValue: 0,
       isDefaultTechnician: false, isAdminCashier: false,
       canCancelJobs: true, canDiscount: false, canApproveParts: true,
-      canManageCatalogue: true, canViewRevenue: true,
+      canManageCatalogue: true, canViewRevenue: true, canEditJobs: true,
       hasOverrides: false,
     };
   }
@@ -327,7 +337,7 @@ export async function rulesForTechnician(technicianName: string): Promise<Effect
       labourCostMode: "none", labourCostValue: 0,
       isDefaultTechnician: false, isAdminCashier: false,
       canCancelJobs: true, canDiscount: false, canApproveParts: true,
-      canManageCatalogue: true, canViewRevenue: true,
+      canManageCatalogue: true, canViewRevenue: true, canEditJobs: true,
       hasOverrides: false,
     };
   }

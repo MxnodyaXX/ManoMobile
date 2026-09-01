@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Play, Pause, CheckCircle, Package, MoreHorizontal,
-  Stethoscope, StickyNote, AlertTriangle, Send, MessageSquare, History,
+  Stethoscope, StickyNote, AlertTriangle, Send, MessageSquare, History, Hand,
 } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
+import { isUnassigned } from "@/lib/repair/api";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -27,7 +28,7 @@ const ff = "'Plus Jakarta Sans', sans-serif";
  */
 
 export type BenchAction =
-  | "start" | "pause" | "resume" | "complete" | "parts"
+  | "start" | "claim" | "pause" | "resume" | "complete" | "parts"
   | "diagnostic" | "notes" | "escalate" | "transfer" | "message" | "activity";
 
 const PRIORITY: Record<string, { color: string; bg: string }> = {
@@ -130,6 +131,11 @@ export default function BenchCard({ job, startedAt, partsPending, onAction }: {
   // offering nothing.
   const done       = job.status === "Completed" || job.status === "Delivered";
   const notStarted = !inProgress && !paused && !done;
+  // Nobody's job yet. Claiming and starting are different acts — one takes
+  // responsibility for the device, the other says work has begun — and rolling
+  // them together would put a technician on the clock for a phone they only
+  // meant to pick up off the pile.
+  const unclaimed  = isUnassigned(job.technician);
   const device     = [job.brand, job.model].filter(Boolean).join(" ") || "Device";
   const pc         = PRIORITY[job.priority] ?? PRIORITY.Normal;
 
@@ -226,7 +232,14 @@ export default function BenchCard({ job, startedAt, partsPending, onAction }: {
             </button>
           </>
         )}
-        {notStarted && (
+        {notStarted && unclaimed && (
+          <button onClick={() => onAction("claim", job)} style={btn("primary")}>
+            <Hand size={13} strokeWidth={2.4} />
+            Claim
+          </button>
+        )}
+
+        {notStarted && !unclaimed && (
           <button onClick={() => onAction("start", job)} style={btn("primary")}>
             <Play size={16} /> Start
           </button>
