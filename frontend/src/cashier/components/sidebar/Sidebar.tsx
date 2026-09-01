@@ -4,7 +4,7 @@ import { useState } from "react";
 import { sidebarData } from "@/cashier/data/sidebarData";
 import { roleMenus } from "@/cashier/data/sidebarRoles";
 import { motion } from "framer-motion";
-import { ChevronLeft, ChevronRight, Smartphone, LogOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, LogOut } from "lucide-react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useMyModuleAccess } from "@/lib/settings/moduleAccess";
 import { useMyPermissions } from "@/lib/settings/staffRules";
@@ -132,12 +132,14 @@ export default function Sidebar({ activePage, onNavigate, isOpen = false, onClos
         }}>
           <div style={{
             width: 36, height: 36,
-            background: "var(--accent)",
+            background: "#fff",
+            border: "1px solid var(--border)",
             borderRadius: 10,
             display: "flex", alignItems: "center", justifyContent: "center",
-            flexShrink: 0,
+            flexShrink: 0, padding: 5,
           }}>
-            <Smartphone size={18} color="var(--accent-fg)" strokeWidth={2.5} />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/ManoMobileBlack.png" alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
           {(!collapsed || isMobile) && (
             <motion.div

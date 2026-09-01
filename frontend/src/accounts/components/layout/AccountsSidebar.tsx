@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, BookOpen, ArrowDownCircle, ArrowUpCircle, FileBarChart2, LogOut, Landmark } from "lucide-react";
+import { LayoutDashboard, BookOpen, ArrowDownCircle, ArrowUpCircle, FileBarChart2, LogOut } from "lucide-react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 
 export type AccountsPage = "Dashboard" | "General Ledger" | "Accounts Receivable" | "Accounts Payable" | "Financial Reports";
@@ -53,8 +53,9 @@ export default function AccountsSidebar({ activePage, onNavigate, userName, onLo
       }}>
         {/* Logo */}
         <div style={{ padding: "20px 18px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 9, background: `${AA}14`, border: `1px solid ${AA}30`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <Landmark size={15} color={AA} />
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: "#fff", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 4 }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/ManoMobileBlack.png" alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
           <div>
             <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Mano Mobile</p>

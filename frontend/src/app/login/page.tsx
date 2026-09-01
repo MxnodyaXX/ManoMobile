@@ -4,7 +4,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AuthProvider, useAuth } from "@/lib/auth/AuthContext";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
-import { LogIn, AlertCircle } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
@@ -62,9 +62,10 @@ function LoginForm() {
           <div style={{
             width: 46, height: 46, borderRadius: 12, margin: "0 auto 12px",
             display: "flex", alignItems: "center", justifyContent: "center",
-            background: "var(--accent-dim)", border: "1px solid var(--accent-glow)", color: "var(--accent)",
+            background: "#fff", border: "1px solid var(--border)", padding: 7,
           }}>
-            <LogIn size={20} />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/ManoMobileBlack.png" alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
           <h1 className="heading" style={{ fontSize: 20, color: "var(--text-primary)" }}>Mano Mobile</h1>
           <p style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: 4 }}>

@@ -93,7 +93,8 @@ function StartClaimModal({ warranty, onClose, onCreated }: { warranty: Warranty;
   const [issue, setIssue] = useState("");
   const create = () => {
     if (issue.trim().length < 4) return;
-    openClaim({ warrantyId: warranty.id, jobId: warranty.jobId, reportedIssue: issue.trim(), handledBy: STAFF });
+    void openClaim({ warrantyId: warranty.id, jobId: warranty.jobId, reportedIssue: issue.trim(), handledBy: STAFF })
+      .catch(err => console.error(`Could not open a claim for ${warranty.id}:`, err));
     onCreated();
   };
   return createPortal(
@@ -160,9 +161,11 @@ export default function WarrantyCenter() {
           imei: orig.imei, dealer: orig.dealer, dealerId: orig.dealerId,
         }).catch(err => console.error(`Warranty re-repair job for ${claim.id} failed to save:`, err));
       }
-      updateClaim(claim.id, { status: "Resolved", withinCoverage: true, inspectionNotes: notes, resolution: "Re-repair (free)" as ClaimResolution, newJobId: newId, resolvedAt: new Date().toISOString() });
+      void updateClaim(claim.id, { status: "Resolved", withinCoverage: true, inspectionNotes: notes, resolution: "Re-repair (free)" as ClaimResolution, newJobId: newId, resolvedAt: new Date().toISOString() })
+        .catch(err => console.error(`Could not resolve claim ${claim.id}:`, err));
     } else {
-      updateClaim(claim.id, { status: "Rejected", withinCoverage: false, inspectionNotes: notes, resolution: "Rejected — out of scope" as ClaimResolution, resolvedAt: new Date().toISOString() });
+      void updateClaim(claim.id, { status: "Rejected", withinCoverage: false, inspectionNotes: notes, resolution: "Rejected — out of scope" as ClaimResolution, resolvedAt: new Date().toISOString() })
+        .catch(err => console.error(`Could not reject claim ${claim.id}:`, err));
     }
   };
 

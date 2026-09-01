@@ -66,8 +66,9 @@ export default function TechSidebar({ activePage, onNavigate, techName, onLogout
       }}>
         {/* Logo */}
         <div style={{ padding: "20px 18px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 9, background: `${TA}14`, border: `1px solid ${TA}30`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <Wrench size={15} color={TA} />
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: "#fff", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 4 }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/ManoMobileBlack.png" alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
           <div>
             <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Mano Mobile</p>

@@ -416,7 +416,7 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
 
       // Issue the unified warranty (status: Pending Activation — clock starts at handover)
       if (warrantyDays > 0 && canWarrant) {
-        const wid = issueWarranty({
+        const wid = await issueWarranty({
           jobId: job.id,
           customerName: job.customerName,
           customerPhone: job.phone,

@@ -65,8 +65,13 @@ export default function HandoverModal({ job, onClose, onDone }: {
       handedOverAt: nowISO,
     };
     updateJob(job.id, { status: "Delivered", advancePaid: job.advancePaid + effectivePaid, handover });
-    // Activate the warranty — the clock starts NOW, on collection.
-    if (job.warrantyId) activateWarranty(job.warrantyId, nowISO);
+    // Activate the warranty — the clock starts NOW, on collection. Fire-and-
+    // forget like updateJob above: the handover confirmation the user is
+    // waiting on doesn't block on this, a failure is just logged.
+    if (job.warrantyId) {
+      activateWarranty(job.warrantyId, nowISO)
+        .catch(err => console.error(`Could not activate warranty ${job.warrantyId}:`, err));
+    }
     setDone(true);
     setTimeout(onDone, 1300);
   };

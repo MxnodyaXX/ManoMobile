@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  Palette, LayoutDashboard, Users, ShieldCheck, Truck, ShoppingCart, Smartphone, Bell, Settings, LogOut, Shield, BarChart3 } from "lucide-react";
+  Palette, LayoutDashboard, Users, ShieldCheck, Truck, ShoppingCart, Smartphone, Bell, Settings, LogOut, BarChart3 } from "lucide-react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 
 export type AdminPage =
@@ -69,8 +69,9 @@ export default function AdminSidebar({ activePage, onNavigate, adminName, onLogo
       }}>
         {/* Logo */}
         <div style={{ padding: "20px 18px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 9, background: `${AA}14`, border: `1px solid ${AA}30`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <Shield size={15} color={AA} />
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: "#fff", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 4 }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/ManoMobileBlack.png" alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
           <div>
             <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Mano Mobile</p>

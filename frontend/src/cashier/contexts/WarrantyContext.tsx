@@ -1,7 +1,12 @@
 "use client";
 
-import { createContext, useContext, useCallback, type ReactNode } from "react";
-import { usePersistentState } from "@/cashier/hooks/usePersistentState";
+import { createContext, useContext, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
+import {
+  fetchWarranties, fetchWarrantyClaims,
+  insertWarranty, patchWarranty,
+  insertWarrantyClaim, patchWarrantyClaim,
+} from "@/lib/warranty/api";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 //
@@ -9,7 +14,14 @@ import { usePersistentState } from "@/cashier/hooks/usePersistentState";
 // the two disconnected representations that existed before:
 //   • the free-text `RepairJob.jobWarranty` string ("3 MONTHS WARRANTY [NORMAL]")
 //   • the thin `WarrantyRecord` in TechContext
-// All dates are ISO strings so they survive JSON / localStorage round-trips.
+// All dates are ISO strings.
+//
+// Backed by Supabase (see supabase/migrations/20260902000002_warranties.sql) —
+// warranties used to live only in this browser's localStorage, which meant no
+// other staff member's browser, and certainly not a customer's own browser on
+// the public /track page, could ever see one. Same "local" fallback as
+// RepairContext: with Supabase unconfigured, this serves in-memory only and
+// nothing is persisted.
 
 export type WarrantyStatus = "Pending Activation" | "Active" | "Expired" | "Void" | "Claimed";
 export type WarrantyScope  = "Parts & Labour" | "Parts Only" | "Labour Only";
@@ -78,37 +90,37 @@ export function daysRemaining(w: Warranty): number | null {
   return Math.ceil((new Date(w.expiresAt).getTime() - Date.now()) / 86_400_000);
 }
 
-// ─── Seed data ──────────────────────────────────────────────────────────────
-// A handful of warranties so the register isn't empty on first load. These mirror
-// the delivered seed jobs in RepairContext (RM-004, RM-008).
-
-const now = Date.now();
-const iso = (offsetDays: number) => new Date(now + offsetDays * 86_400_000).toISOString();
-
-const SEED_WARRANTIES: Warranty[] = [];
-
-const SEED_CLAIMS: WarrantyClaim[] = [];
-
 // ─── Context ────────────────────────────────────────────────────────────────
 
 interface WarrantyContextValue {
   warranties: Warranty[];
   claims: WarrantyClaim[];
+  loading: boolean;
+  error: string | null;
 
   getWarrantyForJob: (jobId: string) => Warranty | undefined;
   lookupActiveWarranty: (imeiOrPhone: string) => Warranty | undefined;
 
   /** Issued at job completion. Status = Pending Activation (clock starts at handover). */
-  issueWarranty: (input: Omit<Warranty, "id" | "status" | "issuedAt" | "startsAt" | "expiresAt" | "exclusions"> & { issuedAt?: string; exclusions?: string[] }) => string;
+  issueWarranty: (input: Omit<Warranty, "id" | "status" | "issuedAt" | "startsAt" | "expiresAt" | "exclusions"> & { issuedAt?: string; exclusions?: string[] }) => Promise<string>;
   /** Called at handover — starts the warranty clock. */
-  activateWarranty: (warrantyId: string, startISO?: string) => void;
-  voidWarranty: (warrantyId: string, reason: string) => void;
+  activateWarranty: (warrantyId: string, startISO?: string) => Promise<void>;
+  voidWarranty: (warrantyId: string, reason: string) => Promise<void>;
 
-  openClaim: (input: Omit<WarrantyClaim, "id" | "status" | "reportedAt">) => string;
-  updateClaim: (claimId: string, patch: Partial<WarrantyClaim>) => void;
+  openClaim: (input: Omit<WarrantyClaim, "id" | "status" | "reportedAt">) => Promise<string>;
+  updateClaim: (claimId: string, patch: Partial<WarrantyClaim>) => Promise<void>;
 }
 
-const WarrantyContext = createContext<WarrantyContextValue>({} as WarrantyContextValue);
+const WarrantyContext = createContext<WarrantyContextValue>({
+  warranties: [], claims: [], loading: false, error: null,
+  getWarrantyForJob: () => undefined,
+  lookupActiveWarranty: () => undefined,
+  issueWarranty: async () => "",
+  activateWarranty: async () => {},
+  voidWarranty: async () => {},
+  openClaim: async () => "",
+  updateClaim: async () => {},
+});
 
 function nextId(prefix: string, items: { id: string }[]): string {
   const max = items.reduce((m, it) => {
@@ -119,8 +131,36 @@ function nextId(prefix: string, items: { id: string }[]): string {
 }
 
 export function WarrantyProvider({ children }: { children: ReactNode }) {
-  const [warranties, setWarranties] = usePersistentState<Warranty[]>("mano_warranties", SEED_WARRANTIES);
-  const [claims, setClaims]         = usePersistentState<WarrantyClaim[]>("mano_claims", SEED_CLAIMS);
+  const configured = isSupabaseConfigured();
+
+  const [warranties, setWarranties] = useState<Warranty[]>([]);
+  const [claims, setClaims]         = useState<WarrantyClaim[]>([]);
+  const [loading, setLoading]       = useState(configured);
+  const [error, setError]           = useState<string | null>(null);
+
+  // Reads inside callbacks need the current list without becoming a render
+  // dependency — same ref trick RepairContext uses for dealers.
+  const warrantiesRef = useRef(warranties);
+  useEffect(() => { warrantiesRef.current = warranties; }, [warranties]);
+
+  useEffect(() => {
+    if (!configured) return;
+    let active = true;
+    (async () => {
+      try {
+        const [w, c] = await Promise.all([fetchWarranties(), fetchWarrantyClaims()]);
+        if (!active) return;
+        setWarranties(w);
+        setClaims(c);
+        setError(null);
+      } catch (e) {
+        if (active) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [configured]);
 
   const getWarrantyForJob = useCallback(
     (jobId: string) => warranties.find(w => w.jobId === jobId),
@@ -139,68 +179,87 @@ export function WarrantyProvider({ children }: { children: ReactNode }) {
     });
   }, [warranties]);
 
-  const issueWarranty: WarrantyContextValue["issueWarranty"] = useCallback((input) => {
-    let id = "";
-    setWarranties(prev => {
-      // Don't double-issue for the same job.
-      const existing = prev.find(w => w.jobId === input.jobId);
-      if (existing) { id = existing.id; return prev; }
-      id = nextId("WR", prev);
+  const issueWarranty: WarrantyContextValue["issueWarranty"] = useCallback(async (input) => {
+    // Don't double-issue for the same job.
+    const existingLocal = warrantiesRef.current.find(w => w.jobId === input.jobId);
+    if (existingLocal) return existingLocal.id;
+
+    if (!configured) {
+      const id = nextId("WR", warrantiesRef.current);
       const w: Warranty = {
-        ...input,
-        id,
+        ...input, id,
         issuedAt: input.issuedAt ?? new Date().toISOString(),
         exclusions: input.exclusions ?? DEFAULT_EXCLUSIONS,
         status: "Pending Activation",
       };
-      return [w, ...prev];
-    });
-    return id;
-  }, [setWarranties]);
+      setWarranties(prev => [w, ...prev]);
+      return id;
+    }
 
-  const activateWarranty = useCallback((warrantyId: string, startISO?: string) => {
+    const created = await insertWarranty({ ...input, exclusions: input.exclusions ?? DEFAULT_EXCLUSIONS });
+    setWarranties(prev => prev.some(w => w.id === created.id) ? prev : [created, ...prev]);
+    return created.id;
+  }, [configured]);
+
+  const activateWarranty = useCallback(async (warrantyId: string, startISO?: string) => {
     const start = startISO ?? new Date().toISOString();
+    const current = warrantiesRef.current.find(w => w.id === warrantyId);
+    const expiresAt = current ? addDaysISO(start, current.durationDays) : undefined;
+
+    if (configured) {
+      await patchWarranty(warrantyId, { startsAt: start, expiresAt, status: "Active" });
+    }
     setWarranties(prev => prev.map(w =>
       w.id === warrantyId
         ? { ...w, startsAt: start, expiresAt: addDaysISO(start, w.durationDays), status: "Active" }
         : w,
     ));
-  }, [setWarranties]);
+  }, [configured]);
 
-  const voidWarranty = useCallback((warrantyId: string, reason: string) => {
+  const voidWarranty = useCallback(async (warrantyId: string, reason: string) => {
+    if (configured) {
+      await patchWarranty(warrantyId, { status: "Void", voidReason: reason });
+    }
     setWarranties(prev => prev.map(w =>
       w.id === warrantyId ? { ...w, status: "Void", voidReason: reason } : w,
     ));
-  }, [setWarranties]);
+  }, [configured]);
 
-  const openClaim: WarrantyContextValue["openClaim"] = useCallback((input) => {
-    let id = "";
-    setClaims(prev => {
-      id = nextId("CL", prev);
-      return [{ ...input, id, status: "Open", reportedAt: new Date().toISOString() }, ...prev];
-    });
-    return id;
-  }, [setClaims]);
+  const openClaim: WarrantyContextValue["openClaim"] = useCallback(async (input) => {
+    if (!configured) {
+      const id = nextId("CL", claims);
+      setClaims(prev => [{ ...input, id, status: "Open", reportedAt: new Date().toISOString() }, ...prev]);
+      return id;
+    }
+    const created = await insertWarrantyClaim(input);
+    setClaims(prev => [created, ...prev]);
+    return created.id;
+  }, [configured, claims]);
 
-  const updateClaim = useCallback((claimId: string, patch: Partial<WarrantyClaim>) => {
+  const updateClaim = useCallback(async (claimId: string, patch: Partial<WarrantyClaim>) => {
+    if (configured) {
+      await patchWarrantyClaim(claimId, patch);
+    }
     setClaims(prev => prev.map(c => c.id === claimId ? { ...c, ...patch } : c));
     // If a claim is marked resolved against coverage, flag the warranty as Claimed.
     if (patch.status === "Resolved" && patch.withinCoverage) {
-      setClaims(prevClaims => {
-        const claim = prevClaims.find(c => c.id === claimId);
-        if (claim) {
-          setWarranties(prevW => prevW.map(w =>
-            w.id === claim.warrantyId && w.status === "Active" ? { ...w, status: "Claimed" } : w,
+      const claim = claims.find(c => c.id === claimId);
+      const warrantyId = claim?.warrantyId;
+      if (warrantyId) {
+        const target = warrantiesRef.current.find(w => w.id === warrantyId);
+        if (target?.status === "Active") {
+          if (configured) await patchWarranty(warrantyId, { status: "Claimed" });
+          setWarranties(prev => prev.map(w =>
+            w.id === warrantyId && w.status === "Active" ? { ...w, status: "Claimed" } : w,
           ));
         }
-        return prevClaims;
-      });
+      }
     }
-  }, [setClaims, setWarranties]);
+  }, [configured, claims]);
 
   return (
     <WarrantyContext.Provider value={{
-      warranties, claims,
+      warranties, claims, loading, error,
       getWarrantyForJob, lookupActiveWarranty,
       issueWarranty, activateWarranty, voidWarranty,
       openClaim, updateClaim,

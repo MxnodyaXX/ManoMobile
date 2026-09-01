@@ -9,6 +9,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Mano Mobile",
   description: "Mobile Repair Management Dashboard",
+  icons: { icon: "/ManoMobileBlack.png" },
 };
 
 export const viewport: Viewport = {

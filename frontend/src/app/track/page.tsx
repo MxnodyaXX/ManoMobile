@@ -6,6 +6,8 @@ import {
   trackJob, trackJobHistory, approveJobEstimate,
   type TrackedJob, type TrackedJobHistoryEntry,
 } from "@/lib/repair/api";
+import { trackWarranty, type TrackedWarranty } from "@/lib/warranty/api";
+import type { WarrantyStatus, ClaimStatus } from "@/cashier/contexts/WarrantyContext";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { SHOP_DETAILS } from "@/lib/shop";
 import type { ConditionGrade } from "@/cashier/contexts/RepairContext";
@@ -16,26 +18,31 @@ import type { ConditionGrade } from "@/cashier/contexts/RepairContext";
  * intake slip, or type their job number in at /track directly.
  *
  * Every section here is backed by something real in the database (via
- * track_job()/track_job_history(), see the migration alongside this file).
- * A few things a fuller version of this page could show — a diagnosis
- * write-up, categorised "fixed / found / suggested" advisories, a
- * functional-test checklist, before/after photo pairs, an itemised invoice —
- * aren't included, because none of that is actually captured anywhere in the
- * app today; showing them would mean inventing data rather than reporting
- * it. Warranty is left out for the same reason: it's still a
- * localStorage-only record on whichever staff browser issued it, not
- * something a customer's own browser can ever see.
+ * track_job()/track_job_history()/track_warranty(), see the migrations
+ * alongside this file). A few things a fuller version of this page could
+ * show — a diagnosis write-up, categorised "fixed / found / suggested"
+ * advisories, a functional-test checklist, before/after photo pairs, an
+ * itemised invoice — aren't included, because none of that is actually
+ * captured anywhere in the app today; showing them would mean inventing data
+ * rather than reporting it. Warranty used to be excluded for the same
+ * reason (it was a localStorage-only record on whichever staff browser
+ * issued it) until warranties moved into Supabase — see
+ * supabase/migrations/20260902000002_warranties.sql.
  */
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
 const CSS = `
 :root{
-  --bg:#F4F6FB; --card:#FFFFFF; --ink:#171A2B; --ink-2:#3D4356; --muted:#767C93; --line:#E8EAF3;
-  --brand:#4A56E2; --brand-deep:#2B33A0; --tint:#EEF0FE;
-  --ok:#0FA96B; --ok-tint:#E4F7EF; --warn:#E0930C; --warn-tint:#FDF3E0; --bad:#E0483F; --bad-tint:#FDECEB;
+  --bg:#F5F5F3; --card:#FFFFFF; --ink:#141414; --ink-2:#3A3A3A; --muted:#7A7A78; --line:#E7E5E0;
+  /* Strictly black, white and grey — no accent colour. Red and green are
+     kept, but only as status signals (needs attention / good outcome),
+     never as decoration. "warn" is folded into the red family so there
+     are just two meaningful hues on the page. */
+  --brand:#1A1A1A; --brand-deep:#000000; --tint:#F2F2F0;
+  --ok:#0FA96B; --ok-tint:#E4F7EF; --warn:#C23B32; --warn-tint:#FBEAE8; --bad:#C23B32; --bad-tint:#FBEAE8;
   --radius:18px; --radius-sm:12px;
-  --shadow-sm:0 1px 2px rgba(23,26,43,.06);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.06);
 }
 *{box-sizing:border-box}
 .tp *{box-sizing:border-box}
@@ -46,7 +53,8 @@ const CSS = `
 .tp a{color:var(--brand);text-decoration:none}
 
 .tp .topbar{position:sticky;top:0;z-index:40;background:rgba(255,255,255,.92);backdrop-filter:saturate(180%) blur(14px);border-bottom:1px solid var(--line);padding:12px 18px;display:flex;align-items:center;gap:12px}
-.tp .logo{width:34px;height:34px;border-radius:10px;flex:none;background:linear-gradient(140deg,#5B67F0,#2B33A0);color:#fff;display:grid;place-items:center;font-weight:800;font-size:13px;box-shadow:0 4px 12px rgba(74,86,226,.32)}
+.tp .logo{width:34px;height:34px;border-radius:10px;flex:none;background:#fff;border:1px solid var(--line);display:grid;place-items:center;padding:5px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.tp .logo img{width:100%;height:100%;object-fit:contain}
 .tp .brand-name{font-weight:800;font-size:15px;letter-spacing:-.02em}
 .tp .brand-sub{font-size:11.5px;color:var(--muted);font-weight:500;margin-top:-2px}
 .tp .secure{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--ok);background:var(--ok-tint);padding:5px 10px;border-radius:999px}
@@ -67,8 +75,8 @@ const CSS = `
 .tp .card>header h2{font-size:16px;font-weight:700}
 .tp .card>header .hint{font-size:12px;color:var(--muted);margin-left:auto;font-weight:500}
 
-.tp .hero{position:relative;overflow:hidden;color:#fff;border-radius:var(--radius);background:linear-gradient(135deg,#4A56E2 0%,#3A44C8 46%,#242B86 100%);padding:22px 20px;box-shadow:0 14px 34px rgba(43,51,160,.28)}
-.tp .hero .blob{position:absolute;inset:auto -60px -110px auto;width:230px;height:230px;border-radius:50%;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.22),rgba(255,255,255,0) 65%);pointer-events:none}
+.tp .hero{position:relative;overflow:hidden;color:#fff;border-radius:var(--radius);background:linear-gradient(135deg,#232323 0%,#141414 55%,#000000 100%);padding:22px 20px;box-shadow:0 14px 34px rgba(0,0,0,.32)}
+.tp .hero .blob{position:absolute;inset:auto -60px -110px auto;width:230px;height:230px;border-radius:50%;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.12),rgba(255,255,255,0) 65%);pointer-events:none}
 .tp .hero-label{font-size:11.5px;font-weight:600;color:rgba(255,255,255,.72)}
 .tp .hero-job{display:flex;align-items:center;gap:10px;margin:4px 0 2px}
 .tp .hero-job strong{font-size:27px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
@@ -98,12 +106,12 @@ const CSS = `
 .tp .tl-step{display:grid;grid-template-columns:26px 1fr;gap:14px;position:relative;padding-bottom:16px}
 .tp .tl-step:last-child{padding-bottom:0}
 .tp .tl-step .rail-line{position:absolute;left:12.5px;top:22px;bottom:0;width:2px;background:var(--line);border-radius:2px}
-.tp .tl-step.done .rail-line{background:#C3C9F7}
+.tp .tl-step.done .rail-line{background:var(--brand)}
 .tp .tl-step:last-child .rail-line{display:none}
 .tp .node{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;z-index:1;flex:none;background:#fff;border:2px solid var(--line);color:transparent}
 .tp .tl-step.done .node{background:var(--brand);border-color:var(--brand);color:#fff}
-.tp .tl-step.current .node{background:#FFD666;border-color:#FFD666}
-.tp .tl-step.current .node::after{content:"";width:8px;height:8px;border-radius:50%;background:#4A3200}
+.tp .tl-step.current .node{background:#fff;border-color:var(--brand-deep);box-shadow:0 0 0 4px rgba(0,0,0,.10)}
+.tp .tl-step.current .node::after{content:"";width:8px;height:8px;border-radius:50%;background:var(--brand-deep)}
 .tp .tl-body h4{font-size:14px;font-weight:700}
 .tp .tl-step.todo .tl-body h4{color:#A2A7BA;font-weight:600}
 .tp .tl-body time{display:block;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;margin-top:1px}
@@ -121,7 +129,7 @@ const CSS = `
 
 .tp .rows{display:grid;gap:8px}
 .tp .row{border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;transition:border-color .16s,box-shadow .16s}
-.tp .row.open{border-color:#C7CCF8;box-shadow:0 6px 20px rgba(74,86,226,.10)}
+.tp .row.open{border-color:var(--brand-deep);box-shadow:0 6px 20px rgba(0,0,0,.10)}
 .tp .row-head{width:100%;display:flex;align-items:center;gap:11px;padding:13px 14px;text-align:left}
 .tp .row.open .row-head{background:var(--brand);color:#fff}
 .tp .row-title{font-size:13.5px;font-weight:700;min-width:0}
@@ -146,16 +154,22 @@ const CSS = `
 .tp .trow+.trow{border-top:1px dashed var(--line)}
 .tp .trow b{margin-left:auto;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
 .tp .trow.credit b{color:var(--ok)}
-.tp .grand{margin-top:14px;padding:16px 18px;border-radius:var(--radius-sm);background:linear-gradient(135deg,#171A2B,#2B33A0);color:#fff;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+
+.tp .warranty-headline{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-top:2px}
+.tp .warranty-sub{font-size:12.5px;color:var(--muted);margin-top:3px}
+.tp .wbar{margin-top:14px;height:8px;border-radius:999px;background:#F1F2F7;overflow:hidden}
+.tp .wbar-fill{height:100%;background:var(--brand-deep);border-radius:999px}
+.tp .warranty-dates{display:flex;justify-content:space-between;margin-top:9px;font-size:11.5px;color:var(--muted);font-weight:600}
+.tp .grand{margin-top:14px;padding:16px 18px;border-radius:var(--radius-sm);background:linear-gradient(135deg,#232323,#000000);color:#fff;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .tp .grand span{font-size:12px;color:rgba(255,255,255,.72);font-weight:600;display:block}
 .tp .grand .amt{font-size:24px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .tp .grand .due{margin-left:auto;text-align:right}
-.tp .grand .due .amt{color:#FFD666;font-size:19px}
+.tp .grand .due .amt{font-size:19px}
 
 .tp .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 14px;border-radius:12px;font-size:13.5px;font-weight:700;transition:transform .12s,background .16s,box-shadow .16s}
 .tp .btn:active{transform:scale(.985)}
-.tp .btn-primary{background:var(--brand);color:#fff;box-shadow:0 6px 16px rgba(74,86,226,.28)}
-.tp .btn-primary:hover{background:#3F4AD4}
+.tp .btn-primary{background:var(--brand-deep);color:#fff;box-shadow:0 6px 16px rgba(0,0,0,.28)}
+.tp .btn-primary:hover{background:#262626}
 .tp .btn-ghost{background:#F1F2F7;color:var(--ink)}
 .tp .btn-ghost:hover{background:#E8EAF3}
 .tp .btn-wa{background:#20BA5A;color:#fff}
@@ -175,7 +189,7 @@ const CSS = `
 @media(min-width:1000px){ .tp .dock{display:none} .tp{padding-bottom:0} }
 
 .tp .seclist{display:grid;gap:9px}
-.tp .seclist div{display:grid;grid-template-columns:18px 1fr;gap:9px;font-size:12.5px;color:var(--ink-2)}
+.tp .seclist>div{display:grid;grid-template-columns:18px 1fr;gap:9px;font-size:12.5px;color:var(--ink-2)}
 .tp .linkbox{margin-top:12px;padding:10px 12px;border-radius:10px;background:#FAFBFE;border:1px dashed var(--line);font-size:11.5px;color:var(--muted);word-break:break-all}
 .tp footer.legal{text-align:center;font-size:11.5px;color:var(--muted);padding:6px 0 4px;line-height:1.7}
 
@@ -186,11 +200,14 @@ const CSS = `
 .tp .searchwrap input{flex:1;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 12px;font-size:14px;color:var(--ink);font-family:${ff};outline:none;box-sizing:border-box}
 `;
 
-const STATUS_META: Record<string, { label: string; bg: string; fg: string; dot: string }> = {
-  "Non-Issued": { label: "Job received", bg: "#EEF0FE", fg: "#2B33A0", dot: "#4A56E2" },
-  "Issued":     { label: "Repair in progress", bg: "#EEF0FE", fg: "#2B33A0", dot: "#4A56E2" },
-  "Pending":    { label: "On hold", bg: "#FDF3E0", fg: "#7A5200", dot: "#E0930C" },
-  "Completed":  { label: "Ready for collection", bg: "#FFD666", fg: "#4A3200", dot: "#4A3200" },
+const STATUS_META: Record<string, { label: string; bg: string; fg: string; dot: string; border?: string }> = {
+  "Non-Issued": { label: "Job received", bg: "#EDEDEB", fg: "#1A1A1A", dot: "#1A1A1A" },
+  "Issued":     { label: "Repair in progress", bg: "#EDEDEB", fg: "#1A1A1A", dot: "#1A1A1A" },
+  "Pending":    { label: "On hold", bg: "#FDECEB", fg: "#8A2A24", dot: "#E0483F" },
+  // White fill so it pops on the black hero card; a border keeps it a
+  // visible badge on the white rail/summary card too, where a plain
+  // white fill would otherwise vanish into the card background.
+  "Completed":  { label: "Ready for collection", bg: "#FFFFFF", fg: "#0A0A0A", dot: "#0A0A0A", border: "1.5px solid #0A0A0A" },
   "Delivered":  { label: "Collected", bg: "#E4F7EF", fg: "#0B6B47", dot: "#0FA96B" },
   "Cancelled":  { label: "Cancelled", bg: "#FDECEB", fg: "#8A2A24", dot: "#E0483F" },
 };
@@ -236,6 +253,73 @@ function buildTimeline(job: TrackedJob): TlStep[] {
   return steps;
 }
 
+const WARRANTY_STATUS_META: Record<WarrantyStatus, { label: string; pill: "ok" | "warn" | "neutral" }> = {
+  "Pending Activation": { label: "Awaiting activation", pill: "neutral" },
+  "Active":             { label: "Active", pill: "ok" },
+  "Expired":            { label: "Expired", pill: "neutral" },
+  "Void":               { label: "Void", pill: "warn" },
+  "Claimed":            { label: "Claim used", pill: "neutral" },
+};
+
+const CLAIM_STATUS_META: Record<ClaimStatus, { label: string; pill: "ok" | "warn" | "neutral" }> = {
+  "Open":           { label: "Open", pill: "warn" },
+  "Under Review":   { label: "Under review", pill: "warn" },
+  "Approved":       { label: "Approved", pill: "ok" },
+  "Resolved":       { label: "Resolved", pill: "ok" },
+  "Rejected":       { label: "Rejected", pill: "warn" },
+};
+
+/** Mirrors WarrantyContext's effectiveStatus() — a page fetched once can sit
+ *  open past the expiry date, so this is computed at render time too. */
+function effectiveWarrantyStatus(w: TrackedWarranty): WarrantyStatus {
+  if (w.status === "Active" && w.expiresAt && new Date(w.expiresAt).getTime() < Date.now()) return "Expired";
+  return w.status;
+}
+
+function warrantyHeadline(w: TrackedWarranty, status: WarrantyStatus): string {
+  if (status === "Active") {
+    const remaining = w.expiresAt ? Math.max(0, Math.ceil((new Date(w.expiresAt).getTime() - Date.now()) / 86_400_000)) : 0;
+    return `${remaining} day${remaining === 1 ? "" : "s"} remaining`;
+  }
+  if (status === "Pending Activation") return "Starts on collection";
+  if (status === "Expired") return "Expired";
+  if (status === "Claimed") return "Claim used on this warranty";
+  return "Voided";
+}
+
+function warrantySubtitle(scope: TrackedWarranty["scope"]): string {
+  if (scope === "Parts Only") return "Covers parts from this job";
+  if (scope === "Labour Only") return "Covers workmanship from this job";
+  return "Covers parts and workmanship from this job";
+}
+
+/** How far through its life the warranty is, 0–100. Null before activation —
+ *  there is nothing to show a bar for yet. */
+function warrantyProgressPct(w: TrackedWarranty): number | null {
+  if (!w.startsAt || !w.expiresAt) return null;
+  const start = new Date(w.startsAt).getTime();
+  const end = new Date(w.expiresAt).getTime();
+  if (end <= start) return 100;
+  return Math.min(100, Math.max(0, Math.round(((Date.now() - start) / (end - start)) * 100)));
+}
+
+function formatDuration(days: number): string {
+  if (days > 0 && days % 30 === 0) {
+    const months = days / 30;
+    return `${months} month${months === 1 ? "" : "s"}`;
+  }
+  return `${days} day${days === 1 ? "" : "s"}`;
+}
+
+/** exclusions is a flat list of standalone phrases ("Physical damage after
+ *  handover…"); this reads them into one sentence for the Conditions box. */
+function formatExclusionsProse(exclusions: string[]): string {
+  const items = exclusions.map(e => e.charAt(0).toLowerCase() + e.slice(1));
+  if (items.length === 0) return "";
+  if (items.length === 1) return items[0];
+  return `${items.slice(0, -1).join(", ")} or ${items[items.length - 1]}`;
+}
+
 function waLink(phone: string, text: string) {
   return `https://wa.me/${phone.replace(/\D/g, "")}?text=${encodeURIComponent(text)}`;
 }
@@ -247,6 +331,7 @@ function TrackInner() {
   const [job, setJob] = useState<TrackedJob | null | undefined>(undefined);
   const [history, setHistory] = useState<TrackedJobHistoryEntry[]>([]);
   const [photos, setPhotos] = useState<string[]>([]);
+  const [warranty, setWarranty] = useState<TrackedWarranty | null>(null);
   const [loading, setLoading] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [approved, setApproved] = useState(false);
@@ -270,6 +355,7 @@ function TrackInner() {
       if (found) {
         setApproved(!!found.approval);
         void trackJobHistory(found.id).then(setHistory).catch(() => setHistory([]));
+        void trackWarranty(found.id).then(setWarranty).catch(() => setWarranty(null));
         if (found.intakePhotos?.length) {
           fetch(`/api/track/photos?job=${encodeURIComponent(found.id)}`)
             .then(r => r.json())
@@ -281,6 +367,7 @@ function TrackInner() {
       } else {
         setHistory([]);
         setPhotos([]);
+        setWarranty(null);
       }
     } catch (e) {
       setJob(null);
@@ -322,7 +409,7 @@ function TrackInner() {
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
       <div className="topbar">
-        <div className="logo">MM</div>
+        <div className="logo"><img src={SHOP_DETAILS.logo} alt="" /></div>
         <div>
           <div className="brand-name">{SHOP_DETAILS.name}</div>
           <div className="brand-sub">Phone Repair &amp; Service Centre</div>
@@ -373,7 +460,7 @@ function TrackInner() {
                   </button>
                 </div>
                 <div className="hero-device">{[job.brand, job.model].filter(Boolean).join(" ")}{job.customerName ? ` · ${job.customerName}` : ""}</div>
-                <div className="hero-status" style={{ background: status.bg, color: status.fg }}>
+                <div className="hero-status" style={{ background: status.bg, color: status.fg, border: status.border }}>
                   <span className="dot" style={{ background: status.dot }} /> {status.label}
                 </div>
                 <div className="hero-foot">
@@ -496,7 +583,7 @@ function TrackInner() {
                 </div>
                 <div className="grand">
                   <div><span>Total</span><div className="amt">Rs. {job.estimatedCost.toLocaleString("en-LK", { minimumFractionDigits: 2 })}</div></div>
-                  <div className="due"><span>Balance due on collection</span><div className="amt">Rs. {balance.toLocaleString("en-LK", { minimumFractionDigits: 2 })}</div></div>
+                  <div className="due"><span>Balance due on collection</span><div className="amt" style={{ color: balance > 0 ? "#FF6B61" : "#5FE3A6" }}>Rs. {balance.toLocaleString("en-LK", { minimumFractionDigits: 2 })}</div></div>
                 </div>
 
                 {needsApproval && (
@@ -522,6 +609,73 @@ function TrackInner() {
                   </div>
                 )}
               </section>
+
+              {/* WARRANTY */}
+              {warranty && (() => {
+                const wStatus = effectiveWarrantyStatus(warranty);
+                const wMeta = WARRANTY_STATUS_META[wStatus];
+                const pct = warrantyProgressPct(warranty);
+                const scopeCoversParts = warranty.scope !== "Labour Only";
+                const scopeCoversLabour = warranty.scope !== "Parts Only";
+                const items: { label: string; covered: boolean }[] = [
+                  ...(job.partsUsed ?? []).map(p => ({ label: p, covered: scopeCoversParts })),
+                  { label: "Workmanship", covered: scopeCoversLabour },
+                ];
+                const conditions = warranty.exclusions.length
+                  ? `This warranty covers ${warrantySubtitle(warranty.scope).replace("Covers ", "")}. It does not cover ${formatExclusionsProse(warranty.exclusions)}. Bring this job number when you claim.`
+                  : "Bring this job number when you claim.";
+
+                return (
+                  <section className="card">
+                    <header><h2>Warranty</h2><span className={`pill ${wMeta.pill}`}>{wMeta.label}</span></header>
+
+                    <div className="warranty-headline">{warrantyHeadline(warranty, wStatus)}</div>
+                    <p className="warranty-sub">{warrantySubtitle(warranty.scope)}</p>
+
+                    {pct !== null && <div className="wbar"><div className="wbar-fill" style={{ width: `${pct}%` }} /></div>}
+
+                    {warranty.startsAt && warranty.expiresAt && (
+                      <div className="warranty-dates">
+                        <span>Started {fmtDate(warranty.startsAt)}</span>
+                        <span>Expires {fmtDate(warranty.expiresAt)}</span>
+                      </div>
+                    )}
+
+                    <div className="totals" style={{ marginTop: 14 }}>
+                      {items.map((it, i) => (
+                        <div className="trow" key={i}>
+                          {it.label}
+                          <b style={it.covered ? undefined : { color: "var(--muted)" }}>
+                            {it.covered ? formatDuration(warranty.durationDays) : "Not covered"}
+                          </b>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="notebox" style={{ marginTop: 14 }}>
+                      <strong>Conditions</strong>{conditions}
+                    </div>
+
+                    {warranty.claims.length > 0 && (
+                      <div className="rows" style={{ marginTop: 14 }}>
+                        {warranty.claims.map(c => {
+                          const cMeta = CLAIM_STATUS_META[c.status];
+                          return (
+                            <div className="row" key={c.id} style={{ padding: "12px 14px" }}>
+                              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                <div style={{ minWidth: 0, flex: 1 }}>
+                                  <div className="row-title">{c.reportedIssue}<small>{fmtDate(c.reportedAt)} · Claim {c.id}{c.resolution ? ` · ${c.resolution}` : ""}</small></div>
+                                </div>
+                                <span className={`pill ${cMeta.pill}`}>{cMeta.label}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </section>
+                );
+              })()}
 
               {/* HISTORY */}
               {history.length > 0 && (
@@ -590,7 +744,7 @@ function TrackInner() {
             <div className="card">
               <h3>Job status</h3>
               <div style={{ marginBottom: 12 }}>
-                <span className="pill" style={{ background: status.bg, color: status.fg }}>{status.label}</span>
+                <span className="pill" style={{ background: status.bg, color: status.fg, border: status.border }}>{status.label}</span>
               </div>
               <div className="kv" style={{ gap: 12 }}>
                 <div><span>Job</span><b className="mono">{job.id}</b></div>
