@@ -3,6 +3,7 @@ import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/lib/auth/AuthContext";
 import { ToastProvider } from "@/lib/ui/toast";
 import AppearanceProvider from "@/lib/settings/AppearanceProvider";
+import NumberScrollGuard from "@/lib/ui/NumberScrollGuard";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -20,6 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
+        <NumberScrollGuard />
         <ThemeProvider attribute="class" defaultTheme="light">
           <AuthProvider>
             <AppearanceProvider>

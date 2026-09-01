@@ -2,32 +2,242 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Smartphone, Search, ShieldCheck, CheckCircle, Clock, Wrench, Truck, AlertTriangle, Loader2 } from "lucide-react";
-import { trackJob, approveJobEstimate, type TrackedJob } from "@/lib/repair/api";
+import {
+  trackJob, trackJobHistory, approveJobEstimate,
+  type TrackedJob, type TrackedJobHistoryEntry,
+} from "@/lib/repair/api";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { SHOP_DETAILS } from "@/lib/shop";
+import type { ConditionGrade } from "@/cashier/contexts/RepairContext";
+
+/**
+ * The public "Repair & Service Summary" page — what a customer sees when
+ * they follow {track_link} from an SMS/email, scan the QR code on their
+ * intake slip, or type their job number in at /track directly.
+ *
+ * Every section here is backed by something real in the database (via
+ * track_job()/track_job_history(), see the migration alongside this file).
+ * A few things a fuller version of this page could show — a diagnosis
+ * write-up, categorised "fixed / found / suggested" advisories, a
+ * functional-test checklist, before/after photo pairs, an itemised invoice —
+ * aren't included, because none of that is actually captured anywhere in the
+ * app today; showing them would mean inventing data rather than reporting
+ * it. Warranty is left out for the same reason: it's still a
+ * localStorage-only record on whichever staff browser issued it, not
+ * something a customer's own browser can ever see.
+ */
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
-// Warranties aren't in the database yet (WarrantyContext is still
-// localStorage-only — see its own file), so this half of the page can only
-// ever show something on the same browser/device that issued the warranty.
-// Real customers scanning the QR code on their own phone will not see this
-// section; it's read defensively rather than removed, so it still works for
-// whoever's testing on the staff machine.
-interface Warranty {
-  id: string; jobId: string; deviceModel: string; partsCovered: string[]; scope: string;
-  durationDays: number; startsAt?: string; expiresAt?: string; status: string;
+const CSS = `
+:root{
+  --bg:#F4F6FB; --card:#FFFFFF; --ink:#171A2B; --ink-2:#3D4356; --muted:#767C93; --line:#E8EAF3;
+  --brand:#4A56E2; --brand-deep:#2B33A0; --tint:#EEF0FE;
+  --ok:#0FA96B; --ok-tint:#E4F7EF; --warn:#E0930C; --warn-tint:#FDF3E0; --bad:#E0483F; --bad-tint:#FDECEB;
+  --radius:18px; --radius-sm:12px;
+  --shadow-sm:0 1px 2px rgba(23,26,43,.06);
+}
+*{box-sizing:border-box}
+.tp *{box-sizing:border-box}
+.tp{background:var(--bg);color:var(--ink);font-family:${ff};font-size:15px;line-height:1.55;padding-bottom:96px;min-height:100vh}
+.tp h1,.tp h2,.tp h3,.tp h4{margin:0;line-height:1.25;letter-spacing:-.015em}
+.tp p{margin:0}
+.tp button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.tp a{color:var(--brand);text-decoration:none}
+
+.tp .topbar{position:sticky;top:0;z-index:40;background:rgba(255,255,255,.92);backdrop-filter:saturate(180%) blur(14px);border-bottom:1px solid var(--line);padding:12px 18px;display:flex;align-items:center;gap:12px}
+.tp .logo{width:34px;height:34px;border-radius:10px;flex:none;background:linear-gradient(140deg,#5B67F0,#2B33A0);color:#fff;display:grid;place-items:center;font-weight:800;font-size:13px;box-shadow:0 4px 12px rgba(74,86,226,.32)}
+.tp .brand-name{font-weight:800;font-size:15px;letter-spacing:-.02em}
+.tp .brand-sub{font-size:11.5px;color:var(--muted);font-weight:500;margin-top:-2px}
+.tp .secure{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--ok);background:var(--ok-tint);padding:5px 10px;border-radius:999px}
+.tp .shell{max-width:1180px;margin:0 auto;padding:20px 16px 24px;display:grid;gap:16px}
+.tp .rail{display:none}
+@media(min-width:1000px){
+  .tp .shell{grid-template-columns:minmax(0,1fr) 316px;align-items:start;gap:22px;padding:28px 24px 40px}
+  .tp .col-main{display:grid;gap:16px;min-width:0}
+  .tp .rail{display:grid;gap:14px;position:sticky;top:78px}
+}
+@media(max-width:999px){ .tp .col-main{display:grid;gap:16px} }
+
+.tp .page-title h1{font-size:26px;font-weight:800}
+.tp .page-title p{color:var(--muted);font-size:13.5px;margin-top:4px}
+
+.tp .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:18px}
+.tp .card>header{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+.tp .card>header h2{font-size:16px;font-weight:700}
+.tp .card>header .hint{font-size:12px;color:var(--muted);margin-left:auto;font-weight:500}
+
+.tp .hero{position:relative;overflow:hidden;color:#fff;border-radius:var(--radius);background:linear-gradient(135deg,#4A56E2 0%,#3A44C8 46%,#242B86 100%);padding:22px 20px;box-shadow:0 14px 34px rgba(43,51,160,.28)}
+.tp .hero .blob{position:absolute;inset:auto -60px -110px auto;width:230px;height:230px;border-radius:50%;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.22),rgba(255,255,255,0) 65%);pointer-events:none}
+.tp .hero-label{font-size:11.5px;font-weight:600;color:rgba(255,255,255,.72)}
+.tp .hero-job{display:flex;align-items:center;gap:10px;margin:4px 0 2px}
+.tp .hero-job strong{font-size:27px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.tp .copy-btn{width:32px;height:32px;border-radius:9px;background:rgba(255,255,255,.16);display:grid;place-items:center;color:#fff;flex:none;transition:background .16s}
+.tp .copy-btn:hover{background:rgba(255,255,255,.28)}
+.tp .hero-device{font-size:13.5px;color:rgba(255,255,255,.84);font-weight:500}
+.tp .hero-status{display:inline-flex;align-items:center;gap:7px;margin-top:14px;font-weight:700;font-size:12.5px;padding:7px 13px;border-radius:999px}
+.tp .hero-status .dot{width:7px;height:7px;border-radius:50%}
+.tp .hero-foot{margin-top:18px;padding-top:14px;border-top:1px solid rgba(255,255,255,.18);display:flex;gap:18px;flex-wrap:wrap}
+.tp .hero-foot div{min-width:96px}
+.tp .hero-foot span{display:block;font-size:11px;color:rgba(255,255,255,.66);font-weight:500}
+.tp .hero-foot b{font-size:14px;font-weight:700}
+
+.tp .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px 16px}
+.tp .kv>div{min-width:0}
+.tp .kv span{display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin-bottom:2px}
+.tp .kv b{font-size:14px;font-weight:600;word-break:break-word}
+.tp .kv .mono{font-variant-numeric:tabular-nums;letter-spacing:.02em}
+
+.tp .pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:999px;white-space:nowrap}
+.tp .pill.ok{background:var(--ok-tint);color:var(--ok)}
+.tp .pill.warn{background:var(--warn-tint);color:var(--warn)}
+.tp .pill.bad{background:var(--bad-tint);color:var(--bad)}
+.tp .pill.neutral{background:#F1F2F7;color:var(--muted)}
+
+.tp .tl{display:grid;gap:0}
+.tp .tl-step{display:grid;grid-template-columns:26px 1fr;gap:14px;position:relative;padding-bottom:16px}
+.tp .tl-step:last-child{padding-bottom:0}
+.tp .tl-step .rail-line{position:absolute;left:12.5px;top:22px;bottom:0;width:2px;background:var(--line);border-radius:2px}
+.tp .tl-step.done .rail-line{background:#C3C9F7}
+.tp .tl-step:last-child .rail-line{display:none}
+.tp .node{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;z-index:1;flex:none;background:#fff;border:2px solid var(--line);color:transparent}
+.tp .tl-step.done .node{background:var(--brand);border-color:var(--brand);color:#fff}
+.tp .tl-step.current .node{background:#FFD666;border-color:#FFD666}
+.tp .tl-step.current .node::after{content:"";width:8px;height:8px;border-radius:50%;background:#4A3200}
+.tp .tl-body h4{font-size:14px;font-weight:700}
+.tp .tl-step.todo .tl-body h4{color:#A2A7BA;font-weight:600}
+.tp .tl-body time{display:block;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;margin-top:1px}
+.tp .tl-body .note{font-size:12.5px;color:var(--ink-2);margin-top:4px}
+.tp .tl-step.current .tl-body h4{color:var(--brand-deep)}
+
+.tp .cond{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:8px}
+.tp .cond-item{display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:var(--radius-sm);background:#FAFBFE;border:1px solid var(--line)}
+.tp .cond-item .ci-l{font-size:12.5px;color:var(--ink-2);font-weight:600}
+.tp .cond-item .ci-v{margin-left:auto;font-size:11.5px;font-weight:700}
+.tp .ci-good{color:var(--ok)} .tp .ci-warn{color:var(--warn)} .tp .ci-bad{color:var(--bad)}
+
+.tp .notebox{margin-top:14px;padding:13px 15px;border-radius:var(--radius-sm);background:#FAFBFE;border:1px solid var(--line);font-size:13.5px;color:var(--ink-2)}
+.tp .notebox strong{display:block;color:var(--ink);font-size:12.5px;margin-bottom:3px}
+
+.tp .rows{display:grid;gap:8px}
+.tp .row{border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;transition:border-color .16s,box-shadow .16s}
+.tp .row.open{border-color:#C7CCF8;box-shadow:0 6px 20px rgba(74,86,226,.10)}
+.tp .row-head{width:100%;display:flex;align-items:center;gap:11px;padding:13px 14px;text-align:left}
+.tp .row.open .row-head{background:var(--brand);color:#fff}
+.tp .row-title{font-size:13.5px;font-weight:700;min-width:0}
+.tp .row-title small{display:block;font-weight:500;font-size:11.5px;color:var(--muted);margin-top:1px}
+.tp .row.open .row-title small{color:rgba(255,255,255,.78)}
+.tp .row-amt{margin-left:auto;font-size:13.5px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tp .chev{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;background:#F1F2F7;color:var(--muted);flex:none;transition:transform .2s}
+.tp .row.open .chev{background:rgba(255,255,255,.2);color:#fff;transform:rotate(180deg)}
+.tp .row-body{display:none;padding:14px;border-top:1px solid var(--line);background:#FAFBFE}
+.tp .row.open .row-body{display:block}
+
+.tp .parts-list{display:grid;gap:6px}
+.tp .parts-list li{list-style:none;display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:var(--radius-sm);background:#FAFBFE;border:1px solid var(--line);font-size:13px;color:var(--ink-2)}
+.tp .parts-list li svg{flex:none;color:var(--brand)}
+
+.tp .gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+.tp .shot{border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;background:#fff}
+.tp .shot img{display:block;width:100%;aspect-ratio:4/5;object-fit:cover}
+
+.tp .totals{display:grid;gap:0;margin-top:2px}
+.tp .trow{display:flex;align-items:center;gap:12px;padding:10px 0;font-size:13.5px;color:var(--ink-2)}
+.tp .trow+.trow{border-top:1px dashed var(--line)}
+.tp .trow b{margin-left:auto;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+.tp .trow.credit b{color:var(--ok)}
+.tp .grand{margin-top:14px;padding:16px 18px;border-radius:var(--radius-sm);background:linear-gradient(135deg,#171A2B,#2B33A0);color:#fff;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.tp .grand span{font-size:12px;color:rgba(255,255,255,.72);font-weight:600;display:block}
+.tp .grand .amt{font-size:24px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.tp .grand .due{margin-left:auto;text-align:right}
+.tp .grand .due .amt{color:#FFD666;font-size:19px}
+
+.tp .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 14px;border-radius:12px;font-size:13.5px;font-weight:700;transition:transform .12s,background .16s,box-shadow .16s}
+.tp .btn:active{transform:scale(.985)}
+.tp .btn-primary{background:var(--brand);color:#fff;box-shadow:0 6px 16px rgba(74,86,226,.28)}
+.tp .btn-primary:hover{background:#3F4AD4}
+.tp .btn-ghost{background:#F1F2F7;color:var(--ink)}
+.tp .btn-ghost:hover{background:#E8EAF3}
+.tp .btn-wa{background:#20BA5A;color:#fff}
+.tp .btn-block{width:100%}
+.tp .btn:disabled{opacity:.55;cursor:not-allowed}
+
+.tp .support-grid{display:grid;gap:9px}
+.tp .support-grid .btn{justify-content:flex-start}
+.tp .ref-note{margin-top:12px;font-size:12px;color:var(--muted);text-align:center}
+.tp .ref-note b{color:var(--ink);font-variant-numeric:tabular-nums}
+
+.tp .rail .card{padding:16px}
+.tp .rail h3{font-size:13.5px;font-weight:700;margin-bottom:12px}
+
+.tp .dock{position:fixed;left:0;right:0;bottom:0;z-index:50;background:rgba(255,255,255,.94);backdrop-filter:blur(14px);border-top:1px solid var(--line);padding:10px 14px calc(10px + env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tp .dock .btn{padding:11px 8px;font-size:12.5px}
+@media(min-width:1000px){ .tp .dock{display:none} .tp{padding-bottom:0} }
+
+.tp .seclist{display:grid;gap:9px}
+.tp .seclist div{display:grid;grid-template-columns:18px 1fr;gap:9px;font-size:12.5px;color:var(--ink-2)}
+.tp .linkbox{margin-top:12px;padding:10px 12px;border-radius:10px;background:#FAFBFE;border:1px dashed var(--line);font-size:11.5px;color:var(--muted);word-break:break-all}
+.tp footer.legal{text-align:center;font-size:11.5px;color:var(--muted);padding:6px 0 4px;line-height:1.7}
+
+.tp .toast{position:fixed;left:50%;bottom:96px;transform:translate(-50%,14px);z-index:70;background:var(--ink);color:#fff;padding:10px 16px;border-radius:999px;font-size:12.5px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s}
+.tp .toast.show{opacity:1;transform:translate(-50%,0)}
+
+.tp .searchwrap{display:flex;gap:8px}
+.tp .searchwrap input{flex:1;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 12px;font-size:14px;color:var(--ink);font-family:${ff};outline:none;box-sizing:border-box}
+`;
+
+const STATUS_META: Record<string, { label: string; bg: string; fg: string; dot: string }> = {
+  "Non-Issued": { label: "Job received", bg: "#EEF0FE", fg: "#2B33A0", dot: "#4A56E2" },
+  "Issued":     { label: "Repair in progress", bg: "#EEF0FE", fg: "#2B33A0", dot: "#4A56E2" },
+  "Pending":    { label: "On hold", bg: "#FDF3E0", fg: "#7A5200", dot: "#E0930C" },
+  "Completed":  { label: "Ready for collection", bg: "#FFD666", fg: "#4A3200", dot: "#4A3200" },
+  "Delivered":  { label: "Collected", bg: "#E4F7EF", fg: "#0B6B47", dot: "#0FA96B" },
+  "Cancelled":  { label: "Cancelled", bg: "#FDECEB", fg: "#8A2A24", dot: "#E0483F" },
+};
+
+const CHECK = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round"><path d="m5 13 4 4L19 7" /></svg>
+);
+
+function fmtDate(iso?: string) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-const STEPS = [
-  { key: "Non-Issued", label: "Received", icon: CheckCircle },
-  { key: "Issued",     label: "In Repair", icon: Wrench },
-  { key: "Completed",  label: "Ready",     icon: Clock },
-  { key: "Delivered",  label: "Collected", icon: Truck },
+const GRADE_CLASS: Record<ConditionGrade, string> = {
+  Pristine: "ci-good", Good: "ci-good", Worn: "ci-warn", Damaged: "ci-bad",
+};
+const CONDITION_LABELS: { key: "front" | "back" | "frame" | "camera" | "ports" | "buttons"; label: string }[] = [
+  { key: "front", label: "Front / Screen" }, { key: "back", label: "Back" },
+  { key: "frame", label: "Frame / Sides" }, { key: "camera", label: "Camera" },
+  { key: "ports", label: "Ports" }, { key: "buttons", label: "Buttons" },
 ];
 
-function readWarranties(): Warranty[] {
-  try { const r = localStorage.getItem("mano_warranties"); return r ? (JSON.parse(r) as Warranty[]) : []; } catch { return []; }
+interface TlStep { label: string; date?: string; note?: string; state: "done" | "current" | "todo"; }
+
+function buildTimeline(job: TrackedJob): TlStep[] {
+  const reachedCompleted = job.status === "Completed" || job.status === "Delivered";
+  const reachedDelivered = job.status === "Delivered";
+  const steps: TlStep[] = [
+    { label: "Device received", date: job.createdAt, state: "done" },
+    { label: "Repair started", date: job.startedAt, state: job.startedAt ? "done" : job.status === "Non-Issued" ? "current" : "todo" },
+  ];
+  if (job.approval?.approvedAt) {
+    steps.push({ label: "You approved the revised estimate", date: job.approval.approvedAt.slice(0, 10), state: "done" });
+  }
+  steps.push({ label: "Repair completed", date: job.completedAt, state: job.completedAt ? "done" : job.status === "Issued" ? "current" : "todo" });
+  steps.push({
+    label: "Ready for collection", date: job.completedAt,
+    note: job.status === "Completed" ? "Bring your job number when you collect." : undefined,
+    state: reachedDelivered ? "done" : job.status === "Completed" ? "current" : "todo",
+  });
+  steps.push({ label: "Collected", date: job.handedOverAt, state: reachedDelivered ? "current" : "todo" });
+  return steps;
+}
+
+function waLink(phone: string, text: string) {
+  return `https://wa.me/${phone.replace(/\D/g, "")}?text=${encodeURIComponent(text)}`;
 }
 
 function TrackInner() {
@@ -35,12 +245,20 @@ function TrackInner() {
   const configured = isSupabaseConfigured();
   const [query, setQuery] = useState(params.get("job") ?? "");
   const [job, setJob] = useState<TrackedJob | null | undefined>(undefined);
+  const [history, setHistory] = useState<TrackedJobHistoryEntry[]>([]);
+  const [photos, setPhotos] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
-  const [warranty, setWarranty] = useState<Warranty | null>(null);
   const [approved, setApproved] = useState(false);
   const [approving, setApproving] = useState(false);
   const [approverName, setApproverName] = useState("");
+  const [openRow, setOpenRow] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 1800);
+  };
 
   const lookup = async (id: string) => {
     if (!id.trim() || !configured) return;
@@ -50,11 +268,19 @@ function TrackInner() {
       const found = await trackJob(id);
       setJob(found);
       if (found) {
-        const ws = readWarranties();
-        setWarranty(ws.find(w => w.jobId === found.id) ?? null);
         setApproved(!!found.approval);
+        void trackJobHistory(found.id).then(setHistory).catch(() => setHistory([]));
+        if (found.intakePhotos?.length) {
+          fetch(`/api/track/photos?job=${encodeURIComponent(found.id)}`)
+            .then(r => r.json())
+            .then(d => setPhotos(d.urls ?? []))
+            .catch(() => setPhotos([]));
+        } else {
+          setPhotos([]);
+        }
       } else {
-        setWarranty(null);
+        setHistory([]);
+        setPhotos([]);
       }
     } catch (e) {
       setJob(null);
@@ -83,211 +309,322 @@ function TrackInner() {
     }
   };
 
-  const stepIdx = job ? Math.max(0, STEPS.findIndex(s => s.key === (job.status === "Pending" ? "Issued" : job.status))) : 0;
-  const needsApproval = job && (job.revisedEstimate ?? 0) > (job.originalEstimate ?? job.estimatedCost) && !approved;
+  const needsApproval = !!job && (job.revisedEstimate ?? 0) > (job.originalEstimate ?? job.estimatedCost) && !approved;
+  const balance = job ? Math.max(0, job.estimatedCost - job.advancePaid) : 0;
+  const status = job ? STATUS_META[job.status] ?? STATUS_META["Non-Issued"] : STATUS_META["Non-Issued"];
+  // wa.me needs the international form with no leading 0 or +; tel: wants the +.
+  const shopDigits = SHOP_DETAILS.phone.replace(/\D/g, "").replace(/^0/, "");
+  const shopWa = `94${shopDigits}`;
+  const shopTel = `+94${shopDigits}`;
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg-primary)", fontFamily: ff, display: "flex", justifyContent: "center", padding: "40px 18px" }}>
-      <div style={{ width: "100%", maxWidth: 560 }}>
-        {/* Brand */}
-        <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ width: 52, height: 52, borderRadius: 15, background: "var(--bg-card)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
-            <Smartphone size={22} color="var(--text-secondary)" />
-          </div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em" }}>Track Your Repair</h1>
-          <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 5 }}>Mano Mobile · enter your job number</p>
+    <div className="tp">
+      <style dangerouslySetInnerHTML={{ __html: CSS }} />
+
+      <div className="topbar">
+        <div className="logo">MM</div>
+        <div>
+          <div className="brand-name">{SHOP_DETAILS.name}</div>
+          <div className="brand-sub">Phone Repair &amp; Service Centre</div>
         </div>
+        <span className="secure">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M12 2 4 6v6c0 5 3.4 8.9 8 10 4.6-1.1 8-5 8-10V6l-8-4Z" /></svg>
+          Secure link
+        </span>
+      </div>
 
-        {!configured && (
-          <div style={{ textAlign: "center", padding: "16px 18px", background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", borderRadius: 14, marginBottom: 20 }}>
-            <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>Tracking isn&apos;t connected right now — please call the shop for your repair status.</p>
+      <div className="shell">
+        <div className="col-main">
+          <div className="page-title">
+            <h1>Repair &amp; Service Summary</h1>
+            <p>Everything that happened to your device, from drop-off to collection.</p>
           </div>
-        )}
 
-        {/* Search */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 22 }}>
-          <div style={{ position: "relative", flex: 1 }}>
-            <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
-            <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && lookup(query)} placeholder="e.g. RM-001" disabled={!configured}
-              style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, padding: "11px 12px 11px 34px", fontSize: 14, color: "var(--text-primary)", fontFamily: ff, outline: "none", boxSizing: "border-box" }} />
-          </div>
-          <button onClick={() => lookup(query)} disabled={!configured || loading} style={{ padding: "0 20px", borderRadius: 10, border: "none", background: "var(--accent)", color: "var(--accent-fg)", fontSize: 13.5, fontWeight: 700, cursor: configured && !loading ? "pointer" : "not-allowed", fontFamily: ff, opacity: configured && !loading ? 1 : 0.6, display: "flex", alignItems: "center", gap: 6 }}>
-            {loading && <Loader2 size={14} className="spin-icon" />} Track
-          </button>
-        </div>
+          {!configured && (
+            <div className="card" style={{ textAlign: "center" }}>
+              <p style={{ fontSize: 13, color: "var(--muted)" }}>Tracking isn&apos;t connected right now — please call the shop for your repair status.</p>
+            </div>
+          )}
 
-        {lookupError && (
-          <div style={{ textAlign: "center", padding: "14px 18px", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 14, marginBottom: 16 }}>
-            <p style={{ fontSize: 13, color: "#f87171" }}>{lookupError}</p>
-          </div>
-        )}
-
-        {job === null && !lookupError && (
-          <div style={{ textAlign: "center", padding: "40px 20px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14 }}>
-            <AlertTriangle size={30} color="var(--text-muted)" style={{ marginBottom: 10 }} />
-            <p style={{ fontSize: 14, color: "var(--text-secondary)" }}>No job found with that number.</p>
-            <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>Check the number on your job card and try again.</p>
-          </div>
-        )}
-
-        {job && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {/* Device card */}
-            <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "18px 20px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-                <div>
-                  <p style={{ fontSize: 16, fontWeight: 800, color: "var(--text-primary)" }}>{job.brand} {job.model}</p>
-                  <p style={{ fontSize: 12.5, color: "var(--text-muted)" }}>{job.id} · {job.issue}</p>
-                </div>
-                <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 7, background: "var(--accent-dim)", color: "var(--accent)", border: "1px solid var(--accent-glow)" }}>{job.status}</span>
+          {configured && !job && (
+            <div className="card">
+              <header><h2>Find your repair</h2></header>
+              <div className="searchwrap">
+                <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && lookup(query)} placeholder="e.g. RM-001" />
+                <button className="btn btn-primary" onClick={() => lookup(query)} disabled={loading}>{loading ? "Looking…" : "Track"}</button>
               </div>
+              {lookupError && <p style={{ fontSize: 12.5, color: "var(--bad)", marginTop: 10 }}>{lookupError}</p>}
+              {job === null && !lookupError && <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 10 }}>No job found with that number — check the job card and try again.</p>}
+            </div>
+          )}
 
-              {/* Progress */}
-              {job.status !== "Cancelled" && (
-                <div style={{ display: "flex", alignItems: "center", gap: 0, marginTop: 6 }}>
-                  {STEPS.map((s, i) => {
-                    const Icon = s.icon; const done = i <= stepIdx;
-                    return (
-                      <div key={s.key} style={{ display: "flex", alignItems: "center", flex: i < STEPS.length - 1 ? 1 : "unset" }}>
-                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                          <div style={{ width: 34, height: 34, borderRadius: "50%", background: done ? "var(--accent)" : "var(--bg-secondary)", border: `2px solid ${done ? "var(--accent)" : "var(--border)"}`, display: "flex", alignItems: "center", justifyContent: "center", color: done ? "var(--accent-fg)" : "var(--text-muted)" }}>
-                            <Icon size={15} />
-                          </div>
-                          <span style={{ fontSize: 10.5, color: done ? "var(--text-primary)" : "var(--text-muted)", fontWeight: i === stepIdx ? 700 : 400 }}>{s.label}</span>
-                        </div>
-                        {i < STEPS.length - 1 && <div style={{ flex: 1, height: 2, margin: "0 6px", marginBottom: 20, background: i < stepIdx ? "var(--accent)" : "var(--border)" }} />}
+          {job && (
+            <>
+              {/* HERO */}
+              <section className="hero">
+                <div className="blob" />
+                <div className="hero-label">Job number</div>
+                <div className="hero-job">
+                  <strong>{job.id}</strong>
+                  <button className="copy-btn" aria-label="Copy job number" onClick={() => {
+                    navigator.clipboard?.writeText(job.id).then(() => showToast("Job number copied")).catch(() => showToast(job.id));
+                  }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
+                  </button>
+                </div>
+                <div className="hero-device">{[job.brand, job.model].filter(Boolean).join(" ")}{job.customerName ? ` · ${job.customerName}` : ""}</div>
+                <div className="hero-status" style={{ background: status.bg, color: status.fg }}>
+                  <span className="dot" style={{ background: status.dot }} /> {status.label}
+                </div>
+                <div className="hero-foot">
+                  <div><span>Received</span><b>{fmtDate(job.createdAt) || "—"}</b></div>
+                  <div><span>{job.status === "Delivered" ? "Collected" : "Completed"}</span><b>{fmtDate(job.status === "Delivered" ? job.handedOverAt : job.completedAt) || "—"}</b></div>
+                  <div><span>Balance due</span><b>Rs. {balance.toLocaleString("en-LK", { minimumFractionDigits: 2 })}</b></div>
+                </div>
+              </section>
+
+              {/* ON HOLD / CANCELLED */}
+              {job.status === "Pending" && (
+                <div className="card" style={{ borderLeft: "3px solid var(--warn)" }}>
+                  <p style={{ fontSize: 13, color: "var(--ink-2)" }}><b style={{ color: "var(--ink)" }}>On hold</b>{job.pauseReason ? ` — ${job.pauseReason}` : " — we'll update this once work resumes."}</p>
+                </div>
+              )}
+              {job.status === "Cancelled" && (
+                <div className="card" style={{ borderLeft: "3px solid var(--bad)" }}>
+                  <p style={{ fontSize: 13, color: "var(--ink-2)" }}><b style={{ color: "var(--ink)" }}>Job cancelled</b>{job.cancelReason ? ` — ${job.cancelReason}` : ""}{job.cancelledAt ? ` (${fmtDate(job.cancelledAt)})` : ""}</p>
+                </div>
+              )}
+
+              {/* DEVICE & CUSTOMER */}
+              <section className="card">
+                <header><h2>Device &amp; customer</h2></header>
+                <div className="kv">
+                  <div><span>Customer</span><b>{job.customerName || "—"}</b></div>
+                  {job.customerPhone && <div><span>Contact</span><b className="mono">{job.customerPhone}</b></div>}
+                  <div><span>Device</span><b>{[job.brand, job.model].filter(Boolean).join(" ") || "—"}</b></div>
+                  {job.imei && <div><span>IMEI</span><b className="mono">{job.imei}</b></div>}
+                  <div><span>Received</span><b>{fmtDate(job.createdAt) || "—"}</b></div>
+                  {job.startedAt && <div><span>Repair started</span><b>{fmtDate(job.startedAt)}</b></div>}
+                  {job.completedAt && <div><span>Repair completed</span><b>{fmtDate(job.completedAt)}</b></div>}
+                  <div><span>Delivered / collected</span><b style={job.handedOverAt ? undefined : { color: "var(--muted)" }}>{fmtDate(job.handedOverAt) || "Awaiting collection"}</b></div>
+                  {job.technician && <div><span>Technician</span><b>{job.technician}</b></div>}
+                </div>
+              </section>
+
+              {/* TIMELINE */}
+              <section className="card">
+                <header><h2>Repair progress</h2></header>
+                <div className="tl">
+                  {buildTimeline(job).map((s, i, arr) => (
+                    <div key={i} className={`tl-step ${s.state}`}>
+                      {i < arr.length - 1 && <div className="rail-line" />}
+                      <div className="node">{s.state === "done" ? CHECK : null}</div>
+                      <div className="tl-body">
+                        <h4>{s.label}</h4>
+                        <time>{s.date ? fmtDate(s.date) : s.state === "todo" ? "Pending" : ""}</time>
+                        {s.note && <p className="note">{s.note}</p>}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-              {job.status !== "Delivered" && job.status !== "Cancelled" && (
-                <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 14, textAlign: "center" }}>Estimated ready: <strong style={{ color: "var(--text-secondary)" }}>{job.estimatedCompletion}</strong></p>
-              )}
-            </div>
-
-            {/* On hold / cancelled context — the progress strip alone doesn't say why */}
-            {job.status === "Pending" && (
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 16px", borderRadius: 12, background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.25)" }}>
-                <Clock size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
-                <span style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                  <strong style={{ color: "var(--text-primary)" }}>On hold</strong>{job.pauseReason ? ` — ${job.pauseReason}` : " — we'll update this once work resumes."}
-                </span>
-              </div>
-            )}
-            {job.status === "Cancelled" && (
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 16px", borderRadius: 12, background: "rgba(248,113,113,0.07)", border: "1px solid rgba(248,113,113,0.25)" }}>
-                <AlertTriangle size={15} color="#f87171" style={{ flexShrink: 0, marginTop: 1 }} />
-                <span style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                  <strong style={{ color: "var(--text-primary)" }}>Job cancelled</strong>{job.cancelReason ? ` — ${job.cancelReason}` : ""}{job.cancelledAt ? ` (${job.cancelledAt})` : ""}
-                </span>
-              </div>
-            )}
-
-            {/* Cost */}
-            <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "16px 18px" }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>Cost</p>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-                <div>
-                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Estimated</p>
-                  <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>Rs. {job.estimatedCost.toLocaleString()}</p>
-                </div>
-                <div>
-                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Advance Paid</p>
-                  <p style={{ fontSize: 14, fontWeight: 700, color: "#4ade80" }}>Rs. {job.advancePaid.toLocaleString()}</p>
-                </div>
-                <div>
-                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Balance Due</p>
-                  <p style={{ fontSize: 14, fontWeight: 700, color: job.estimatedCost - job.advancePaid > 0 ? "#f87171" : "#4ade80" }}>
-                    Rs. {Math.max(0, job.estimatedCost - job.advancePaid).toLocaleString()}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Job details — hidden entirely rather than shown empty. A blank
-                card here almost always means the database's track_job()
-                function still predates migration 20260819000016 and doesn't
-                return these columns yet (created_at alone should never be
-                missing for a real job otherwise). */}
-            {(job.technician || job.createdAt || job.startedAt || job.completedAt || job.handedOverAt || (job.receivedItems && job.receivedItems.length > 0)) && (
-            <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "16px 18px" }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>Job Details</p>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                {job.technician && (
-                  <div><p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Technician</p><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 600 }}>{job.technician}</p></div>
-                )}
-                {job.createdAt && (
-                  <div><p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Received</p><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 600 }}>{job.createdAt}</p></div>
-                )}
-                {job.startedAt && (
-                  <div><p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Started</p><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 600 }}>{job.startedAt}</p></div>
-                )}
-                {job.completedAt && (
-                  <div><p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Completed</p><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 600 }}>{job.completedAt}</p></div>
-                )}
-                {job.handedOverAt && (
-                  <div><p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Collected</p><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 600 }}>{job.handedOverAt}</p></div>
-                )}
-                {job.receivedItems && job.receivedItems.length > 0 && (
-                  <div style={{ gridColumn: "1 / -1" }}><p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3 }}>Items Received</p><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 600 }}>{job.receivedItems.join(", ")}</p></div>
-                )}
-              </div>
-            </div>
-            )}
-
-            {/* Approval request */}
-            {needsApproval && (
-              <div style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.3)", borderRadius: 14, padding: "16px 18px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                  <AlertTriangle size={16} color="#fbbf24" />
-                  <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>Approval needed</p>
-                </div>
-                <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 12 }}>
-                  After inspection, the repair cost is now <strong>Rs. {(job.revisedEstimate ?? 0).toLocaleString()}</strong> (originally
-                  Rs. {(job.originalEstimate ?? job.estimatedCost).toLocaleString()}). Please approve to let us proceed.
-                </p>
-                <input
-                  value={approverName}
-                  onChange={e => setApproverName(e.target.value)}
-                  placeholder={`Your name (defaults to ${job.customerName})`}
-                  style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 9, padding: "9px 12px", fontSize: 13, color: "var(--text-primary)", fontFamily: ff, outline: "none", boxSizing: "border-box", marginBottom: 10 }}
-                />
-                <button onClick={approve} disabled={approving} style={{ width: "100%", padding: "10px", borderRadius: 9, border: "none", background: "#fbbf24", color: "#000", fontSize: 13, fontWeight: 700, cursor: approving ? "not-allowed" : "pointer", fontFamily: ff, opacity: approving ? 0.7 : 1 }}>
-                  {approving ? "Recording…" : `Approve Rs. ${(job.revisedEstimate ?? 0).toLocaleString()}`}
-                </button>
-              </div>
-            )}
-            {approved && (job.revisedEstimate ?? 0) > 0 && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 14px", borderRadius: 12, background: "rgba(74,222,128,0.07)", border: "1px solid rgba(74,222,128,0.25)" }}>
-                <CheckCircle size={15} color="#4ade80" /><span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>Revised estimate approved — thank you!</span>
-              </div>
-            )}
-
-            {/* Warranty */}
-            {warranty && (
-              <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "16px 18px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                  <ShieldCheck size={16} color="#a78bfa" />
-                  <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>Warranty {warranty.id}</p>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  {[
-                    ["Covers", warranty.partsCovered.join(", ")],
-                    ["Scope", warranty.scope],
-                    ["Status", warranty.status === "Pending Activation" ? "Starts on collection" : warranty.status],
-                    ["Valid until", warranty.expiresAt ? warranty.expiresAt.slice(0, 10) : "On collection"],
-                  ].map(([k, v]) => (
-                    <div key={k}><p style={{ fontSize: 10.5, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>{k}</p><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 600 }}>{v}</p></div>
+                    </div>
                   ))}
                 </div>
-              </div>
-            )}
-          </div>
-        )}
+              </section>
 
-        <p style={{ textAlign: "center", fontSize: 11, color: "var(--text-muted)", marginTop: 28 }}>Mano Mobile · For help call 011-234-5678</p>
+              {/* WHAT YOU REPORTED */}
+              {(job.issue || job.cosmeticCondition || job.receivedItems?.length) && (
+                <section className="card">
+                  <header><h2>What you reported &amp; how we received it</h2></header>
+                  {job.issue && (
+                    <div className="notebox" style={{ marginTop: 0, marginBottom: job.cosmeticCondition || job.receivedItems?.length ? 14 : 0 }}>
+                      <strong>Your reported problem</strong>{job.issue}
+                    </div>
+                  )}
+                  {job.cosmeticCondition && (
+                    <div className="cond" style={{ marginBottom: job.receivedItems?.length ? 14 : 0 }}>
+                      {CONDITION_LABELS.map(({ key, label }) => {
+                        const grade = job.cosmeticCondition?.[key];
+                        if (!grade) return null;
+                        return (
+                          <div key={key} className="cond-item">
+                            <span className="ci-l">{label}</span>
+                            <span className={`ci-v ${GRADE_CLASS[grade]}`}>{grade}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {job.receivedItems?.length ? (
+                    <div className="notebox">
+                      <strong>Handed over with the device</strong>{job.receivedItems.join(", ")}
+                    </div>
+                  ) : null}
+                </section>
+              )}
+
+              {/* PARTS USED */}
+              {job.partsUsed?.length ? (
+                <section className="card">
+                  <header><h2>Parts used</h2></header>
+                  <ul className="parts-list">
+                    {job.partsUsed.map((p, i) => (
+                      <li key={i}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m5 13 4 4L19 7" /></svg>
+                        {p}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
+              {/* PHOTOS */}
+              {photos.length > 0 && (
+                <section className="card">
+                  <header><h2>Photos at drop-off</h2></header>
+                  <div className="gallery">
+                    {photos.map((src, i) => (
+                      <figure className="shot" key={i}><img src={src} alt={`Device at drop-off ${i + 1}`} /></figure>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* COST */}
+              <section className="card">
+                <header><h2>Cost breakdown</h2><span className={`pill ${balance > 0 ? "warn" : "ok"}`}>{balance > 0 ? "Balance due" : "Fully settled"}</span></header>
+                <div className="totals">
+                  <div className="trow">Estimated cost <b>Rs. {job.estimatedCost.toLocaleString("en-LK", { minimumFractionDigits: 2 })}</b></div>
+                  <div className="trow credit">Advance paid <b>− Rs. {job.advancePaid.toLocaleString("en-LK", { minimumFractionDigits: 2 })}</b></div>
+                </div>
+                <div className="grand">
+                  <div><span>Total</span><div className="amt">Rs. {job.estimatedCost.toLocaleString("en-LK", { minimumFractionDigits: 2 })}</div></div>
+                  <div className="due"><span>Balance due on collection</span><div className="amt">Rs. {balance.toLocaleString("en-LK", { minimumFractionDigits: 2 })}</div></div>
+                </div>
+
+                {needsApproval && (
+                  <div className="notebox" style={{ marginTop: 14, borderLeft: "3px solid var(--warn)" }}>
+                    <strong>Approval needed</strong>
+                    After inspection, the repair cost is now Rs. {(job.revisedEstimate ?? 0).toLocaleString("en-LK")} (originally Rs. {(job.originalEstimate ?? job.estimatedCost).toLocaleString("en-LK")}). Please approve to let us proceed.
+                    <div style={{ marginTop: 10 }}>
+                      <input
+                        value={approverName}
+                        onChange={e => setApproverName(e.target.value)}
+                        placeholder={`Your name (defaults to ${job.customerName})`}
+                        style={{ width: "100%", background: "#fff", border: "1px solid var(--line)", borderRadius: 9, padding: "9px 12px", fontSize: 13, color: "var(--ink)", fontFamily: ff, outline: "none", boxSizing: "border-box", marginBottom: 10 }}
+                      />
+                      <button className="btn btn-primary btn-block" onClick={approve} disabled={approving}>
+                        {approving ? "Recording…" : `Approve Rs. ${(job.revisedEstimate ?? 0).toLocaleString("en-LK")}`}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {approved && (job.revisedEstimate ?? 0) > 0 && (
+                  <div className="notebox" style={{ marginTop: 14, borderLeft: "3px solid var(--ok)" }}>
+                    Revised estimate approved — thank you!
+                  </div>
+                )}
+              </section>
+
+              {/* HISTORY */}
+              {history.length > 0 && (
+                <section className="card">
+                  <header><h2>Previous repairs on this device</h2><span className="hint">{history.length} record{history.length !== 1 ? "s" : ""}</span></header>
+                  <div className="rows">
+                    {history.map(h => {
+                      const open = openRow === h.id;
+                      return (
+                        <div className={`row${open ? " open" : ""}`} key={h.id}>
+                          <button className="row-head" aria-expanded={open} onClick={() => setOpenRow(open ? null : h.id)}>
+                            <div className="row-title">{h.issue || "Repair"}<small>{fmtDate(h.completedAt ?? h.createdAt)} · Job {h.id}</small></div>
+                            <div className="row-amt">Rs. {h.estimatedCost.toLocaleString("en-LK")}</div>
+                            <span className="chev"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg></span>
+                          </button>
+                          {open && (
+                            <div className="row-body">
+                              <div className="kv">
+                                <div><span>Device</span><b>{[h.brand, h.model].filter(Boolean).join(" ") || "—"}</b></div>
+                                <div><span>Status</span><b>{STATUS_META[h.status]?.label ?? h.status}</b></div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
+              {/* SUPPORT */}
+              <section className="card">
+                <header><h2>Questions about this repair?</h2></header>
+                <div className="support-grid">
+                  <a className="btn btn-wa" href={waLink(shopWa, `Hi ${SHOP_DETAILS.name}, I have a question about job ${job.id}`)}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.5L3 21l2.1-5.5A8.4 8.4 0 1 1 21 11.5Z" /></svg>
+                    WhatsApp us about this job
+                  </a>
+                  <a className="btn btn-primary" href={`tel:${shopTel}`}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z" /></svg>
+                    Call {SHOP_DETAILS.name}
+                  </a>
+                </div>
+                <p className="ref-note">Please quote job <b>{job.id}</b> when you contact us.</p>
+              </section>
+
+              {/* SECURITY */}
+              <section className="card">
+                <header><h2>About this link</h2></header>
+                <div className="seclist">
+                  <div><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: 3 }}><path d="m5 13 4 4L19 7" /></svg><div>This page was created only for your repair. No account or password is needed.</div></div>
+                  <div><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: 3 }}><path d="m5 13 4 4L19 7" /></svg><div>Your IMEI and phone number are shown partly hidden, and unlock codes or internal notes are never published here.</div></div>
+                </div>
+              </section>
+
+              <footer className="legal">
+                {SHOP_DETAILS.name} · {SHOP_DETAILS.address} · {SHOP_DETAILS.phone}<br />
+                © {new Date().getFullYear()} {SHOP_DETAILS.name}. Repair record generated {fmtDate(new Date().toISOString())}.
+              </footer>
+            </>
+          )}
+        </div>
+
+        {job && (
+          <aside className="rail">
+            <div className="card">
+              <h3>Job status</h3>
+              <div style={{ marginBottom: 12 }}>
+                <span className="pill" style={{ background: status.bg, color: status.fg }}>{status.label}</span>
+              </div>
+              <div className="kv" style={{ gap: 12 }}>
+                <div><span>Job</span><b className="mono">{job.id}</b></div>
+                <div><span>{job.status === "Delivered" ? "Collected" : "Completed"}</span><b>{fmtDate(job.status === "Delivered" ? job.handedOverAt : job.completedAt) || "—"}</b></div>
+              </div>
+            </div>
+            <div className="card">
+              <h3>Payment</h3>
+              <div className="totals">
+                <div className="trow" style={{ paddingTop: 0 }}>Total <b>Rs. {job.estimatedCost.toLocaleString("en-LK")}</b></div>
+                <div className="trow credit">Advance paid <b>− Rs. {job.advancePaid.toLocaleString("en-LK")}</b></div>
+              </div>
+              <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 12, background: balance > 0 ? "var(--warn-tint)" : "var(--ok-tint)" }}>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: balance > 0 ? "var(--warn)" : "var(--ok)" }}>{balance > 0 ? "Balance due on collection" : "Fully settled"}</span>
+                <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-.02em" }}>Rs. {balance.toLocaleString("en-LK")}</div>
+              </div>
+            </div>
+            <div className="card">
+              <h3>Collection</h3>
+              <p style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.6 }}>{SHOP_DETAILS.address}</p>
+              <a className="btn btn-wa btn-block" style={{ marginTop: 12 }} href={waLink(shopWa, `Hi ${SHOP_DETAILS.name}, job ${job.id}`)}>WhatsApp us</a>
+            </div>
+          </aside>
+        )}
       </div>
+
+      {job && (
+        <div className="dock">
+          <a className="btn btn-wa" href={waLink(shopWa, `Hi ${SHOP_DETAILS.name}, job ${job.id}`)}>WhatsApp</a>
+          <a className="btn btn-ghost" href={`tel:${shopTel}`}>Call</a>
+        </div>
+      )}
+
+      <div className={`toast${toast ? " show" : ""}`}>{toast}</div>
     </div>
   );
 }

@@ -24,8 +24,10 @@ import {
   Search, Filter, ChevronDown, MoreHorizontal,
   CheckCircle, Clock, AlertCircle, XCircle, Wrench,
   X, CheckSquare, Send, Printer, ShieldCheck, CreditCard,
-  Truck, Ban, FileText, Package, Tag, Info, Save, Pencil,
+  Truck, Ban, FileText, Package, Tag, Info, Save, Pencil, BellRing,
 } from "lucide-react";
+import { notifyJobEvent } from "@/lib/sms/notify";
+import { useToast } from "@/lib/ui/toast";
 
 interface FinishJobData {
   actionTaken: string;
@@ -70,6 +72,14 @@ const fmtDate = (d?: string) => {
   return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 };
 const rs = (n: number) => `Rs. ${Math.round(n).toLocaleString("en-LK")}`;
+
+/** Whole days since a job's completedAt — 0 if it isn't completed yet, or the
+ *  date is missing/unparseable, rather than a negative number or NaN. */
+const daysWaiting = (j: RepairJob): number => {
+  if (!j.completedAt) return 0;
+  const completed = new Date(j.completedAt).getTime();
+  return isNaN(completed) ? 0 : Math.max(0, Math.floor((Date.now() - completed) / 86_400_000));
+};
 
 /** Today / this (calendar) week / this (calendar) month, all against the
  *  job's own createdAt — i.e. when it was booked in, not when its status
@@ -239,7 +249,23 @@ const COLUMNS: Record<ColId, ColSpec> = {
       </>
     ),
   },
-  completed: { label: "Completed", render: j => <span style={muted}>{fmtDate(j.completedAt)}</span> },
+  // Only ever shows the "waiting" flag for a job still sitting on the shelf
+  // (status Completed) — an Issued/Delivered row uses this same column
+  // definition too, and has nothing to wait for any more.
+  completed: {
+    label: "Completed",
+    render: j => {
+      const days = daysWaiting(j);
+      return (
+        <>
+          <span style={muted}>{fmtDate(j.completedAt)}</span>
+          {j.status === "Completed" && days >= 7 && (
+            <p style={{ fontSize: 10.5, fontWeight: 700, color: "#f87171", marginTop: 2 }}>Waiting {days}d</p>
+          )}
+        </>
+      );
+    },
+  },
   issued: { label: "Issued On", render: j => <span style={muted}>{fmtDate(j.handover?.handedOverAt)}</span> },
   // What the shop actually paid for parts on this job — quantity × catalog
   // cost price, summed over its approved/issued part requests (Pending and
@@ -1758,6 +1784,17 @@ interface JobsTableProps {
 export default function JobsTable({ view = "All", title, icon: Icon, description }: JobsTableProps) {
   const { addEntry } = useCashRegister();
   const { jobs: allJobs, updateJob, dealers } = useRepair();
+  const toast = useToast();
+
+  /** Manual pickup reminder — same SMS event the daily cron job sends
+   *  automatically for anything waiting 7+ days, just triggered by a click
+   *  instead of a schedule. Fire-and-forget like every other customer SMS
+   *  here (see notifyJobEvent) — the toast is optimistic, not a delivery
+   *  receipt; a real failure still lands in the console and sms_messages. */
+  const sendReminder = (job: RepairJob) => {
+    notifyJobEvent("reminder", job);
+    toast.dialog("success", "Reminder sent", `A pickup reminder was sent to ${job.customerName || "the customer"}.`);
+  };
   // What this cashier is allowed to do at the counter — an Admin is never
   // limited by it. Permissive while it loads, so a slow network cannot stop
   // someone taking a payment.
@@ -2142,6 +2179,18 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
                     ))}
                     <td style={{ padding: "13px 14px" }}>
                       <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                        {/* Only a job actually still waiting for pickup, and
+                            only a Mano Mobile customer — an outside dealer's
+                            job has no end customer of ours to text. */}
+                        {job.status === "Completed" && isInHouseDealer(dealers, job) && (
+                          <button onClick={(e) => { e.stopPropagation(); sendReminder(job); }}
+                            title="Send pickup reminder SMS"
+                            style={{ width: 28, height: 28, borderRadius: 7, border: `1px solid ${daysWaiting(job) >= 7 ? "rgba(248,113,113,0.4)" : "var(--border)"}`, background: "transparent", color: daysWaiting(job) >= 7 ? "#f87171" : "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
+                            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "#f87171"; (e.currentTarget as HTMLButtonElement).style.color = "#f87171"; (e.currentTarget as HTMLButtonElement).style.background = "rgba(248,113,113,0.08)"; }}
+                            onMouseLeave={e => { const w = daysWaiting(job) >= 7; (e.currentTarget as HTMLButtonElement).style.borderColor = w ? "rgba(248,113,113,0.4)" : "var(--border)"; (e.currentTarget as HTMLButtonElement).style.color = w ? "#f87171" : "var(--text-muted)"; (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}>
+                            <BellRing size={12} />
+                          </button>
+                        )}
                         <button onClick={() => setIntakeSlipJob(job)}
                           title="Print intake slip"
                           style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}

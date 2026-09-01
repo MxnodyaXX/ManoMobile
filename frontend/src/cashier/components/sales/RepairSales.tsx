@@ -32,6 +32,11 @@ interface CompletedRepair {
   advance: number;
   unitPrice: number;
   discount: number;
+  /** Only actually shown for an outside dealer's jobs — see the Step 2 table,
+   *  where the customer/advance columns swap for these plus a fault column. */
+  issue: string;
+  createdAt: string;
+  completedAt?: string;
 }
 
 interface DealerProfile {
@@ -49,6 +54,12 @@ const COMPLETED_REPAIRS: CompletedRepair[] = [];
 
 /** Dealer stats are computed from live jobs; no canned figures. */
 const DEALER_PROFILES: Record<string, Pick<DealerProfile, "stats" | "totalEarned" | "outstanding">> = {};
+
+const fmtDate = (d?: string) => {
+  if (!d) return "—";
+  const dt = new Date(d);
+  return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+};
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -618,6 +629,9 @@ export default function RepairSales() {
         // Applied here so grandTotal, totalDiscount, netDue and the invoice all
         // follow from one place.
         discount: Math.min(rowDiscounts[j.id] ?? 0, j.estimatedCost),
+        issue: j.issue,
+        createdAt: j.createdAt,
+        completedAt: j.completedAt,
       }));
     const liveIds = new Set(live.map(r => r.id));
     return [
@@ -780,6 +794,23 @@ export default function RepairSales() {
     setSelectedCreditCustomer(null);
   };
 
+  /** Header checkbox — selects every row currently listed for this dealer
+   *  (i.e. whatever the search box has left visible), or clears the lot if
+   *  they're already all checked. */
+  const allChecked = dealerRepairs.length > 0 && dealerRepairs.every(r => checkedIds.has(r.id));
+  const toggleCheckAll = () => {
+    setCheckedIds(prev => {
+      if (allChecked) {
+        const next = new Set(prev);
+        dealerRepairs.forEach(r => next.delete(r.id));
+        return next;
+      }
+      return new Set([...prev, ...dealerRepairs.map(r => r.id)]);
+    });
+    setAmountReceived("");
+    setSelectedCreditCustomer(null);
+  };
+
   const handleReset = () => {
     setSelectedDealer(""); setCheckedIds(new Set()); setSearch("");
     setBillToDealer(false); manualCustomer.current = { name: "", phone: "", nic: "" };
@@ -794,13 +825,29 @@ export default function RepairSales() {
   const handleDealerChange = (val: string) => {
     setSelectedDealer(val); setCheckedIds(new Set()); setSearch("");
     // The filled-in details belong to the dealer being left behind.
-    setBillToDealer(false); manualCustomer.current = { name: "", phone: "", nic: "" };
-    setCustName(""); setCustPhone(""); setCustNic(""); setAmountReceived("");
+    manualCustomer.current = { name: "", phone: "", nic: "" };
+    setAmountReceived("");
     setRowDiscounts({}); setWriteOffBalance(false); setInvDiscount("");
     setPayMethod("Cash"); setCardRef("");
     setSelectedCreditCustomer(null); setShowCreditConfirm(false); setCreditRecordMade(false);
     setInvoiceSnapshot(null);
     setInvoiceNo(null);
+
+    // Outside dealer: default to billing it to them — that's who actually
+    // gets invoiced for a device they sent in, so ticking it every time was
+    // just an extra click on the common case. Can't be done for Mano Mobile
+    // itself (selectedDealer/dealerRecord below still reflect the dealer
+    // being left, so this checks the incoming value directly).
+    const billable = !!val && !isInHouseDealer(dealers, val);
+    if (billable) {
+      const record = findDealer(dealers, val);
+      setCustName(record?.name ?? val);
+      setCustPhone(record?.contact ?? "");
+      setCustNic("");
+    } else {
+      setCustName(""); setCustPhone(""); setCustNic("");
+    }
+    setBillToDealer(billable);
   };
 
   /**
@@ -1036,9 +1083,29 @@ export default function RepairSales() {
                       is the order the money moved: what the job was billed at,
                       what the customer already put down at intake, and what is
                       left to collect at the counter now. Without them, deciding
-                      what to charge meant opening every job. */}
-                  {["", "Job ID", "Customer", "Brand / Model", "IMEI No.", "Warranty", "Unit Price", "Discount", "Line Total", "Advance Paid", "Balance"].map(h => (
-                    <th key={h} style={{ padding: "9px 14px", textAlign: h === "" ? "center" : "left", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.06em", textTransform: "uppercase" as const, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>{h}</th>
+                      what to charge meant opening every job.
+
+                      An outside dealer's device has no Mano Mobile customer to
+                      name, and no advance of ours on record — the dealer is who
+                      we billed, and what they may have taken from the end owner
+                      isn't ours to show. In its place: the fault and the two
+                      dates that actually matter to a dealer chasing up a job —
+                      when it came in, when it was finished. */}
+                  {(isManoMobile
+                    ? ["", "Job ID", "Customer", "Brand / Model", "IMEI No.", "Warranty", "Unit Price", "Discount", "Line Total", "Advance Paid", "Balance"]
+                    : ["", "Job ID", "Brand / Model", "IMEI No.", "Fault", "Job Accepted", "Finished", "Warranty", "Estimate", "Discount", "Line Total", "Balance"]
+                  ).map((h, i) => (
+                    <th key={h} style={{ padding: "9px 14px", textAlign: h === "" ? "center" : "left", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.06em", textTransform: "uppercase" as const, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
+                      {i === 0 ? (
+                        <input
+                          type="checkbox"
+                          checked={allChecked}
+                          onChange={toggleCheckAll}
+                          title={allChecked ? "Deselect all" : "Select all"}
+                          style={{ accentColor: "var(--accent)", width: 14, height: 14, cursor: "pointer", verticalAlign: "middle" }}
+                        />
+                      ) : h}
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -1062,9 +1129,18 @@ export default function RepairSales() {
                         <input type="checkbox" checked={checked} onChange={() => toggleCheck(r.id)} onClick={(e) => e.stopPropagation()} style={{ accentColor: "var(--accent)", width: 14, height: 14, cursor: "pointer" }} />
                       </td>
                       <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.id}</span></td>
-                      <td style={{ padding: "11px 14px" }}><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.customerName}</p></td>
+                      {isManoMobile && (
+                        <td style={{ padding: "11px 14px" }}><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.customerName}</p></td>
+                      )}
                       <td style={{ padding: "11px 14px" }}><p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.brand} {r.model}</p></td>
                       <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "monospace" }}>{r.imei}</span></td>
+                      {!isManoMobile && (
+                        <>
+                          <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 11.5, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }} title={r.issue}>{r.issue || "—"}</span></td>
+                          <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>{fmtDate(r.createdAt)}</span></td>
+                          <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>{fmtDate(r.completedAt)}</span></td>
+                        </>
+                      )}
                       <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 11.5, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.warranty}</span></td>
                       <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 12, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Rs. {r.unitPrice.toLocaleString()}</span></td>
                       <td style={{ padding: "11px 14px" }} onClick={e => { if (mayDiscount) e.stopPropagation(); }}>
@@ -1097,11 +1173,13 @@ export default function RepairSales() {
                         )}
                       </td>
                       <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Rs. {lineTotal.toLocaleString()}</span></td>
-                      <td style={{ padding: "11px 14px" }}>
-                        <span style={{ fontSize: 12, color: r.advance > 0 ? "#4ade80" : "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                          {r.advance > 0 ? `Rs. ${r.advance.toLocaleString()}` : "—"}
-                        </span>
-                      </td>
+                      {isManoMobile && (
+                        <td style={{ padding: "11px 14px" }}>
+                          <span style={{ fontSize: 12, color: r.advance > 0 ? "#4ade80" : "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                            {r.advance > 0 ? `Rs. ${r.advance.toLocaleString()}` : "—"}
+                          </span>
+                        </td>
+                      )}
                       <td style={{ padding: "11px 14px" }}>
                         <span style={{ fontSize: 12, fontWeight: 700, color: balance > 0 ? "var(--text-primary)" : "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                           {balance > 0 ? `Rs. ${balance.toLocaleString()}` : "Settled"}

@@ -20,15 +20,16 @@ export const SHOP = "Mano Mobile";
 /** Printed at the foot of the default templates. */
 export const SHOP_CONTACT = "0717537383";
 
-export type JobSmsEvent = "created" | "started" | "paused" | "finished";
+export type JobSmsEvent = "created" | "started" | "paused" | "finished" | "reminder";
 
-export const JOB_SMS_EVENTS: JobSmsEvent[] = ["created", "started", "paused", "finished"];
+export const JOB_SMS_EVENTS: JobSmsEvent[] = ["created", "started", "paused", "finished", "reminder"];
 
 export const JOB_SMS_LABEL: Record<JobSmsEvent, string> = {
   created: "Job Received",
   started: "Repair Started",
   paused: "Repair On Hold",
   finished: "Ready For Collection",
+  reminder: "Pickup Reminder",
 };
 
 export const JOB_SMS_PURPOSE: Record<JobSmsEvent, string> = {
@@ -36,6 +37,7 @@ export const JOB_SMS_PURPOSE: Record<JobSmsEvent, string> = {
   started: "repair-started",
   paused: "repair-on-hold",
   finished: "ready-for-collection",
+  reminder: "pickup-reminder",
 };
 
 /** When each message is sent — shown next to the editor so wording matches timing. */
@@ -44,6 +46,7 @@ export const JOB_SMS_TRIGGER: Record<JobSmsEvent, string> = {
   started: "Sent when a technician starts the repair (assigned or self-taken).",
   paused: "Sent when a technician puts the job on hold, including the reason.",
   finished: "Sent when the technician marks the repair finished.",
+  reminder: "Sent for a Completed job still waiting for pickup — a cashier can send it any time from the Non-Issued list, and it also goes out automatically once a day for jobs that have been waiting 7+ days (repeating weekly until collected).",
 };
 
 // ─── Placeholders ────────────────────────────────────────────────────────────
@@ -64,6 +67,8 @@ export const SMS_VARIABLES: { token: string; description: string }[] = [
   { token: "pause_reason", description: "Why the job is on hold" },
   { token: "shop", description: "Shop name" },
   { token: "contact", description: "Shop contact number" },
+  { token: "track_link", description: "Link for the customer to view their invoice and job history online" },
+  { token: "days_waiting", description: "Days since the repair was finished (reminder only)" },
 ];
 
 /** Which tokens make sense per event — the rest would render as fallback text. */
@@ -71,7 +76,8 @@ export const JOB_SMS_VARIABLES: Record<JobSmsEvent, string[]> = {
   created: ["customer_name", "device", "job_number", "fault", "estimated_price", "technician", "paid_amount", "due_amount", "estimated_completion", "shop", "contact"],
   started: ["customer_name", "device", "job_number", "fault", "technician", "estimated_completion", "shop", "contact"],
   paused: ["customer_name", "device", "job_number", "pause_reason", "technician", "shop", "contact"],
-  finished: ["customer_name", "device", "job_number", "fault", "technician", "total", "paid_amount", "due_amount", "shop", "contact"],
+  finished: ["customer_name", "device", "job_number", "fault", "technician", "total", "paid_amount", "due_amount", "track_link", "shop", "contact"],
+  reminder: ["customer_name", "device", "job_number", "fault", "days_waiting", "total", "due_amount", "track_link", "shop", "contact"],
 };
 
 // ─── Formatting helpers ──────────────────────────────────────────────────────
@@ -118,8 +124,33 @@ function trimReason(text: string, max = 90) {
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
 
-/** Values for every token, for one job. */
-export function smsValues(job: RepairJob): Record<string, string> {
+/**
+ * The public tracking page, one job at a time — no login, so the link
+ * itself is what proves it's this customer's job.
+ *
+ * Rendering normally happens client-side (see notify.ts), where the origin
+ * is just `window.location.origin`. The pickup-reminder cron job (see
+ * app/api/cron/pickup-reminders) renders server-side instead, with no
+ * `window` to read — it passes its own base URL in explicitly. Without
+ * either, this quietly omits the link rather than crashing.
+ */
+function trackLink(jobId: string, baseUrl?: string): string {
+  const origin = baseUrl ?? (typeof window === "undefined" ? "" : window.location.origin);
+  return origin ? `${origin}/track?job=${encodeURIComponent(jobId)}` : "";
+}
+
+/** Whole days since a job's completedAt — 0 if it isn't completed yet, or
+ *  completedAt is missing/unparseable, rather than a negative or NaN. */
+function daysSinceCompleted(job: RepairJob): number {
+  if (!job.completedAt) return 0;
+  const completed = new Date(job.completedAt).getTime();
+  if (isNaN(completed)) return 0;
+  return Math.max(0, Math.floor((Date.now() - completed) / 86_400_000));
+}
+
+/** Values for every token, for one job. `baseUrl` is only needed when
+ *  rendering outside the browser — see trackLink above. */
+export function smsValues(job: RepairJob, baseUrl?: string): Record<string, string> {
   const dueAmount = Math.max(0, job.estimatedCost - job.advancePaid);
   return {
     customer_name: firstName(job.customerName),
@@ -136,6 +167,8 @@ export function smsValues(job: RepairJob): Record<string, string> {
     pause_reason: trimReason(job.pauseReason || "Awaiting parts"),
     shop: SHOP,
     contact: SHOP_CONTACT,
+    track_link: trackLink(job.id, baseUrl),
+    days_waiting: String(daysSinceCompleted(job)),
   };
 }
 
@@ -146,8 +179,8 @@ export function smsValues(job: RepairJob): Record<string, string> {
  * the editor then shows up in the preview instead of silently sending a message
  * with a hole in it.
  */
-export function renderTemplate(body: string, job: RepairJob): string {
-  const values = smsValues(job);
+export function renderTemplate(body: string, job: RepairJob, baseUrl?: string): string {
+  const values = smsValues(job, baseUrl);
   const filled = (body || "").replace(/\{(\w+)\}/g, (whole, token: string) =>
     Object.prototype.hasOwnProperty.call(values, token) ? values[token] : whole,
   );
@@ -210,15 +243,30 @@ Total - {total}
 Paid Amount - {paid_amount}
 Due Amount - {due_amount}
 
+View your invoice and job history - {track_link}
+
 Please bring this job number when collecting.
 Thank you for choosing {shop}.
+
+For any other information contact {contact}.`,
+
+  reminder: `Hi {customer_name},
+this is a reminder that your {device} has been ready for collection for {days_waiting} days now.
+
+Job Number - {job_number}
+Fault - {fault}
+Due Amount - {due_amount}
+
+View your invoice and job history - {track_link}
+
+Please collect it at your earliest convenience. Thank you for choosing {shop}.
 
 For any other information contact {contact}.`,
 };
 
 /** Render an event using the built-in wording (used when the table has no row). */
-export function jobSmsBody(event: JobSmsEvent, job: RepairJob): string {
-  return renderTemplate(DEFAULT_SMS_BODIES[event], job);
+export function jobSmsBody(event: JobSmsEvent, job: RepairJob, baseUrl?: string): string {
+  return renderTemplate(DEFAULT_SMS_BODIES[event], job, baseUrl);
 }
 
 /** A representative job for previewing template wording. Never saved or sent. */

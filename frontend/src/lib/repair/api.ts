@@ -240,13 +240,20 @@ export interface TrackedJob {
   id: string; customerName: string; brand: string; model: string; issue: string;
   status: RepairJob["status"]; estimatedCompletion: string;
   estimatedCost: number; advancePaid: number;
-  originalEstimate?: number; revisedEstimate?: number;
+  originalEstimate?: number; revisedEstimate?: number; labourCost?: number;
   approval?: EstimateApproval; warrantyId?: string;
   technician?: string;
   createdAt?: string;
   startedAt?: string;
   completedAt?: string;
   receivedItems?: string[];
+  /** Masked server-side (track_job() never returns the raw value) — safe to
+   *  print as-is, there's nothing further to hide. */
+  customerPhone?: string;
+  imei?: string;
+  partsUsed?: string[];
+  cosmeticCondition?: DeviceConditionMap;
+  intakePhotos?: string[];
   pauseReason?: string;
   cancelReason?: string;
   cancelledAt?: string;
@@ -258,12 +265,18 @@ interface TrackJobRow {
   status: RepairJob["status"]; estimated_completion: string | null;
   estimated_cost: number | string; advance_paid: number | string;
   original_estimate: number | string | null; revised_estimate: number | string | null;
+  labour_cost: number | string | null;
   approval: EstimateApproval | null; warranty_id: string | null;
   technician: string | null;
   created_at: string | null;
   started_at: string | null;
   completed_at: string | null;
   received_items: string[] | null;
+  customer_phone: string | null;
+  imei: string | null;
+  parts_used: string[] | null;
+  cosmetic_condition: DeviceConditionMap | null;
+  intake_photos: string[] | null;
   pause_reason: string | null;
   cancel_reason: string | null;
   cancelled_at: string | null;
@@ -274,7 +287,9 @@ interface TrackJobRow {
  * Public job lookup for the /track page — the only thing an unauthenticated
  * customer's browser can read. Goes through track_job() rather than the
  * table directly: repair_jobs' own RLS is staff-only, on purpose, so a
- * scanned QR code must not be able to list or read arbitrary columns.
+ * scanned QR code must not be able to list or read arbitrary columns. Phone
+ * and IMEI arrive already masked — track_job() masks them in SQL, so the raw
+ * values never leave the database.
  */
 export async function trackJob(jobId: string): Promise<TrackedJob | null> {
   const { data, error } = await getSupabaseBrowserClient()
@@ -296,6 +311,7 @@ export async function trackJob(jobId: string): Promise<TrackedJob | null> {
     advancePaid: num(row.advance_paid),
     originalEstimate: optNum(row.original_estimate),
     revisedEstimate: optNum(row.revised_estimate),
+    labourCost: optNum(row.labour_cost),
     approval: opt(row.approval),
     warrantyId: opt(row.warranty_id),
     technician: opt(row.technician),
@@ -303,11 +319,48 @@ export async function trackJob(jobId: string): Promise<TrackedJob | null> {
     startedAt: dateOnly(row.started_at),
     completedAt: dateOnly(row.completed_at),
     receivedItems: row.received_items?.length ? row.received_items : undefined,
+    customerPhone: opt(row.customer_phone),
+    imei: opt(row.imei),
+    partsUsed: row.parts_used?.length ? row.parts_used : undefined,
+    cosmeticCondition: opt(row.cosmetic_condition),
+    intakePhotos: row.intake_photos?.length ? row.intake_photos : undefined,
     pauseReason: opt(row.pause_reason),
     cancelReason: opt(row.cancel_reason),
     cancelledAt: dateOnly(row.cancelled_at),
     handedOverAt: dateOnly(row.handed_over_at),
   };
+}
+
+export interface TrackedJobHistoryEntry {
+  id: string; brand: string; model: string; issue: string;
+  status: RepairJob["status"]; estimatedCost: number;
+  completedAt?: string; createdAt?: string;
+}
+
+interface TrackJobHistoryRow {
+  id: string; brand: string; model: string; issue: string;
+  status: RepairJob["status"]; estimated_cost: number | string;
+  completed_at: string | null; created_at: string | null;
+}
+
+/** Other jobs for the same customer as `jobId` — "previous repairs on this
+ *  device" on the tracking page. Same trust boundary as trackJob(): you have
+ *  to already hold one exact job id to see anything at all. */
+export async function trackJobHistory(jobId: string): Promise<TrackedJobHistoryEntry[]> {
+  const { data, error } = await getSupabaseBrowserClient()
+    .rpc("track_job_history", { p_job_id: jobId.trim() });
+  if (error) throw new Error(`Could not look up previous repairs: ${error.message}`);
+
+  return ((data as TrackJobHistoryRow[] | null) ?? []).map(row => ({
+    id: row.id,
+    brand: row.brand,
+    model: row.model,
+    issue: row.issue,
+    status: row.status,
+    estimatedCost: num(row.estimated_cost),
+    completedAt: dateOnly(row.completed_at),
+    createdAt: dateOnly(row.created_at),
+  }));
 }
 
 /** The customer approving a revised estimate from the tracking page. See

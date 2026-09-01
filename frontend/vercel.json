@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/pickup-reminders",
+      "schedule": "0 4 * * *"
+    }
+  ]
+}

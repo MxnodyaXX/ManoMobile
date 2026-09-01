@@ -53,13 +53,14 @@ export const EMAIL_VARIABLES: { token: string; description: string }[] = [
   { token: "shop_name", description: "Shop name" },
   { token: "shop_phone", description: "Shop phone number" },
   { token: "shop_address", description: "Shop address" },
+  { token: "track_link", description: "Link for the customer to view their invoice and job history online" },
 ];
 
 /** Which tokens make sense per event. */
 export const JOB_EMAIL_VARIABLES: Record<JobEmailEvent, string[]> = {
   created: ["customer_name", "device", "job_number", "imei", "fault", "estimated_price", "technician", "paid_amount", "due_amount", "estimated_completion", "shop_name", "shop_phone", "shop_address"],
-  issued: ["customer_name", "device", "job_number", "imei", "fault", "estimated_price", "paid_amount", "due_amount", "shop_name", "shop_phone", "shop_address"],
-  finished: ["customer_name", "device", "job_number", "fault", "estimated_price", "due_amount", "shop_name", "shop_phone", "shop_address"],
+  issued: ["customer_name", "device", "job_number", "imei", "fault", "estimated_price", "paid_amount", "due_amount", "track_link", "shop_name", "shop_phone", "shop_address"],
+  finished: ["customer_name", "device", "job_number", "fault", "estimated_price", "due_amount", "track_link", "shop_name", "shop_phone", "shop_address"],
 };
 
 /**

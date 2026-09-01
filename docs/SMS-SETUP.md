@@ -91,6 +91,43 @@ const result = await sendSms({
 if (!result.ok) console.error(result.error);
 ```
 
+## Pickup reminders (automatic)
+
+A Completed job that's still sitting on the shelf gets a **Pickup Reminder**
+SMS — the same message a cashier can send by hand from the "Send Reminder"
+button on the Non-Issued list, but also sent automatically once a day for
+anything waiting 7+ days (7, 14, 21… — a weekly nudge, not a daily one), for
+Mano Mobile's own customers only.
+
+The automatic half runs as a Vercel Cron job (`vercel.json`) hitting
+`GET /api/cron/pickup-reminders` once a day. It has no signed-in user (nothing
+triggered it from the browser), so it authenticates itself and talks to
+Supabase differently from every other SMS in the app:
+
+1. **`CRON_SECRET`** — add this to `frontend/.env.local` for local testing and
+   to the Vercel project's environment variables for the deployed cron to
+   work. Vercel automatically sends `Authorization: Bearer $CRON_SECRET` to
+   the paths listed in `vercel.json`'s `crons`; the route checks that header
+   matches before doing anything.
+2. **`SUPABASE_SERVICE_ROLE_KEY`** — already required for staff account
+   creation (see `docs/BACKEND-SETUP.md`); the cron route reuses it, since
+   there's no user session for RLS to key off.
+3. **`NEXT_PUBLIC_SITE_URL`** — the deployed app's own URL (e.g.
+   `https://mobile.vercel.app`), used to build the `{track_link}` in the
+   reminder text. Without it (and outside of Vercel, where `VERCEL_URL` is
+   read as a fallback), the reminder still sends, just without a link.
+
+To test it without waiting for the schedule, call the route directly with the
+secret:
+
+```
+curl -H "Authorization: Bearer $CRON_SECRET" https://your-app/api/cron/pickup-reminders
+```
+
+It responds with a JSON summary (`checked`, `eligible`, `sent`, `skipped`,
+`failed`) rather than sending silently, so a test run's outcome is visible
+immediately.
+
 ## Testing
 
 Text.lk accounts start in a sandbox that accepts requests without delivering to

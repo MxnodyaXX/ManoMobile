@@ -96,6 +96,12 @@ const inputSt: React.CSSProperties = {
 
 const rs = (n: number) => `Rs. ${Math.round(n).toLocaleString()}`;
 
+const fmtDate = (d?: string) => {
+  if (!d) return "—";
+  const dt = new Date(d);
+  return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+};
+
 function Modal({ children, onClose, width = 480 }: { children: React.ReactNode; onClose: () => void; width?: number }) {
   if (typeof document === "undefined") return null;
   return createPortal(
@@ -326,6 +332,7 @@ function WriteOffModal({ account, onClose, onDone }: {
  */
 function CreditHistoryList({ account }: { account: CreditAccount }) {
   const { entries, loading, error } = useCreditEntries(account.id);
+  const { jobs } = useRepair();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showInvoice, setShowInvoice] = useState<string | null>(null);
 
@@ -443,12 +450,34 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
 
               {open && (
                 <div style={{ borderTop: "1px solid var(--border)", background: "var(--bg-secondary)", padding: "4px 13px 8px 55px" }}>
-                  {g.entries.map(e => (
-                    <div key={e.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0" }}>
-                      <span style={{ fontSize: 11.5, color: "var(--text-secondary)", fontFamily: ff }}>{e.jobId ?? "—"}</span>
-                      <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff }}>{rs(e.amount)}</span>
-                    </div>
-                  ))}
+                  {g.entries.map((e, i) => {
+                    // The credit entry only ever carried the job id and the
+                    // amount — everything else here is looked up from the
+                    // job itself, same as any other screen that shows this
+                    // job's details.
+                    const job = e.jobId ? jobs.find(j => j.id === e.jobId) : undefined;
+                    return (
+                      <div key={e.id} style={{ padding: "7px 0", borderBottom: i < g.entries.length - 1 ? "1px solid var(--border)" : "none" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                          <span style={{ fontSize: 11.5, color: "var(--text-secondary)", fontFamily: ff }}>
+                            {e.jobId ?? "—"}
+                            {job?.dealerJobNo && <span style={{ color: "var(--text-muted)" }}> · #{job.dealerJobNo}</span>}
+                          </span>
+                          <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff }}>{rs(e.amount)}</span>
+                        </div>
+                        {job && (
+                          <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginTop: 3, lineHeight: 1.5 }}>
+                            {[job.brand, job.model].filter(Boolean).join(" ") || "—"}
+                            {job.imei ? ` · IMEI ${job.imei}` : ""}
+                            {job.issue ? ` · ${job.issue}` : ""}
+                            {" · Accepted "}{fmtDate(job.createdAt)}
+                            {" · Finished "}{fmtDate(job.completedAt)}
+                            {" · Issued "}{fmtDate(job.handover?.handedOverAt)}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
