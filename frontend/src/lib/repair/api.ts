@@ -232,6 +232,36 @@ export async function fetchJobs(): Promise<RepairJob[]> {
   return (data as JobRow[]).map(rowToJob);
 }
 
+/**
+ * Every job this device has been through before, newest first.
+ *
+ * A phone that comes back is the single most useful thing the counter can know
+ * at intake — it changes the quote, the warranty question and often the fault
+ * itself — and until now nothing looked. The IMEI is the only identifier that
+ * survives a customer changing their number, their name spelling, or the phone
+ * changing hands.
+ *
+ * Matched on digits only. IMEIs get typed with spaces and dashes, and two
+ * records of the same handset must not miss each other over punctuation.
+ */
+export async function fetchJobsByImei(imei: string, excludeId?: string): Promise<RepairJob[]> {
+  const digits = (imei ?? "").replace(/\D/g, "");
+  if (digits.length < 14) return [];
+
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("repair_jobs")
+    .select("*")
+    .not("imei", "is", null)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(`Could not check the IMEI: ${error.message}`);
+
+  return (data as JobRow[])
+    .filter(r => (r.imei ?? "").replace(/\D/g, "") === digits)
+    .filter(r => r.id !== excludeId)
+    .map(rowToJob);
+}
+
 /** The narrow shape track_job() returns — see migrations
  *  20260819000015 / 20260819000016_public_job_tracking for why this isn't
  *  the full RepairJob (no phone, address, IMEI, passcode, signature, or

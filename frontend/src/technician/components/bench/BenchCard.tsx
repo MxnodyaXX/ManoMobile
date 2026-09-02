@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Play, Pause, CheckCircle, Package, MoreHorizontal,
-  Stethoscope, StickyNote, AlertTriangle, Send, MessageSquare, History, Hand,
+  Stethoscope, StickyNote, AlertTriangle, Send, MessageSquare, History, Hand, Smartphone,
 } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import { isUnassigned } from "@/lib/repair/api";
@@ -29,7 +29,7 @@ const ff = "'Plus Jakarta Sans', sans-serif";
 
 export type BenchAction =
   | "start" | "claim" | "pause" | "resume" | "complete" | "parts"
-  | "diagnostic" | "notes" | "escalate" | "transfer" | "message" | "activity";
+  | "device" | "diagnostic" | "notes" | "escalate" | "transfer" | "message" | "activity";
 
 const PRIORITY: Record<string, { color: string; bg: string }> = {
   Low:    { color: "#94a3b8", bg: "rgba(148,163,184,0.10)" },
@@ -39,6 +39,9 @@ const PRIORITY: Record<string, { color: string; bg: string }> = {
 };
 
 const OVERFLOW: { id: BenchAction; label: string; icon: typeof StickyNote }[] = [
+  // First, because it is the one that has to be done while the phone is in
+  // your hand — the rest can wait until it is back on the shelf.
+  { id: "device",     label: "Device details",    icon: Smartphone    },
   { id: "diagnostic", label: "Diagnostic",        icon: Stethoscope   },
   { id: "notes",      label: "Internal notes",    icon: StickyNote    },
   { id: "escalate",   label: "Escalate",          icon: AlertTriangle },

@@ -3,9 +3,10 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
-import { previewNextJobNo, checkDealerJobNo, type DealerJobNoCheck } from "@/lib/repair/api";
+import { previewNextJobNo, checkDealerJobNo, fetchJobsByImei, type DealerJobNoCheck } from "@/lib/repair/api";
 import { useRepair, isInHouseDealer, IN_HOUSE_DEALER, type ConditionGrade, type DeviceConditionMap, type JobPriority, type RepairJob, type RepairDealer } from "@/cashier/contexts/RepairContext";
 import { useAuth } from "@/lib/auth/AuthContext";
+import DeviceHistoryModal from "@/cashier/components/repair/DeviceHistoryModal";
 import { useWarranty, effectiveStatus } from "@/cashier/contexts/WarrantyContext";
 import { useRepairDrafts, newDraftId, fmtSaved, type RepairDraft, type RepairFormData as FormData } from "@/cashier/hooks/useRepairDrafts";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
@@ -19,7 +20,7 @@ import { lookupModelNumber, normaliseModelNumber, type ModelInfo } from "@/cashi
 import { useDeviceModelLookup, rememberDeviceModel } from "@/lib/repair/deviceModels";
 import { fetchStaffRules } from "@/lib/settings/staffRules";
 import { useDeviceFaults, FALLBACK_FAULTS } from "@/lib/repair/deviceFaults";
-import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2, AlertCircle, FileClock, ChevronDown } from "lucide-react";
+import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2, AlertCircle, FileClock, ChevronDown, History } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -322,7 +323,7 @@ function fmtJoined(iso: string) {
   return isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoCheck, checkingDealerNo, models, onAddModel, modelNumberLookup, deviceModelLookup, modelBrandLookup, brands, onAddBrand }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; dealers: RepairDealer[]; errors: RequiredField[]; nextJobNo: string | null; dealerNoCheck: DealerJobNoCheck | null; checkingDealerNo: boolean; models: string[]; onAddModel: (m: string) => void; modelNumberLookup: Map<string, ModelInfo>; deviceModelLookup: Map<string, ModelInfo>; modelBrandLookup: Map<string, string>; brands: string[]; onAddBrand: (b: string) => void }) {
+function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoCheck, checkingDealerNo, models, onAddModel, modelNumberLookup, deviceModelLookup, modelBrandLookup, brands, onAddBrand, imeiHistory, checkingImei, onViewHistory }: { data: FormData; onChange: (d: Partial<FormData>) => void; isMobile?: boolean; dealers: RepairDealer[]; errors: RequiredField[]; nextJobNo: string | null; dealerNoCheck: DealerJobNoCheck | null; checkingDealerNo: boolean; models: string[]; onAddModel: (m: string) => void; modelNumberLookup: Map<string, ModelInfo>; deviceModelLookup: Map<string, ModelInfo>; modelBrandLookup: Map<string, string>; brands: string[]; onAddBrand: (b: string) => void; imeiHistory: RepairJob[]; checkingImei: boolean; onViewHistory: () => void }) {
   const dealer = dealers.find((d) => d.id.toString() === data.dealerId);
   const bad = (f: RequiredField) => errors.includes(f);
   const toggleItem = (list: string[], item: string) =>
@@ -749,11 +750,56 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
             <div>
               <label style={labelStyle}>IMEI Number</label>
               <input
-                style={inputStyle}
+                style={{
+                  ...inputStyle,
+                  borderColor: imeiHistory.length > 0 ? "#fbbf24" : inputStyle.borderColor as string,
+                }}
                 maxLength={15}
+                inputMode="numeric"
                 value={data.deviceIMEI}
                 onChange={(e) => onChange({ deviceIMEI: e.target.value.replace(/\D/g, "") })}
               />
+
+              {/*
+                The check runs itself once all fifteen digits are in — no button,
+                because a button is a thing to forget, and the one moment this
+                matters is before the new job is written.
+              */}
+              {checkingImei && (
+                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                  Checking this IMEI…
+                </p>
+              )}
+
+              {!checkingImei && imeiHistory.length > 0 && (
+                <button
+                  type="button"
+                  onClick={onViewHistory}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8, width: "100%", marginTop: 6,
+                    padding: "9px 11px", borderRadius: 9, cursor: "pointer", textAlign: "left",
+                    background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)",
+                    fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  }}
+                >
+                  <History size={14} color="#fbbf24" style={{ flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: "#fbbf24", display: "block" }}>
+                      Seen before — {imeiHistory.length} previous {imeiHistory.length === 1 ? "repair" : "repairs"}
+                    </span>
+                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      Last: {imeiHistory[0].id} · {imeiHistory[0].issue || "no fault recorded"}
+                    </span>
+                  </span>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: "#fbbf24", flexShrink: 0 }}>View</span>
+                </button>
+              )}
+
+              {!checkingImei && imeiHistory.length === 0 && data.deviceIMEI.replace(/\D/g, "").length === 15 && (
+                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                  No previous repair on this IMEI.
+                </p>
+              )}
             </div>
           </div>
 
@@ -1431,6 +1477,20 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
   }, []);
   // Shown in the job-number box so the cashier can see what will be assigned.
   // Advisory only — the sequence, not this value, decides on save.
+  /**
+   * Previous repairs on the IMEI being typed.
+   *
+   * Fires on its own the moment fifteen digits are in. A device that has been
+   * here before changes the quote, the warranty question and often the fault
+   * itself, and the counter has to know that before writing the new job — not
+   * after the customer has left.
+   *
+   * Keyed by the digits it ran for, so a result can never be shown against a
+   * different number than the one that produced it.
+   */
+  const [imeiCheck, setImeiCheck] = useState<{ digits: string; jobs: RepairJob[] }>({ digits: "", jobs: [] });
+  const [showHistory, setShowHistory] = useState(false);
+
   const [nextJobNo, setNextJobNo] = useState<string | null>(null);
 
   /**
@@ -1470,6 +1530,32 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
   const [form, setForm] = useState<FormData>(
     initialDraft ? { ...INITIAL, ...initialDraft.form, intakePhotos: [] } : INITIAL,
   );
+
+  // Fifteen digits is a complete IMEI; anything shorter is somebody still
+  // typing, and searching on a partial number would match the wrong handset.
+  const imeiDigits = form.deviceIMEI.replace(/\D/g, "");
+  useEffect(() => {
+    if (imeiDigits.length !== 15) return;
+    let active = true;
+    fetchJobsByImei(imeiDigits)
+      .then(jobs => { if (active) setImeiCheck({ digits: imeiDigits, jobs }); })
+      // A lookup that cannot run must not stop an intake. The worst case is the
+      // counter not being told about a repeat, which is where it was before
+      // this existed.
+      .catch(() => { if (active) setImeiCheck({ digits: imeiDigits, jobs: [] }); })
+    return () => { active = false; };
+  }, [imeiDigits]);
+
+  /**
+   * Both derived from the one stamped result rather than tracked separately.
+   *
+   * A second "checking" flag would need setting inside the effect body, which
+   * costs an extra render on every keystroke — and the stamp already answers
+   * the question: a complete number with no result yet IS the loading state,
+   * and a result stamped with different digits is never shown at all.
+   */
+  const imeiHistory = imeiCheck.digits === imeiDigits ? imeiCheck.jobs : [];
+  const checkingImei = imeiDigits.length === 15 && imeiCheck.digits !== imeiDigits;
 
   // Pre-select the remembered dealer, once, on a fresh intake only. Skipped if
   // that dealer has since been deleted, so a stale id never leaves the form
@@ -1884,6 +1970,10 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
       }}
     >
 
+      {showHistory && (
+        <DeviceHistoryModal imei={imeiDigits} jobs={imeiHistory} onClose={() => setShowHistory(false)} />
+      )}
+
 
       {wrongRole && (
         <div style={{
@@ -1917,7 +2007,7 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
           the panels up with them; padding on this side just pushed
           everything an extra 16–28px to the right of that reference. */}
       <div ref={contentRef} className="repair-wizard" style={{ flex: isMobile ? "none" : 1, padding: 0, minHeight: 0, overflowY: isMobile ? "visible" : "auto" }}>
-        {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} dealers={dealers} errors={errors} nextJobNo={nextJobNo} dealerNoCheck={dealerNoCheck} checkingDealerNo={checkingDealerNo} models={modelOptions} onAddModel={addModel} modelNumberLookup={modelNumberLookup} deviceModelLookup={deviceModelLookup} modelBrandLookup={modelBrandLookup} brands={brandOptions} onAddBrand={addBrand} />}
+        {step === 1 && <Step1 data={form} onChange={update} isMobile={isMobile} dealers={dealers} errors={errors} nextJobNo={nextJobNo} dealerNoCheck={dealerNoCheck} checkingDealerNo={checkingDealerNo} models={modelOptions} onAddModel={addModel} modelNumberLookup={modelNumberLookup} deviceModelLookup={deviceModelLookup} modelBrandLookup={modelBrandLookup} brands={brandOptions} onAddBrand={addBrand} imeiHistory={imeiHistory} checkingImei={checkingImei} onViewHistory={() => setShowHistory(true)} />}
         {step === 2 && <Step2 data={form} onChange={update} isMobile={isMobile} errors={errors} dealers={dealers} technicians={technicians} techLoading={techLoading} />}
       </div>
 

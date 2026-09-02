@@ -13,6 +13,7 @@ import BenchFilters, {
   applyBenchFilter, isFiltering, EMPTY_FILTER, type BenchFilter,
 } from "@/technician/components/bench/BenchFilters";
 import StatusUpdateModal from "@/technician/components/jobs/StatusUpdateModal";
+import DeviceDetailsModal from "@/technician/components/jobs/DeviceDetailsModal";
 import PartRequestModal from "@/technician/components/parts/PartRequestModal";
 import DiagnosticModal from "@/technician/components/jobs/DiagnosticModal";
 import ActivityLogPanel from "@/technician/components/jobs/ActivityLogPanel";
@@ -367,6 +368,9 @@ export default function MyBench() {
       )}
       {openJob && modal?.kind === "pause" && (
         <StatusUpdateModal job={openJob} initialNext={modal.next} onClose={() => setModal(null)} />
+      )}
+      {openJob && modal?.kind === "device" && (
+        <DeviceDetailsModal job={openJob} onClose={() => setModal(null)} />
       )}
       {openJob && modal?.kind === "parts" && (
         <PartRequestModal job={openJob} onClose={() => setModal(null)} />

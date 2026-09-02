@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   X, AlertTriangle, Play, Pause, CheckCircle,
-  XCircle, ArrowRight, Shield, CheckSquare, DollarSign, ChevronDown,
+  XCircle, ArrowRight, Shield, CheckSquare, DollarSign, ChevronDown, Wrench,
 } from "lucide-react";
 import { type RepairJob, type JobStatus, type CompletionType, type EstimateApproval, type ApprovalChannel, useRepair, isInHouseDealer } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
+import DeviceDetailsFields, { draftFromJob, missingOn, type DeviceDraft } from "@/technician/components/jobs/DeviceDetailsFields";
 import { useParts } from "@/cashier/contexts/PartsContext";
 import { rulesForTechnician, type EffectiveRules } from "@/lib/settings/staffRules";
 import { labourFromRate, describeRate } from "@/lib/repair/labour";
@@ -97,7 +98,22 @@ const QUICK_SUMMARIES = [
   "Speaker / mic replaced", "No fault found",
 ];
 
+/**
+ * Warranty periods, plus the one that is not a period.
+ *
+ * CHECKING_WARRANTY is a sentinel, not a duration: the device is going back to
+ * the counter with its cover still to be worked out — usually because it is a
+ * repeat visit and somebody has to look up what was issued last time.
+ *
+ * It is also the default, which the 30 days here used to be. A form that opens
+ * on a real warranty gives one away every time a technician finishes a job
+ * without reading this section; a form that opens on "checking" gives away
+ * nothing and leaves the decision where it belongs.
+ */
+const CHECKING_WARRANTY = -1;
+
 const WARRANTY_OPTIONS = [
+  { days: CHECKING_WARRANTY, label: "Checking Warranty" },
   { days: 0,   label: "No Warranty"  },
   { days: 7,   label: "7 Days"       },
   { days: 30,  label: "30 Days"      },
@@ -145,7 +161,34 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
   const [testNotes, setTestNotes]       = useState("");
   const [testsOpen, setTestsOpen]       = useState(false);
   const [extrasOpen, setExtrasOpen]     = useState(false);
-  const [warrantyDays, setWarrantyDays] = useState(30);
+  /**
+   * The two optional sections, folded away.
+   *
+   * Finishing a job that needs nothing said about it still meant scrolling past
+   * eight quick-remark chips, a notes box, a parts table and a parts box to
+   * reach the button. Both are genuinely optional on most repairs, so they
+   * start closed and say what is in them — and open themselves the moment
+   * there is something to see.
+   */
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [partsOpen, setPartsOpen] = useState(false);
+  const [warrantyDays, setWarrantyDays] = useState(CHECKING_WARRANTY);
+
+  /**
+   * Model number and IMEI, filled in at the bench.
+   *
+   * Neither is printed on the outside of most handsets, so intake books the
+   * majority of jobs in without them and they stay empty for the life of the
+   * record — which is the one place they matter, since the IMEI is what ties a
+   * warranty claim or a police enquiry to this repair.
+   *
+   * The technician is the first person who can read them. Opened by default
+   * when either is missing, folded away when the record is already complete.
+   */
+  const [deviceDraft, setDeviceDraft] = useState<DeviceDraft>(() => draftFromJob(job));
+  const deviceNeed = missingOn(job);
+  const deviceIncomplete = deviceNeed.modelNumber || deviceNeed.imei;
+  const [deviceOpen, setDeviceOpen] = useState(deviceIncomplete);
   const [completionType, setCompletionType] = useState<CompletionType>("Normal");
   // What this technician is allowed to do. Defaults are permissive, so a rules
   // lookup that fails never traps a finished job on the bench.
@@ -389,6 +432,22 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
       // which is a real answer — so a job that cost nothing is distinguishable
       // from one finished before this field existed (those stay null).
       completedPatch.labourCost = labourCost;
+      // Only when something was actually typed. A blank box means intake had
+      // nothing and the technician could not read it either — not an
+      // instruction to wipe a number somebody already recorded.
+      if (deviceNeed.modelNumber) {
+        if (deviceDraft.modelNumber.trim()) completedPatch.modelNumber = deviceDraft.modelNumber.trim();
+        if (deviceDraft.brand.trim())       completedPatch.brand       = deviceDraft.brand.trim();
+        if (deviceDraft.model.trim())       completedPatch.model       = deviceDraft.model.trim();
+      }
+      if (deviceNeed.imei && deviceDraft.imei.trim()) completedPatch.imei = deviceDraft.imei.trim();
+      // Left at "checking", the counter has to settle the cover at handover —
+      // so say so on the job. Without it the sales screen falls back to
+      // "NO WARRANTY", which is a different answer from "not decided yet" and
+      // the one nobody would go back and correct.
+      if (warrantyDays === CHECKING_WARRANTY && canWarrant) {
+        completedPatch.jobWarranty = "CHECKING WARRANTY";
+      }
       // Save functional test
       // Only record a QC result when something was actually checked. Saving
       // "overall pass" for a checklist nobody opened would put a test on the
@@ -469,6 +528,36 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
     borderRadius: 8, padding: "9px 12px", fontSize: 13, color: "var(--text-primary)",
     fontFamily: ff, outline: "none", resize: "none" as const,
   };
+
+  /**
+   * A section heading that folds.
+   *
+   * Same row the functional tests and future-faults sections already use — one
+   * tappable bar, the state on the right — so an optional block reads the same
+   * wherever it appears in this sheet.
+   */
+  const fold = (label: string, open: boolean, toggle: () => void, hint: string) => (
+    <button
+      onClick={toggle}
+      style={{
+        display: "flex", alignItems: "center", gap: 8, width: "100%",
+        minHeight: 44, padding: "0 12px", borderRadius: 9, cursor: "pointer",
+        background: "var(--bg-secondary)", border: "1px solid var(--border)",
+        fontFamily: ff, textAlign: "left",
+      }}
+    >
+      <span style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+        {label}
+      </span>
+      <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: hint === "Optional" || hint === "None" ? "var(--text-muted)" : TA }}>
+        {hint}
+      </span>
+      <ChevronDown
+        size={14}
+        style={{ color: "var(--text-muted)", transform: open ? "rotate(180deg)" : undefined, transition: "transform 0.18s" }}
+      />
+    </button>
+  );
 
   const sec = (label: string) => (
     <p style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: ff }}>{label}</p>
@@ -633,6 +722,57 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                  columns; only the short ones pair up. */
               <div className="complete-grid" style={{ display: "grid", gap: 16, alignItems: "start" }}>
 
+                {/*
+                  The first thing asked, because it decides everything under it:
+                  whether there is anything to charge, whether a warranty can be
+                  issued, and what the receipt says. It used to sit in the right
+                  column beside a Final Cost field the technician had to fill in
+                  before knowing whether the job had a cost at all.
+                */}
+                {/* How this job ended — drives the charge, the warranty and the receipt */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, gridColumn: "1 / -1" }}>
+                  {sec("How did this job end? *")}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {COMPLETION_TYPES.map(t => {
+                      const active = completionType === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => setCompletionType(t.id)}
+                          style={{
+                            flex: "1 1 210px", textAlign: "left", padding: "14px 16px", borderRadius: 11,
+                            borderWidth: active ? 2 : 1, borderStyle: "solid",
+                            borderColor: active ? t.color : "var(--border)",
+                            background: active ? t.color + "12" : "var(--bg-secondary)",
+                            cursor: "pointer", fontFamily: ff, transition: "all 0.15s",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 5 }}>
+                            <span style={{
+                              width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
+                              border: `2px solid ${active ? t.color : "var(--border)"}`,
+                              background: active ? t.color : "transparent",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                            }}>
+                              {active && <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--bg-card)" }} />}
+                            </span>
+                            <span style={{ fontSize: 14.5, fontWeight: 700, color: active ? t.color : "var(--text-primary)" }}>{t.label}</span>
+                          </div>
+                          <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5 }}>{t.blurb}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {completionType !== "Normal" && (
+                    <p style={{ fontSize: 11.5, color: "#fbbf24", fontFamily: ff, lineHeight: 1.5 }}>
+                      {completionType === "Return"
+                        ? "Nothing will be charged and no warranty is issued. Explain below what could not be repaired — it goes on the customer's receipt."
+                        : "Nothing will be charged. A warranty can still be issued for the work done."}
+                    </p>
+                  )}
+                </div>
+
+
                 {/* Estimate & approval gate */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -689,46 +829,17 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                       )}
                     </div>
                   )}
-                </div>
 
-                {/* How this job ended — drives the charge, the warranty and the receipt */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {sec("Completion Type *")}
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {COMPLETION_TYPES.map(t => {
-                      const active = completionType === t.id;
-                      return (
-                        <button
-                          key={t.id}
-                          onClick={() => setCompletionType(t.id)}
-                          style={{
-                            flex: "1 1 150px", textAlign: "left", padding: "10px 12px", borderRadius: 10,
-                            border: `1px solid ${active ? t.color + "60" : "var(--border)"}`,
-                            background: active ? t.color + "12" : "var(--bg-secondary)",
-                            cursor: "pointer", fontFamily: ff, transition: "all 0.15s",
-                          }}
-                        >
-                          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 3 }}>
-                            <span style={{ width: 9, height: 9, borderRadius: "50%", background: active ? t.color : "var(--border)", flexShrink: 0 }} />
-                            <span style={{ fontSize: 12.5, fontWeight: 700, color: active ? t.color : "var(--text-primary)" }}>{t.label}</span>
-                          </div>
-                          <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.45 }}>{t.blurb}</p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {completionType !== "Normal" && (
-                    <p style={{ fontSize: 11.5, color: "#fbbf24", fontFamily: ff, lineHeight: 1.5 }}>
-                      {completionType === "Return"
-                        ? "Nothing will be charged and no warranty is issued. Explain below what could not be repaired — it goes on the customer's receipt."
-                        : "Nothing will be charged. A warranty can still be issued for the work done."}
-                    </p>
-                  )}
-                </div>
 
-                {/* Work summary (technician remarks → printed on the Non-Issued receipt) */}
+                  {/* Work summary (technician remarks → printed on the receipt) */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {sec(completionType === "Return" ? "Reason Not Repaired * (required)" : "Job Remarks / Work Summary (optional)")}
+                  {/* A Return has to be explained, so that one is never folded. */}
+                  {completionType === "Return"
+                    ? sec("Reason Not Repaired * (required)")
+                    : fold("Job remarks", notesOpen, () => setNotesOpen(v => !v),
+                        completionNotes.trim() ? "Written" : "Optional")}
+                  {(completionType === "Return" || notesOpen || completionNotes.trim() !== "") && (
+                  <>
                   {completionType !== "Return" && (
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                       {QUICK_SUMMARIES.map(q => (
@@ -754,12 +865,81 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                       ? <>{completionNotes.trim().length} chars {completionNotes.trim().length > 5 ? "✓" : "(min 6)"}</>
                       : <>Printed on the customer&apos;s receipt if you fill it in.</>}
                   </p>
+                  </>
+                  )}
                 </div>
+
+                </div>
+
+                {/*
+                  What the technician is charging the shop for the job.
+
+                  Structured to mirror the Final Cost block beside it: an icon
+                  row, then a small caption, then the input. Without the caption
+                  this input sat a line higher than the one it is read against,
+                  which is the sort of half-alignment that reads as broken even
+                  when nothing is.
+                */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Wrench size={13} color={TA} />
+                    {sec("Your Charge For This Job * (required)")}
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginBottom: 3 }}>
+                      Amount (Rs.)
+                    </p>
+                    <input
+                      type="number"
+                      min={0}
+                      value={labourValue}
+                      onChange={e => { setLabourTouched(true); setLabourInput(e.target.value); }}
+                      placeholder="What you are charging for this repair"
+                      style={inputStyle}
+                    />
+                  </div>
+                    <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                      {!labourTouched && labourMode !== "none" && labourMode !== "custom"
+                        ? `Suggested from your rate (${describeRate(labourMode, labourRate)}) — change it if this job was worth more or less.`
+                        : labourMode === "custom"
+                          ? "Your work is priced job by job, so this cannot be worked out later."
+                          : "Recorded against the repair. It is what the shop pays out, and what profit is measured after."}
+                    </p>
+                  </div>
+
+                {/*
+                  The device's own identity, captured while it is open.
+
+                  Sits with the optional folds rather than at the top: it is not
+                  a decision, and on a job where intake already got both it is
+                  nothing to read. It opens itself when either is missing, which
+                  on this shop's jobs is most of them.
+                */}
+                {/* Nothing at all when intake already captured both — an empty
+                    fold saying "Recorded" is a row of chrome asking to be read
+                    on every single job that does not need it. */}
+                {deviceIncomplete && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, gridColumn: "1 / -1" }}>
+                    {fold("Device details", deviceOpen, () => setDeviceOpen(v => !v),
+                      deviceNeed.modelNumber && deviceNeed.imei ? "Model no. and IMEI missing"
+                        : deviceNeed.modelNumber ? "Model number missing"
+                          : "IMEI missing")}
+
+                    {deviceOpen && (
+                      <DeviceDetailsFields job={job} value={deviceDraft} onChange={setDeviceDraft} inputStyle={inputStyle} />
+                    )}
+                  </div>
+                )}
 
                 {/* Parts used, with what they cost the shop */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 8, gridColumn: "1 / -1" }}>
-                  {sec("Parts Used & Cost")}
+                  {fold("Parts used", partsOpen || jobPartLines.length > 0, () => setPartsOpen(v => !v),
+                    jobPartLines.length > 0
+                      ? `${jobPartLines.length} ${jobPartLines.length === 1 ? "part" : "parts"} · Rs. ${partsCost.toLocaleString()}`
+                      : "None")}
 
+                  {(partsOpen || jobPartLines.length > 0) && (
+                  <>
                   {(jobPartLines.length > 0 || labourCost > 0) && (
                     <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", fontFamily: ff }}>
                       {jobPartLines.map(l => (
@@ -816,29 +996,21 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                     </p>
                   )}
 
-                  {/* Only the technician knows what the job was worth to them */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {sec("Your Charge For This Job * (required)")}
-                    <input
-                      type="number"
-                      min={0}
-                      value={labourValue}
-                      onChange={e => { setLabourTouched(true); setLabourInput(e.target.value); }}
-                      placeholder="What you are charging for this repair"
-                      style={inputStyle}
-                    />
-                    <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
-                      {!labourTouched && labourMode !== "none" && labourMode !== "custom"
-                        ? `Suggested from your rate (${describeRate(labourMode, labourRate)}) — change it if this job was worth more or less.`
-                        : labourMode === "custom"
-                          ? "Your work is priced job by job, so this cannot be worked out later."
-                          : "Recorded against the repair. It is what the shop pays out, and what profit is measured after."}
-                    </p>
-                  </div>
+                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginTop: 2 }}>
+                    Parts used (one per line) — printed on the receipt
+                  </p>
+                  <textarea placeholder="e.g. iPhone 13 Rear Camera Module" value={partsUsedText} onChange={e => setPartsUsedText(e.target.value)} rows={2} style={inputStyle} />
+                  </>
+                  )}
+                </div>
 
-                  {/* The loss gate. Deliberately not a block: sometimes the shop
-                      eats it. But it must be chosen, not stumbled into. */}
-                  {needsLossAck && (
+                {/*
+                  Outside the fold on purpose. It refuses the submit until it is
+                  answered, and a blocker hidden inside a collapsed section is a
+                  button that will not work for a reason nobody can see.
+                */}
+                {needsLossAck && (
+                  <div style={{ gridColumn: "1 / -1" }}>
                     <div style={{
                       padding: "11px 13px", borderRadius: 10,
                       background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.4)",
@@ -859,13 +1031,8 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                         <span style={{ color: "var(--text-secondary)" }}>Complete anyway at a loss</span>
                       </label>
                     </div>
-                  )}
-
-                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginTop: 2 }}>
-                    Parts used (one per line) — printed on the receipt
-                  </p>
-                  <textarea placeholder="e.g. iPhone 13 Rear Camera Module" value={partsUsedText} onChange={e => setPartsUsedText(e.target.value)} rows={2} style={inputStyle} />
-                </div>
+                  </div>
+                )}
 
                 {/* Future faults — worth recording when spotted, never worth
                     blocking a finished job on, so it folds away with the rest
@@ -1013,6 +1180,12 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                       Warranty is issued now but <strong style={{ color: "#a78bfa" }}>activates when the customer collects</strong> the device.
                     </p>
                   )}
+                  {warrantyDays === CHECKING_WARRANTY && (
+                    <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                      No warranty is issued yet — the counter settles it at handover. Pick a period
+                      here if you already know what this repair should carry.
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -1035,22 +1208,51 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
               </div>
             )}
 
-            {/* Actions */}
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", alignItems: "center", marginTop: 4 }}>
+            {/*
+              Stuck to the bottom of the sheet.
+
+              Finishing a job asks for one required thing and eight optional
+              ones, and the button sat under all nine — so the quick case, where
+              nothing needs changing, still meant scrolling the whole form to
+              reach it. It stays on screen now, and says what it is about to
+              record, so the technician can read the two numbers and press once.
+            */}
+            <div style={{
+              position: "sticky", bottom: 0, zIndex: 2,
+              display: "flex", gap: 10, justifyContent: "flex-end", alignItems: "center",
+              flexWrap: "wrap", marginTop: 4, padding: "12px 0 2px",
+              background: "var(--bg-card)", borderTop: "1px solid var(--border)",
+            }}>
+              {selectedNext === "Completed" && !blockedBecause && (
+                <div style={{ flex: 1, minWidth: 180, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff }}>
+                    Customer pays{" "}
+                    <strong style={{ fontSize: 14, color: chargeable ? "var(--text-primary)" : "#fbbf24" }}>
+                      {chargeable ? `Rs. ${revisedNum.toLocaleString()}` : "nothing"}
+                    </strong>
+                  </span>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff }}>
+                    You charge{" "}
+                    <strong style={{ fontSize: 14, color: "var(--text-primary)" }}>Rs. {labourCost.toLocaleString()}</strong>
+                  </span>
+                </div>
+              )}
               {blockedBecause && (
-                <p style={{ flex: 1, fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                <p style={{ flex: 1, minWidth: 180, fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
                   {blockedBecause}
                 </p>
               )}
-              <button onClick={onClose} style={{ padding: "9px 18px", borderRadius: 9, fontSize: 13, background: "none", border: "1px solid var(--border)", color: "var(--text-secondary)", cursor: "pointer", fontFamily: ff }}>Cancel</button>
+              <button onClick={onClose} style={{ padding: "10px 18px", borderRadius: 9, fontSize: 13, background: "none", border: "1px solid var(--border)", color: "var(--text-secondary)", cursor: "pointer", fontFamily: ff }}>Cancel</button>
               <button onClick={handleSubmit} disabled={!canSubmit} style={{
-                padding: "9px 20px", borderRadius: 9, fontSize: 13, fontWeight: 600,
+                padding: "10px 24px", borderRadius: 9, fontSize: 13.5, fontWeight: 700,
                 background: canSubmit ? TA : "var(--bg-secondary)",
                 border: `1px solid ${canSubmit ? TA : "var(--border)"}`,
                 color: canSubmit ? "#000" : "var(--text-muted)",
                 cursor: canSubmit ? "pointer" : "not-allowed",
                 fontFamily: ff, transition: "all 0.15s",
-              }}>Confirm Update</button>
+              }}>
+                {selectedNext === "Completed" ? "Finish job" : "Confirm update"}
+              </button>
             </div>
           </>
         )}
