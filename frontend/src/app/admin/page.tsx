@@ -19,6 +19,7 @@ import { useStaffByRole } from "@/lib/staff/roster";
 import { RepairProvider } from "@/cashier/contexts/RepairContext";
 import { WarrantyProvider } from "@/cashier/contexts/WarrantyContext";
 import { InventoryProvider } from "@/cashier/contexts/InventoryContext";
+import { AccessoriesProvider } from "@/cashier/contexts/AccessoriesContext";
 import { PartsProvider } from "@/cashier/contexts/PartsContext";
 import TabTitle from "@/lib/ui/TabTitle";
 import { useAuth } from "@/lib/auth/AuthContext";
@@ -104,6 +105,7 @@ function AdminPageInner() {
     <RepairProvider>
     <WarrantyProvider>
     <InventoryProvider>
+    <AccessoriesProvider>
     <PartsProvider>
       <TabTitle role="Admin" />
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
@@ -135,6 +137,7 @@ function AdminPageInner() {
         </div>
       </div>
     </PartsProvider>
+    </AccessoriesProvider>
     </InventoryProvider>
     </WarrantyProvider>
     </RepairProvider>

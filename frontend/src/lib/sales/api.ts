@@ -16,11 +16,22 @@ import type { SaleTx, TxCategory, TxStatus } from "@/cashier/contexts/SalesConte
  * and now they read the same shape from the database.
  */
 
+export interface SaleLineItem {
+  /** Only "accessory" lines are ever restocked on void today — repair and
+   *  device sales have nothing here yet. */
+  type: "accessory";
+  id: number;
+  qty: number;
+}
+
 export interface SaleExtras {
   customerPhone?: string | null;
   dealerId?: number | null;
   creditAccountId?: string | null;
   jobIds?: string[];
+  /** Structured cart lines, only for sales whose stock needs to be reversible
+   *  on void — see void_sale() in the migration. */
+  lineItems?: SaleLineItem[];
 }
 
 type Row = Record<string, unknown>;
@@ -104,6 +115,7 @@ export async function insertSale(sale: Omit<SaleTx, "id">, extras: SaleExtras = 
       credit_account_id: extras.creditAccountId ?? null,
       items: sale.items ?? "",
       job_ids: extras.jobIds ?? [],
+      line_items: extras.lineItems ?? null,
       total: sale.total,
       subtotal: sale.subtotal ?? null,
       discount: sale.discountAmount ?? 0,
@@ -211,8 +223,19 @@ export function useInvoiceCategories(invoiceNos: string[]): Record<string, TxCat
   return map;
 }
 
-/** A void or a return. The row always survives — an issued invoice number
- *  cannot become an absence. */
+/**
+ * Void a sale through void_sale(), not a plain status update — voiding has to
+ * restock every accessory line in the same transaction as the status flip
+ * (see the migration), which a client-side UPDATE cannot do safely.
+ */
+export async function voidSale(id: string): Promise<SaleTx> {
+  const { data, error } = await getSupabaseBrowserClient().rpc("void_sale", { p_sale_id: id });
+  if (error) throw new Error(explain(error.message, error.code));
+  return toSale(data as Row);
+}
+
+/** A return. The row always survives — an issued invoice number cannot become
+ *  an absence. (Voiding goes through voidSale() above, not this.) */
 export async function updateSale(id: string, changes: Partial<SaleTx>): Promise<void> {
   const row: Record<string, unknown> = {};
   if (changes.status         !== undefined) row.status          = changes.status;

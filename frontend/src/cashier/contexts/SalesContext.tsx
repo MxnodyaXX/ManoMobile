@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { fetchSales, insertSale, updateSale as persistSale, type SaleExtras } from "@/lib/sales/api";
+import { fetchSales, insertSale, updateSale as persistSale, voidSale as persistVoidSale, type SaleExtras } from "@/lib/sales/api";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -55,6 +55,11 @@ interface SalesContextValue {
   addSale: (partial: Omit<SaleTx, "id">, extras?: SaleExtras) => void;
   updateSale: (id: string, changes: Partial<SaleTx>) => void;
   returnSale: (id: string, amount: number, reason: string) => void;
+  /** Voids the sale AND restocks every accessory line it sold, atomically —
+   *  see void_sale() in the migration. Throws on failure so the caller can
+   *  tell a cashier the void didn't happen, rather than showing "Voided" for
+   *  a sale that's still Paid in the database. */
+  voidSale: (id: string) => Promise<void>;
   loading: boolean;
   /** Set when the ledger could not be read or a sale could not be stored. The
    *  sale still shows on screen; this says it is not safe yet. */
@@ -66,6 +71,7 @@ const SalesContext = createContext<SalesContextValue>({
   addSale: () => {},
   updateSale: () => {},
   returnSale: () => {},
+  voidSale: async () => {},
   loading: false,
   error: null,
 });
@@ -148,8 +154,18 @@ export function SalesProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const voidSale = async (id: string) => {
+    if (!configured || id.startsWith("pending-")) {
+      // Local/unconfigured mode never had real stock to restock either.
+      setSales(prev => prev.map(s => (s.id === id ? { ...s, status: "Voided" } : s)));
+      return;
+    }
+    const voided = await persistVoidSale(id);
+    setSales(prev => prev.map(s => (s.id === id ? voided : s)));
+  };
+
   return (
-    <SalesContext.Provider value={{ sales, addSale, updateSale, returnSale, loading, error }}>
+    <SalesContext.Provider value={{ sales, addSale, updateSale, returnSale, voidSale, loading, error }}>
       {children}
     </SalesContext.Provider>
   );

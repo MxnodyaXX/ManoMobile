@@ -1,20 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import AgentsManager from "@/admin/components/repair/AgentsManager";
 import { useToast } from "@/lib/ui/toast";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import Barcode from "react-barcode";
 import {
-  Tag, Layers, Truck, Barcode as BarcodeIcon, Settings,
-  Plus, Edit2, Trash2, X, Search, Phone, Mail, Eye, KeyRound, Check,
+  Tag, Tags, Layers, Truck, Barcode as BarcodeIcon, Settings,
+  Plus, Edit2, Trash2, X, Search, Phone, Mail, Eye, KeyRound, Check, ChevronDown,
   Store, MapPin, CalendarDays, Building2, Package, ClipboardCheck,
   CheckCircle2, XCircle, Clock, AlertTriangle, AlertCircle, Star, Copy,
 } from "lucide-react";
 import {
   useInventory,
-  type Brand, type Category, type Supplier, type BarcodeSettings,
+  type Brand, type Category, type Subcategory, type Supplier, type BarcodeSettings,
 } from "@/cashier/contexts/InventoryContext";
 import { useRepair, type RepairDealer } from "@/cashier/contexts/RepairContext";
 import { useParts, PART_CATEGORIES, type SparePart, type PartCategory, type PartRequestStatus } from "@/cashier/contexts/PartsContext";
@@ -163,7 +163,7 @@ function BrandModal({ brand, onSave, onClose }: { brand: Brand | null; onSave: (
 
   function handleSave() {
     if (!name.trim()) { setNameError("Name is required"); return; }
-    onSave({ id: brand?.id ?? Date.now(), name: name.trim(), type, categoryIds: type === "device" ? [] : catIds });
+    onSave({ id: brand?.id ?? Date.now(), name: name.trim(), type, categoryIds: type === "device" ? [] : catIds, active: brand?.active ?? true });
   }
 
   const typeOptions: { value: Brand["type"]; label: string; desc: string }[] = [
@@ -235,7 +235,7 @@ function BrandModal({ brand, onSave, onClose }: { brand: Brand | null; onSave: (
 
 function SupplierModal({ supplier, onSave, onClose }: { supplier: Supplier | null; onSave: (s: Supplier) => void; onClose: () => void }) {
   const { brands } = useInventory();
-  const blank: Supplier = { id: 0, name: "", phone: "", email: "", brandIds: [] };
+  const blank: Supplier = { id: 0, name: "", phone: "", email: "", brandIds: [], active: true };
   const [form, setForm] = useState<Supplier>(supplier ?? blank);
   const [errors, setErrors] = useState<Partial<Record<keyof Supplier, string>>>({});
 
@@ -299,15 +299,99 @@ function SupplierModal({ supplier, onSave, onClose }: { supplier: Supplier | nul
 // ─── Categories Manager ───────────────────────────────────────────────────────
 
 function CategoriesManager() {
-  const { categories, setCategories } = useInventory();
+  const {
+    categories, subcategories, loading, configured,
+    addCategory, updateCategory, setCategoryActive, deleteCategory,
+    addSubcategory, updateSubcategory, setSubcategoryActive, deleteSubcategory,
+  } = useInventory();
+  const toast = useToast();
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<Category | null | "new">(null);
   const [deleteTarget, setDeleteTarget] = useState<Category | null>(null);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // Subcategory add/edit shares one modal; `categoryId` is which row it opened
+  // from — "new" preselects that category, editing shows the sub's own.
+  const [subModal, setSubModal] = useState<{ sub: Subcategory | null; categoryId: number } | null>(null);
+  const [subDeleteTarget, setSubDeleteTarget] = useState<Subcategory | null>(null);
+  const [busy, setBusy] = useState(false);
   const filtered = categories.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
 
-  function handleSave(name: string) {
-    setCategories(prev => modal && modal !== "new" ? prev.map(c => c.id === modal.id ? { ...c, name } : c) : [...prev, { id: Date.now(), name }]);
-    setModal(null);
+  const toggleExpand = (id: number) =>
+    setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  async function handleSave(name: string) {
+    setBusy(true);
+    try {
+      if (modal && modal !== "new") await updateCategory(modal.id, name);
+      else await addCategory(name);
+      setModal(null);
+    } catch (e) {
+      toast.dialog("error", "Could not save category", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setBusy(true);
+    try {
+      await deleteCategory(deleteTarget.id);
+      setDeleteTarget(null);
+    } catch (e) {
+      toast.dialog("error", "Could not remove category", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleToggleActive(c: Category) {
+    setBusy(true);
+    try {
+      await setCategoryActive(c.id, !c.active);
+    } catch (e) {
+      toast.dialog("error", "Could not update category", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveSub(s: Subcategory) {
+    setBusy(true);
+    try {
+      const { id, active, ...rest } = s;
+      if (subModal?.sub) await updateSubcategory(subModal.sub.id, rest);
+      else await addSubcategory(rest);
+      setSubModal(null);
+    } catch (e) {
+      toast.dialog("error", "Could not save subcategory", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDeleteSub() {
+    if (!subDeleteTarget) return;
+    setBusy(true);
+    try {
+      await deleteSubcategory(subDeleteTarget.id);
+      setSubDeleteTarget(null);
+    } catch (e) {
+      toast.dialog("error", "Could not remove subcategory", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleToggleSubActive(s: Subcategory) {
+    setBusy(true);
+    try {
+      await setSubcategoryActive(s.id, !s.active);
+    } catch (e) {
+      toast.dialog("error", "Could not update subcategory", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -321,23 +405,138 @@ function CategoriesManager() {
       </div>
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-          <thead><tr><th style={thStyle}>#</th><th style={thStyle}>Category Name</th><th style={{ ...thStyle, width: 80 }}></th></tr></thead>
+          <thead><tr><th style={{ ...thStyle, width: 32 }}></th><th style={thStyle}>#</th><th style={thStyle}>Category Name</th><th style={thStyle}>Subcategories</th><th style={thStyle}>Status</th><th style={{ ...thStyle, width: 110 }}></th></tr></thead>
           <tbody>
-            {filtered.length === 0 ? <tr><td colSpan={3} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>{search ? "No categories match" : "No categories added yet"}</td></tr>
-              : filtered.map((c, i) => (
-                <tr key={c.id}>
-                  <td style={{ ...tdStyle, color: "var(--text-muted)", fontSize: 12, width: 48 }}>{i + 1}</td>
-                  <td style={tdStyle}><div style={{ display: "flex", alignItems: "center", gap: 9 }}><div style={{ width: 30, height: 30, borderRadius: 8, background: "var(--accent-dim)", border: "1px solid var(--accent-glow)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)", flexShrink: 0 }}><Tag size={13} /></div><span style={{ fontWeight: 500 }}>{c.name}</span></div></td>
-                  <td style={tdStyle}><div style={{ display: "flex", gap: 4 }}><button onClick={() => setModal(c)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><Edit2 size={14} /></button><button onClick={() => setDeleteTarget(c)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}><Trash2 size={14} /></button></div></td>
-                </tr>
-              ))}
+            {filtered.length === 0 ? <tr><td colSpan={6} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>{search ? "No categories match" : "No categories added yet"}</td></tr>
+              : filtered.map((c, i) => {
+                const open = expanded.has(c.id);
+                const subs = subcategories.filter(s => s.categoryId === c.id);
+                return (
+                <Fragment key={c.id}>
+                  <tr style={{ opacity: c.active ? 1 : 0.55, cursor: "pointer" }} onClick={() => toggleExpand(c.id)}>
+                    <td style={{ ...tdStyle, textAlign: "center", color: "var(--text-muted)" }}>
+                      <ChevronDown size={14} style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.15s" }} />
+                    </td>
+                    <td style={{ ...tdStyle, color: "var(--text-muted)", fontSize: 12, width: 48 }}>{i + 1}</td>
+                    <td style={tdStyle}><div style={{ display: "flex", alignItems: "center", gap: 9 }}><div style={{ width: 30, height: 30, borderRadius: 8, background: "var(--accent-dim)", border: "1px solid var(--accent-glow)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)", flexShrink: 0 }}><Tag size={13} /></div><span style={{ fontWeight: 500 }}>{c.name}</span></div></td>
+                    <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-secondary)" }}>{subs.length === 0 ? <span style={{ fontStyle: "italic", color: "var(--text-muted)" }}>None</span> : `${subs.length} subcategor${subs.length === 1 ? "y" : "ies"}`}</td>
+                    <td style={tdStyle}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20, background: c.active ? "#dcfce7" : "var(--bg-surface)", color: c.active ? "#16a34a" : "var(--text-muted)" }}>
+                        {c.active ? <CheckCircle2 size={11} /> : <XCircle size={11} />} {c.active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td style={tdStyle} onClick={e => e.stopPropagation()}><div style={{ display: "flex", gap: 4 }}>
+                      <button onClick={() => { if (!busy) void handleToggleActive(c); }} title={c.active ? "Deactivate" : "Activate"} style={{ background: "none", border: "none", cursor: "pointer", color: c.active ? "#dc2626" : "#16a34a", padding: 4 }}>{c.active ? <XCircle size={14} /> : <CheckCircle2 size={14} />}</button>
+                      <button onClick={() => setModal(c)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><Edit2 size={14} /></button>
+                      <button onClick={() => setDeleteTarget(c)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}><Trash2 size={14} /></button>
+                    </div></td>
+                  </tr>
+                  {open && (
+                    <tr key={`${c.id}-sub`}>
+                      <td></td>
+                      <td colSpan={5} style={{ padding: "4px 14px 14px 14px", background: "var(--bg-surface)" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          {subs.length === 0 && <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "6px 2px" }}>No subcategories under {c.name} yet.</div>}
+                          {subs.map(s => (
+                            <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 10px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, opacity: s.active ? 1 : 0.55 }}>
+                              <Tags size={12} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                              <span style={{ fontSize: 12.5, fontWeight: 500, color: "var(--text-primary)", flex: 1 }}>{s.name}</span>
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, fontWeight: 700, padding: "1px 7px", borderRadius: 20, background: s.active ? "#dcfce7" : "var(--bg-surface)", color: s.active ? "#16a34a" : "var(--text-muted)" }}>
+                                {s.active ? <CheckCircle2 size={10} /> : <XCircle size={10} />} {s.active ? "Active" : "Inactive"}
+                              </span>
+                              <button onClick={() => { if (!busy) void handleToggleSubActive(s); }} title={s.active ? "Deactivate" : "Activate"} style={{ background: "none", border: "none", cursor: "pointer", color: s.active ? "#dc2626" : "#16a34a", padding: 3 }}>{s.active ? <XCircle size={13} /> : <CheckCircle2 size={13} />}</button>
+                              <button onClick={() => setSubModal({ sub: s, categoryId: c.id })} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 3 }}><Edit2 size={13} /></button>
+                              <button onClick={() => setSubDeleteTarget(s)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 3 }}><Trash2 size={13} /></button>
+                            </div>
+                          ))}
+                          <button
+                            onClick={() => setSubModal({ sub: null, categoryId: c.id })}
+                            style={{ display: "flex", alignItems: "center", gap: 6, alignSelf: "flex-start", padding: "6px 10px", borderRadius: 7, border: "1px dashed var(--border)", background: "transparent", color: "var(--accent)", cursor: "pointer", fontSize: 11.5, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 2 }}
+                          >
+                            <Plus size={12} /> Add Subcategory
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+                );
+              })}
           </tbody>
         </table>
-        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{filtered.length} of {categories.length} categories</div>
+        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{filtered.length} of {categories.length} categories{loading ? " · loading…" : ""}</div>
       </div>
-      {modal !== null && <NameModal title={modal === "new" ? "Add Category" : "Edit Category"} initial={modal === "new" ? "" : modal.name} onSave={handleSave} onClose={() => setModal(null)} />}
-      {deleteTarget && <DeleteConfirm name={deleteTarget.name} onConfirm={() => { setCategories(prev => prev.filter(c => c.id !== deleteTarget.id)); setDeleteTarget(null); }} onClose={() => setDeleteTarget(null)} />}
+      {!configured && (
+        <div style={{ display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          <AlertCircle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>Connect Supabase to manage accessory categories.</p>
+        </div>
+      )}
+      {modal !== null && <NameModal title={modal === "new" ? "Add Category" : "Edit Category"} initial={modal === "new" ? "" : modal.name} onSave={name => { if (!busy) void handleSave(name); }} onClose={() => setModal(null)} />}
+      {deleteTarget && <DeleteConfirm name={deleteTarget.name} onConfirm={() => { if (!busy) void handleDelete(); }} onClose={() => setDeleteTarget(null)} />}
+      {subModal && (
+        <SubcategoryModal
+          sub={subModal.sub}
+          defaultCategoryId={subModal.categoryId}
+          onSave={s => { if (!busy) void handleSaveSub(s); }}
+          onClose={() => setSubModal(null)}
+        />
+      )}
+      {subDeleteTarget && <DeleteConfirm name={subDeleteTarget.name} onConfirm={() => { if (!busy) void handleDeleteSub(); }} onClose={() => setSubDeleteTarget(null)} />}
     </div>
+  );
+}
+
+// ─── Subcategory Modal ────────────────────────────────────────────────────────
+
+function SubcategoryModal({ sub, defaultCategoryId, onSave, onClose }: {
+  sub: Subcategory | null; defaultCategoryId?: number; onSave: (s: Subcategory) => void; onClose: () => void;
+}) {
+  const { categories } = useInventory();
+  const [name, setName] = useState(sub?.name ?? "");
+  const [categoryId, setCategoryId] = useState<number | "">(sub?.categoryId ?? defaultCategoryId ?? "");
+  const [nameError, setNameError] = useState("");
+  const [catError, setCatError] = useState("");
+
+  function handleSave() {
+    let ok = true;
+    if (!name.trim()) { setNameError("Name is required"); ok = false; }
+    if (categoryId === "") { setCatError("Pick a category"); ok = false; }
+    if (!ok) return;
+    onSave({ id: sub?.id ?? Date.now(), categoryId: categoryId as number, name: name.trim(), active: sub?.active ?? true });
+  }
+
+  return createPortal(
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: 28, width: 380, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{sub ? "Edit Subcategory" : "Add Subcategory"}</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><X size={16} /></button>
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Main Category</label>
+          <select
+            value={categoryId}
+            onChange={e => { setCategoryId(e.target.value ? Number(e.target.value) : ""); setCatError(""); }}
+            style={{ ...inputStyle, cursor: "pointer", borderColor: catError ? "#dc2626" : "var(--border)" }}
+          >
+            <option value="">Select a category…</option>
+            {categories.map(c => <option key={c.id} value={c.id}>{c.name}{c.active ? "" : " (inactive)"}</option>)}
+          </select>
+          {catError && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{catError}</div>}
+        </div>
+        <div style={{ marginBottom: 20 }}>
+          <label style={labelStyle}>Subcategory Name</label>
+          <input autoFocus type="text" value={name} onChange={e => { setName(e.target.value); setNameError(""); }} onKeyDown={e => e.key === "Enter" && handleSave()} placeholder="e.g. Type-C" style={{ ...inputStyle, borderColor: nameError ? "#dc2626" : "var(--border)" }} />
+          {nameError && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{nameError}</div>}
+        </div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button onClick={onClose} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
+          <button onClick={handleSave} style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Save</button>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -462,11 +661,51 @@ function DeviceFaultsManager() {
 // ─── Brands Manager ───────────────────────────────────────────────────────────
 
 function BrandsManager() {
-  const { brands, setBrands } = useInventory();
+  const { brands, loading, configured, addBrand, updateBrand, setBrandActive, deleteBrand } = useInventory();
+  const toast = useToast();
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<Brand | null | "new">(null);
   const [deleteTarget, setDeleteTarget] = useState<Brand | null>(null);
+  const [busy, setBusy] = useState(false);
   const filtered = brands.filter(b => b.name.toLowerCase().includes(search.toLowerCase()));
+
+  async function handleSave(b: Brand) {
+    setBusy(true);
+    try {
+      const { id, ...rest } = b;
+      if (modal && modal !== "new") await updateBrand(modal.id, rest);
+      else await addBrand(rest);
+      setModal(null);
+    } catch (e) {
+      toast.dialog("error", "Could not save brand", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setBusy(true);
+    try {
+      await deleteBrand(deleteTarget.id);
+      setDeleteTarget(null);
+    } catch (e) {
+      toast.dialog("error", "Could not remove brand", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleToggleActive(b: Brand) {
+    setBusy(true);
+    try {
+      await setBrandActive(b.id, !b.active);
+    } catch (e) {
+      toast.dialog("error", "Could not update brand", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const typeBadge = (type: Brand["type"]) => {
     const map = { device: { bg: "#dbeafe", color: "#1d4ed8", label: "Device" }, accessory: { bg: "var(--accent-dim)", color: "var(--accent)", label: "Accessory" }, both: { bg: "#dcfce7", color: "#16a34a", label: "Both" } } as const;
@@ -485,26 +724,41 @@ function BrandsManager() {
       </div>
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-          <thead><tr><th style={thStyle}>#</th><th style={thStyle}>Brand Name</th><th style={thStyle}>Type</th><th style={thStyle}>Categories</th><th style={{ ...thStyle, width: 80 }}></th></tr></thead>
+          <thead><tr><th style={thStyle}>#</th><th style={thStyle}>Brand Name</th><th style={thStyle}>Type</th><th style={thStyle}>Categories</th><th style={thStyle}>Status</th><th style={{ ...thStyle, width: 110 }}></th></tr></thead>
           <tbody>
-            {filtered.length === 0 ? <tr><td colSpan={5} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>{search ? "No brands match" : "No brands added yet"}</td></tr>
+            {filtered.length === 0 ? <tr><td colSpan={6} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>{search ? "No brands match" : "No brands added yet"}</td></tr>
               : filtered.map((b, i) => (
-                <tr key={b.id}>
+                <tr key={b.id} style={{ opacity: b.active ? 1 : 0.55 }}>
                   <td style={{ ...tdStyle, color: "var(--text-muted)", fontSize: 12, width: 48 }}>{i + 1}</td>
                   <td style={tdStyle}><div style={{ display: "flex", alignItems: "center", gap: 9 }}><div style={{ width: 30, height: 30, borderRadius: 8, background: "var(--bg-surface)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", flexShrink: 0 }}><Layers size={13} /></div><span style={{ fontWeight: 600 }}>{b.name}</span></div></td>
                   <td style={tdStyle}>{typeBadge(b.type)}</td>
                   <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-secondary)" }}>
                     {b.categoryIds.length === 0 ? <span style={{ color: "var(--text-muted)", fontStyle: "italic" }}>All</span> : b.categoryIds.length + " linked"}
                   </td>
-                  <td style={tdStyle}><div style={{ display: "flex", gap: 4 }}><button onClick={() => setModal(b)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><Edit2 size={14} /></button><button onClick={() => setDeleteTarget(b)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}><Trash2 size={14} /></button></div></td>
+                  <td style={tdStyle}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20, background: b.active ? "#dcfce7" : "var(--bg-surface)", color: b.active ? "#16a34a" : "var(--text-muted)" }}>
+                      {b.active ? <CheckCircle2 size={11} /> : <XCircle size={11} />} {b.active ? "Active" : "Inactive"}
+                    </span>
+                  </td>
+                  <td style={tdStyle}><div style={{ display: "flex", gap: 4 }}>
+                    <button onClick={() => { if (!busy) void handleToggleActive(b); }} title={b.active ? "Deactivate" : "Activate"} style={{ background: "none", border: "none", cursor: "pointer", color: b.active ? "#dc2626" : "#16a34a", padding: 4 }}>{b.active ? <XCircle size={14} /> : <CheckCircle2 size={14} />}</button>
+                    <button onClick={() => setModal(b)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><Edit2 size={14} /></button>
+                    <button onClick={() => setDeleteTarget(b)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}><Trash2 size={14} /></button>
+                  </div></td>
                 </tr>
               ))}
           </tbody>
         </table>
-        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{filtered.length} of {brands.length} brands</div>
+        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{filtered.length} of {brands.length} brands{loading ? " · loading…" : ""}</div>
       </div>
-      {modal !== null && <BrandModal brand={modal === "new" ? null : modal} onSave={b => { setBrands(prev => prev.find(x => x.id === b.id) ? prev.map(x => x.id === b.id ? b : x) : [...prev, b]); setModal(null); }} onClose={() => setModal(null)} />}
-      {deleteTarget && <DeleteConfirm name={deleteTarget.name} onConfirm={() => { setBrands(prev => prev.filter(b => b.id !== deleteTarget.id)); setDeleteTarget(null); }} onClose={() => setDeleteTarget(null)} />}
+      {!configured && (
+        <div style={{ display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          <AlertCircle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>Connect Supabase to manage accessory brands.</p>
+        </div>
+      )}
+      {modal !== null && <BrandModal brand={modal === "new" ? null : modal} onSave={b => { if (!busy) void handleSave(b); }} onClose={() => setModal(null)} />}
+      {deleteTarget && <DeleteConfirm name={deleteTarget.name} onConfirm={() => { if (!busy) void handleDelete(); }} onClose={() => setDeleteTarget(null)} />}
     </div>
   );
 }
@@ -512,11 +766,51 @@ function BrandsManager() {
 // ─── Suppliers Manager ────────────────────────────────────────────────────────
 
 function SuppliersManager() {
-  const { suppliers, setSuppliers, brands } = useInventory();
+  const { suppliers, brands, loading, configured, addSupplier, updateSupplier, setSupplierActive, deleteSupplier } = useInventory();
+  const toast = useToast();
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<Supplier | null | "new">(null);
   const [deleteTarget, setDeleteTarget] = useState<Supplier | null>(null);
+  const [busy, setBusy] = useState(false);
   const filtered = suppliers.filter(s => s.name.toLowerCase().includes(search.toLowerCase()) || s.phone.toLowerCase().includes(search.toLowerCase()) || s.email.toLowerCase().includes(search.toLowerCase()));
+
+  async function handleSave(s: Supplier) {
+    setBusy(true);
+    try {
+      const { id, ...rest } = s;
+      if (modal && modal !== "new") await updateSupplier(modal.id, rest);
+      else await addSupplier(rest);
+      setModal(null);
+    } catch (e) {
+      toast.dialog("error", "Could not save supplier", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setBusy(true);
+    try {
+      await deleteSupplier(deleteTarget.id);
+      setDeleteTarget(null);
+    } catch (e) {
+      toast.dialog("error", "Could not remove supplier", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleToggleActive(s: Supplier) {
+    setBusy(true);
+    try {
+      await setSupplierActive(s.id, !s.active);
+    } catch (e) {
+      toast.dialog("error", "Could not update supplier", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -529,11 +823,11 @@ function SuppliersManager() {
       </div>
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-          <thead><tr><th style={thStyle}>#</th><th style={thStyle}>Supplier Name</th><th style={thStyle}>Phone</th><th style={thStyle}>Email</th><th style={thStyle}>Brands</th><th style={{ ...thStyle, width: 80 }}></th></tr></thead>
+          <thead><tr><th style={thStyle}>#</th><th style={thStyle}>Supplier Name</th><th style={thStyle}>Phone</th><th style={thStyle}>Email</th><th style={thStyle}>Brands</th><th style={thStyle}>Status</th><th style={{ ...thStyle, width: 110 }}></th></tr></thead>
           <tbody>
-            {filtered.length === 0 ? <tr><td colSpan={6} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>{search ? "No suppliers match" : "No suppliers added yet"}</td></tr>
+            {filtered.length === 0 ? <tr><td colSpan={7} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>{search ? "No suppliers match" : "No suppliers added yet"}</td></tr>
               : filtered.map((s, i) => (
-                <tr key={s.id}>
+                <tr key={s.id} style={{ opacity: s.active ? 1 : 0.55 }}>
                   <td style={{ ...tdStyle, color: "var(--text-muted)", fontSize: 12, width: 48 }}>{i + 1}</td>
                   <td style={tdStyle}><div style={{ display: "flex", alignItems: "center", gap: 9 }}><div style={{ width: 30, height: 30, borderRadius: 8, background: "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", color: "#1d4ed8", flexShrink: 0 }}><Truck size={13} /></div><span style={{ fontWeight: 600 }}>{s.name}</span></div></td>
                   <td style={tdStyle}>{s.phone ? <div style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--text-secondary)", fontSize: 12.5 }}><Phone size={12} />{s.phone}</div> : <span style={{ color: "var(--text-muted)", fontSize: 12 }}>—</span>}</td>
@@ -541,15 +835,30 @@ function SuppliersManager() {
                   <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-secondary)" }}>
                     {s.brandIds.length === 0 ? <span style={{ color: "var(--text-muted)", fontStyle: "italic" }}>All</span> : brands.filter(b => s.brandIds.includes(b.id)).map(b => b.name).join(", ")}
                   </td>
-                  <td style={tdStyle}><div style={{ display: "flex", gap: 4 }}><button onClick={() => setModal(s)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><Edit2 size={14} /></button><button onClick={() => setDeleteTarget(s)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}><Trash2 size={14} /></button></div></td>
+                  <td style={tdStyle}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20, background: s.active ? "#dcfce7" : "var(--bg-surface)", color: s.active ? "#16a34a" : "var(--text-muted)" }}>
+                      {s.active ? <CheckCircle2 size={11} /> : <XCircle size={11} />} {s.active ? "Active" : "Inactive"}
+                    </span>
+                  </td>
+                  <td style={tdStyle}><div style={{ display: "flex", gap: 4 }}>
+                    <button onClick={() => { if (!busy) void handleToggleActive(s); }} title={s.active ? "Deactivate" : "Activate"} style={{ background: "none", border: "none", cursor: "pointer", color: s.active ? "#dc2626" : "#16a34a", padding: 4 }}>{s.active ? <XCircle size={14} /> : <CheckCircle2 size={14} />}</button>
+                    <button onClick={() => setModal(s)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><Edit2 size={14} /></button>
+                    <button onClick={() => setDeleteTarget(s)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}><Trash2 size={14} /></button>
+                  </div></td>
                 </tr>
               ))}
           </tbody>
         </table>
-        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{filtered.length} of {suppliers.length} suppliers</div>
+        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{filtered.length} of {suppliers.length} suppliers{loading ? " · loading…" : ""}</div>
       </div>
-      {modal !== null && <SupplierModal supplier={modal === "new" ? null : modal} onSave={s => { setSuppliers(prev => prev.find(x => x.id === s.id) ? prev.map(x => x.id === s.id ? s : x) : [...prev, s]); setModal(null); }} onClose={() => setModal(null)} />}
-      {deleteTarget && <DeleteConfirm name={deleteTarget.name} onConfirm={() => { setSuppliers(prev => prev.filter(s => s.id !== deleteTarget.id)); setDeleteTarget(null); }} onClose={() => setDeleteTarget(null)} />}
+      {!configured && (
+        <div style={{ display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          <AlertCircle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>Connect Supabase to manage accessory suppliers.</p>
+        </div>
+      )}
+      {modal !== null && <SupplierModal supplier={modal === "new" ? null : modal} onSave={s => { if (!busy) void handleSave(s); }} onClose={() => setModal(null)} />}
+      {deleteTarget && <DeleteConfirm name={deleteTarget.name} onConfirm={() => { if (!busy) void handleDelete(); }} onClose={() => setDeleteTarget(null)} />}
     </div>
   );
 }
@@ -1588,7 +1897,7 @@ function CredentialsManager() {
 type AdminTab = "Categories" | "Brands" | "Suppliers" | "Dealers" | "Agents" | "Parts" | "PartRequests" | "Faults" | "Barcode" | "Settings";
 
 const tabs: { id: AdminTab; icon: React.ComponentType<{ size?: number; strokeWidth?: number }>; label: string }[] = [
-  { id: "Categories",   icon: Tag,            label: "Item Categories" },
+  { id: "Categories",   icon: Tag,            label: "Categories"      },
   { id: "Brands",       icon: Layers,         label: "Brands"          },
   { id: "Suppliers",    icon: Truck,          label: "Suppliers"       },
   { id: "Dealers",      icon: Store,          label: "Repair Dealers"  },

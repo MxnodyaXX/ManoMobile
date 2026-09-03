@@ -11,21 +11,14 @@ import { QRCodeSVG } from "qrcode.react";
 import Barcode from "react-barcode";
 import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 import InvoiceNoBadge from "@/cashier/components/sales/InvoiceNoBadge";
+import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Product {
-  id: number;
-  name: string;
-  model: string;
-  brand: string;
-  supplier: string;
-  category: string;
-  insight: string;
-  sellingPrice: number;
-  buyingPrice: number;
-  stock: number;
-}
+// The catalogue this screen sells from — see AccessoriesContext for why it's
+// no longer a local, disconnected product list. Kept as a local alias so the
+// rest of this file (already written against "Product") doesn't need renaming.
+type Product = AccessoryProduct;
 
 interface CartItem {
   product: Product;
@@ -39,10 +32,6 @@ interface CustomerInfo {
   email: string;
   nic: string;
 }
-
-// ─── Sample Data ──────────────────────────────────────────────────────────────
-
-const INITIAL_PRODUCTS: Product[] = [];
 
 // ─── Shared Styles ────────────────────────────────────────────────────────────
 
@@ -123,6 +112,7 @@ function SearchPopup({
   const MAX_PRICE = Math.max(...products.map((p) => p.sellingPrice), 1000);
 
   const [filterType, setFilterType]         = useState("");
+  const [filterSubcategory, setFilterSubcategory] = useState("");
   const [filterBrand, setFilterBrand]       = useState("");
   const [filterName, setFilterName]         = useState("");
   const [filterSupplier, setFilterSupplier] = useState("");
@@ -134,6 +124,10 @@ function SearchPopup({
   const [selectedIds, setSelectedIds]       = useState<Set<number>>(new Set());
 
   const types     = [...new Set(products.map((p) => p.category))];
+  // Narrowed to whichever type is picked, same cascade as the product form.
+  const subcategories = [...new Set(
+    products.filter((p) => !filterType || p.category === filterType).map((p) => p.subcategory).filter(Boolean)
+  )];
   const brands    = [...new Set(products.map((p) => p.brand))];
   const suppliers = [...new Set(products.map((p) => p.supplier))];
 
@@ -147,6 +141,7 @@ function SearchPopup({
 
   let filtered = products.filter((p) => {
     if (filterType && p.category !== filterType) return false;
+    if (filterSubcategory && p.subcategory !== filterSubcategory) return false;
     if (filterBrand && p.brand !== filterBrand) return false;
     if (filterName && !p.name.toLowerCase().includes(filterName.toLowerCase())) return false;
     if (filterSupplier && p.supplier !== filterSupplier) return false;
@@ -155,7 +150,7 @@ function SearchPopup({
   });
   if (sortPrice === "asc")  filtered = [...filtered].sort((a, b) => a.sellingPrice - b.sellingPrice);
   if (sortPrice === "desc") filtered = [...filtered].sort((a, b) => b.sellingPrice - a.sellingPrice);
-  if (sortInsight) filtered = [...filtered].sort((a, b) => a.insight.localeCompare(b.insight));
+  if (sortInsight) filtered = [...filtered].sort((a, b) => (a.insight ?? "").localeCompare(b.insight ?? ""));
 
   const toggleSelect = (id: number) =>
     setSelectedIds((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -236,9 +231,14 @@ function SearchPopup({
 
         {/* Filters row */}
         <div style={{ padding: "14px 22px", borderBottom: "1px solid var(--border)", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", flexShrink: 0 }}>
-          <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={selStyle}>
+          <select value={filterType} onChange={(e) => { setFilterType(e.target.value); setFilterSubcategory(""); }} style={selStyle}>
             <option value="">All Types</option>
             {types.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+
+          <select value={filterSubcategory} onChange={(e) => setFilterSubcategory(e.target.value)} style={selStyle}>
+            <option value="">All Subcategories</option>
+            {subcategories.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
 
           <select value={filterBrand} onChange={(e) => setFilterBrand(e.target.value)} style={selStyle}>
@@ -384,9 +384,9 @@ function SearchPopup({
           </button>
 
           {/* Clear all */}
-          {(filterType || filterBrand || filterName || filterSupplier || sortPrice || sortInsight || priceMin > 0 || priceMax < MAX_PRICE) && (
+          {(filterType || filterSubcategory || filterBrand || filterName || filterSupplier || sortPrice || sortInsight || priceMin > 0 || priceMax < MAX_PRICE) && (
             <button
-              onClick={() => { setFilterType(""); setFilterBrand(""); setFilterName(""); setFilterSupplier(""); setSortPrice(""); setSortInsight(false); setPriceMin(0); setPriceMax(MAX_PRICE); }}
+              onClick={() => { setFilterType(""); setFilterSubcategory(""); setFilterBrand(""); setFilterName(""); setFilterSupplier(""); setSortPrice(""); setSortInsight(false); setPriceMin(0); setPriceMax(MAX_PRICE); }}
               style={{ ...selStyle, color: "#ef4444", border: "1px solid #ef444440" }}
             >
               Clear All
@@ -412,6 +412,7 @@ function SearchPopup({
                 <th style={thStyle}>Brand</th>
                 <th style={thStyle}>Supplier</th>
                 <th style={thStyle}>Category</th>
+                <th style={thStyle}>Subcategory</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Price</th>
                 <th style={{ ...thStyle, textAlign: "center" }}>Stock</th>
                 <th style={thStyle}>Insight</th>
@@ -421,7 +422,7 @@ function SearchPopup({
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={10} style={{ ...tdStyle, textAlign: "center", padding: "32px 0", color: "var(--text-muted)" }}>
+                  <td colSpan={11} style={{ ...tdStyle, textAlign: "center", padding: "32px 0", color: "var(--text-muted)" }}>
                     No products match the filters
                   </td>
                 </tr>
@@ -429,12 +430,17 @@ function SearchPopup({
                 filtered.map((p) => {
                   const selected = selectedIds.has(p.id);
                   const qty = cartQty(p.id);
+                  // p.stock is already what's left after this cart's own
+                  // reservation (see availableProducts) — 0 means nothing
+                  // more of this product can be added, in cart or not.
+                  const outOfStock = p.stock === 0;
                   return (
                     <tr
                       key={p.id}
-                      onClick={() => toggleSelect(p.id)}
+                      onClick={() => !outOfStock && toggleSelect(p.id)}
                       style={{
-                        cursor: "pointer",
+                        cursor: outOfStock ? "not-allowed" : "pointer",
+                        opacity: outOfStock ? 0.5 : 1,
                         background: selected ? "rgba(var(--accent-rgb,99,102,241),0.06)" : "transparent",
                         transition: "background 0.1s",
                       }}
@@ -443,9 +449,10 @@ function SearchPopup({
                         <input
                           type="checkbox"
                           checked={selected}
+                          disabled={outOfStock}
                           onChange={() => toggleSelect(p.id)}
                           onClick={(e) => e.stopPropagation()}
-                          style={{ cursor: "pointer", accentColor: "var(--accent)" }}
+                          style={{ cursor: outOfStock ? "not-allowed" : "pointer", accentColor: "var(--accent)" }}
                         />
                       </td>
                       <td style={{ ...tdStyle, fontWeight: 600 }}>{p.name}</td>
@@ -457,6 +464,7 @@ function SearchPopup({
                           {p.category}
                         </span>
                       </td>
+                      <td style={{ ...tdStyle, color: "var(--text-secondary)", fontSize: 12 }}>{p.subcategory || "—"}</td>
                       <td style={{ ...tdStyle, textAlign: "right", fontWeight: 600 }}>
                         Rs. {p.sellingPrice.toLocaleString()}
                       </td>
@@ -696,7 +704,7 @@ function Step1({
                         ><Minus size={12} /></button>
                         <span style={{ fontSize: 13, fontWeight: 700, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif", minWidth: 18, textAlign: "center" }}>{qty}</span>
                         <button
-                          onClick={() => qty < p.stock && onQtyChange(p.id, qty + 1)}
+                          onClick={() => p.stock > 0 && onQtyChange(p.id, qty + 1)}
                           style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid var(--border)", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)" }}
                         ><Plus size={12} /></button>
                       </div>
@@ -813,8 +821,8 @@ function Step1({
                         minWidth: 20, textAlign: "center",
                       }}>{qty}</span>
                       <button
-                        onClick={() => qty < p.stock && onQtyChange(p.id, qty + 1)}
-                        disabled={qty >= p.stock}
+                        onClick={() => p.stock > 0 && onQtyChange(p.id, qty + 1)}
+                        disabled={p.stock <= 0}
                         style={{
                           width: 28, height: 28, borderRadius: 7,
                           border: "1px solid var(--border)", background: "transparent",
@@ -1867,18 +1875,28 @@ const INITIAL_CUSTOMER: CustomerInfo = { name: "", phone: "", whatsapp: "", emai
 export default function AccessorySales() {
   const { addEntry } = useCashRegister();
   const { addSale } = useSales();
+  const { products, sellStock, loading: productsLoading, configured: productsConfigured } = useAccessories();
   const [step, setStep] = useState(1);
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customer, setCustomer] = useState<CustomerInfo>(INITIAL_CUSTOMER);
   const [payMethod, setPayMethod] = useState("Cash");
   const [discount, setDiscount] = useState("");
   const [completed, setCompleted] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [showSearchPopup, setShowSearchPopup] = useState(false);
 
-  const adjustStock = (id: number, delta: number) =>
-    setProducts((prev) => prev.map((p) => p.id === id ? { ...p, stock: p.stock + delta } : p));
+  // Stock isn't touched locally at all any more — it's only ever really
+  // deducted at checkout, atomically, via sellStock(). What the cart needs
+  // in the meantime is "how many can still be added", which is just the
+  // catalogue's real stock minus whatever this cart is already holding —
+  // so the products list handed to the pickers below has that baked in,
+  // and every add/remove/qty handler is a plain cart edit.
+  const availableProducts = useMemo(() => {
+    const reserved = new Map<number, number>();
+    for (const c of cart) reserved.set(c.product.id, (reserved.get(c.product.id) ?? 0) + c.qty);
+    return products.map((p) => ({ ...p, stock: Math.max(0, p.stock - (reserved.get(p.id) ?? 0)) }));
+  }, [products, cart]);
 
   const addToCart = (p: Product) => {
     setCart((prev) => {
@@ -1887,7 +1905,6 @@ export default function AccessorySales() {
         ? prev.map((c) => c.product.id === p.id ? { ...c, qty: c.qty + 1 } : c)
         : [...prev, { product: p, qty: 1 }];
     });
-    adjustStock(p.id, -1);
   };
 
   const addMultipleToCart = (selected: Product[]) => {
@@ -1900,23 +1917,13 @@ export default function AccessorySales() {
       }
       return next;
     });
-    setProducts((prev) =>
-      prev.map((p) => {
-        const count = selected.filter((s) => s.id === p.id).length;
-        return count > 0 ? { ...p, stock: p.stock - count } : p;
-      })
-    );
   };
 
   const removeFromCart = (id: number) => {
-    const item = cart.find((c) => c.product.id === id);
-    if (item) adjustStock(id, item.qty);
     setCart((prev) => prev.filter((c) => c.product.id !== id));
   };
 
   const changeQty = (id: number, qty: number) => {
-    const item = cart.find((c) => c.product.id === id);
-    if (item) adjustStock(id, item.qty - qty);
     setCart((prev) => prev.map((c) => c.product.id === id ? { ...c, qty } : c));
   };
 
@@ -1929,7 +1936,6 @@ export default function AccessorySales() {
 
   const handleNewSale = () => {
     setCart([]);
-    setProducts(INITIAL_PRODUCTS);
     setCustomer(INITIAL_CUSTOMER);
     setPayMethod("Cash");
     setDiscount("");
@@ -1959,11 +1965,25 @@ export default function AccessorySales() {
         <StepIndicator current={step} />
       </div>
 
+      {!productsConfigured && (
+        <div style={{ margin: "0 28px 8px", padding: "10px 14px", borderRadius: 9, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)", fontSize: 12.5, color: "var(--text-secondary)" }}>
+          Connect Supabase to sell accessories — the catalogue is empty and nothing here will be saved.
+        </div>
+      )}
+      {productsConfigured && productsLoading && products.length === 0 && (
+        <div style={{ margin: "0 28px 8px", fontSize: 12.5, color: "var(--text-muted)" }}>Loading catalogue…</div>
+      )}
+      {checkoutError && (
+        <div style={{ margin: "0 28px 8px", padding: "10px 14px", borderRadius: 9, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.35)", fontSize: 12.5, color: "#dc2626" }}>
+          {checkoutError}
+        </div>
+      )}
+
       {/* Content */}
       <div style={{ flex: 1, padding: "0 28px", minHeight: 0, display: "flex", flexDirection: "column" }}>
         {step === 1 && (
           <Step1
-            products={products}
+            products={availableProducts}
             cart={cart}
             onAdd={addToCart}
             onRemove={removeFromCart}
@@ -2039,23 +2059,38 @@ export default function AccessorySales() {
             onClick={async () => {
               if (invoicing) return;
               setInvoicing(true);
-              const invoiceNo = await fetchNextInvoiceNo();
-              const subtotal = cart.reduce((s, c) => s + c.product.sellingPrice * c.qty, 0);
-              const total = Math.max(0, subtotal - (parseFloat(discount) || 0));
-              if (payMethod === "Cash") {
-                addEntry("in", `Cash Sale — Accessories`, total);
+              setCheckoutError(null);
+              try {
+                // Deducts stock for the whole cart in one transaction first —
+                // if anything ran out since it was added (another till sold
+                // it in the meantime), this throws and nothing below runs:
+                // no invoice for stock that doesn't exist.
+                await sellStock(cart.map(c => ({ id: c.product.id, qty: c.qty })));
+                const invoiceNo = await fetchNextInvoiceNo();
+                const subtotal = cart.reduce((s, c) => s + c.product.sellingPrice * c.qty, 0);
+                const total = Math.max(0, subtotal - (parseFloat(discount) || 0));
+                if (payMethod === "Cash") {
+                  addEntry("in", `Cash Sale — Accessories`, total);
+                }
+                addSale({
+                  invoiceNo,
+                  date: new Date().toISOString().slice(0, 10),
+                  customer: customer.name || "Walk-in",
+                  category: "Accessories",
+                  items: cart.map(c => `${c.product.name} ×${c.qty}`).join(", ") || "Accessory Sale",
+                  total,
+                  status: "Paid",
+                }, {
+                  // So a later void can restock exactly what this sale sold —
+                  // see void_sale() in the migration.
+                  lineItems: cart.map(c => ({ type: "accessory" as const, id: c.product.id, qty: c.qty })),
+                });
+                setCompleted(true);
+              } catch (e) {
+                setCheckoutError(e instanceof Error ? e.message : String(e));
+              } finally {
+                setInvoicing(false);
               }
-              addSale({
-                invoiceNo,
-                date: new Date().toISOString().slice(0, 10),
-                customer: customer.name || "Walk-in",
-                category: "Accessories",
-                items: cart.map(c => `${c.product.name} ×${c.qty}`).join(", ") || "Accessory Sale",
-                total,
-                status: "Paid",
-              });
-              setInvoicing(false);
-              setCompleted(true);
             }}
             disabled={invoicing}
             style={{
@@ -2065,14 +2100,14 @@ export default function AccessorySales() {
               fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 700,
             }}
           >
-            {invoicing ? "Generating invoice…" : "✓ Complete Sale"}
+            {invoicing ? "Processing…" : "✓ Complete Sale"}
           </button>
         )}
       </div>
 
       {showSearchPopup && (
         <SearchPopup
-          products={products}
+          products={availableProducts}
           cart={cart}
           onAddMultiple={addMultipleToCart}
           onClose={() => setShowSearchPopup(false)}

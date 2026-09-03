@@ -10,8 +10,10 @@ import {
 } from "lucide-react";
 import StockReceiving from "./StockReceiving";
 import { useInventory } from "@/cashier/contexts/InventoryContext";
+import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
+import { useToast } from "@/lib/ui/toast";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,24 +33,10 @@ interface DeviceItem {
   notes: string;
 }
 
-interface AccessoryProduct {
-  id: number;
-  code: string;
-  name: string;
-  brand: string;
-  category: string;
-  model: string;
-  buyingPrice: number;
-  sellingPrice: number;
-  stock: number;
-  minStock: number;
-  supplier: string;
-  addedDate: string;
-}
-
 interface ApprovalRequest {
-  entityType: "category" | "brand" | "supplier";
+  entityType: "category" | "subcategory" | "brand" | "supplier";
   newName: string;
+  /** The subcategory/brand's parent category name, when entityType needs one. */
   presetCategoryName?: string;
   presetBrandName?: string;
   suggestedBrandType?: "device" | "accessory";
@@ -59,8 +47,6 @@ type InventoryTab = "Overview" | "Mobile Devices" | "Accessories" | "Stock Recei
 // ─── Initial Data ─────────────────────────────────────────────────────────────
 
 const INITIAL_DEVICES: DeviceItem[] = [];
-
-const INITIAL_ACCESSORIES: AccessoryProduct[] = [];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -119,7 +105,7 @@ interface ComboFieldProps {
   value: string;
   onChange: (v: string) => void;
   options: string[];
-  entityType: "category" | "brand" | "supplier";
+  entityType: "category" | "subcategory" | "brand" | "supplier";
   onNewRequest: (typed: string) => void;
   onPromptChange?: (active: boolean) => void;
   error?: string;
@@ -136,7 +122,7 @@ function ComboField({ label, value, onChange, options, entityType, onNewRequest,
   const promptRef = useRef(onPromptChange);
   promptRef.current = onPromptChange;
 
-  const entityLabel = entityType === "category" ? "Category" : entityType === "brand" ? "Brand" : "Supplier";
+  const entityLabel = entityType === "category" ? "Category" : entityType === "subcategory" ? "Subcategory" : entityType === "brand" ? "Brand" : "Supplier";
 
   const setPrompt = useCallback((v: boolean) => {
     setShowPrompt(v);
@@ -181,7 +167,7 @@ function ComboField({ label, value, onChange, options, entityType, onNewRequest,
     setPrompt(false);
   }
 
-  const disabledPlaceholder = entityType === "brand" ? "Select category first" : "Select brand first";
+  const disabledPlaceholder = entityType === "brand" || entityType === "subcategory" ? "Select category first" : "Select brand first";
 
   return (
     <div style={{ position: "relative" }}>
@@ -315,15 +301,23 @@ function AdminApprovalModal({ request, onEntityAdded, onClose }: {
   onEntityAdded: (entityType: ApprovalRequest["entityType"], name: string) => void;
   onClose: () => void;
 }) {
-  const { adminCredentials, brands, categories, setBrands, setCategories, setSuppliers } = useInventory();
+  const { adminCredentials, brands, categories, addCategory, addSubcategory, addBrand, addSupplier } = useInventory();
 
   const [step, setStep] = useState<"auth" | "add">("auth");
   const [authUser, setAuthUser] = useState("");
   const [authPass, setAuthPass] = useState("");
   const [authError, setAuthError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   // Category form
   const [catName, setCatName] = useState(request.newName);
+
+  // Subcategory form
+  const [subName, setSubName] = useState(request.newName);
+  const presetCategory = useMemo(
+    () => categories.find(c => c.name === request.presetCategoryName),
+    [categories, request.presetCategoryName],
+  );
 
   // Brand form
   const [brandName, setBrandName] = useState(request.newName);
@@ -350,7 +344,7 @@ function AdminApprovalModal({ request, onEntityAdded, onClose }: {
 
   const [addErrors, setAddErrors] = useState<Record<string, string>>({});
 
-  const entityLabel = request.entityType === "category" ? "Category" : request.entityType === "brand" ? "Brand" : "Supplier";
+  const entityLabel = request.entityType === "category" ? "Category" : request.entityType === "subcategory" ? "Subcategory" : request.entityType === "brand" ? "Brand" : "Supplier";
 
   function handleAuth() {
     if (authUser === adminCredentials.username && authPass === adminCredentials.password) {
@@ -361,25 +355,34 @@ function AdminApprovalModal({ request, onEntityAdded, onClose }: {
     }
   }
 
-  function handleSave() {
+  async function handleSave() {
     const errs: Record<string, string> = {};
-    if (request.entityType === "category") {
-      if (!catName.trim()) { errs.name = "Name is required"; setAddErrors(errs); return; }
-      const newCat = { id: Date.now(), name: catName.trim() };
-      setCategories(prev => [...prev, newCat]);
-      onEntityAdded("category", newCat.name);
-    } else if (request.entityType === "brand") {
-      if (!brandName.trim()) { errs.name = "Name is required"; setAddErrors(errs); return; }
-      const newBrand = { id: Date.now(), name: brandName.trim(), type: brandType, categoryIds: brandType === "device" ? [] : brandCatIds };
-      setBrands(prev => [...prev, newBrand]);
-      onEntityAdded("brand", newBrand.name);
-    } else {
-      if (!suppName.trim()) { errs.name = "Name is required"; setAddErrors(errs); return; }
-      const newSupp = { id: Date.now(), name: suppName.trim(), phone: suppPhone.trim(), email: suppEmail.trim(), brandIds: suppBrandIds };
-      setSuppliers(prev => [...prev, newSupp]);
-      onEntityAdded("supplier", newSupp.name);
+    setSaving(true);
+    try {
+      if (request.entityType === "category") {
+        if (!catName.trim()) { errs.name = "Name is required"; setAddErrors(errs); return; }
+        const created = await addCategory(catName.trim());
+        onEntityAdded("category", created.name);
+      } else if (request.entityType === "subcategory") {
+        if (!subName.trim()) { errs.name = "Name is required"; setAddErrors(errs); return; }
+        if (!presetCategory) { errs.name = "No category selected"; setAddErrors(errs); return; }
+        const created = await addSubcategory({ name: subName.trim(), categoryId: presetCategory.id });
+        onEntityAdded("subcategory", created.name);
+      } else if (request.entityType === "brand") {
+        if (!brandName.trim()) { errs.name = "Name is required"; setAddErrors(errs); return; }
+        const created = await addBrand({ name: brandName.trim(), type: brandType, categoryIds: brandType === "device" ? [] : brandCatIds });
+        onEntityAdded("brand", created.name);
+      } else {
+        if (!suppName.trim()) { errs.name = "Name is required"; setAddErrors(errs); return; }
+        const created = await addSupplier({ name: suppName.trim(), phone: suppPhone.trim(), email: suppEmail.trim(), brandIds: suppBrandIds });
+        onEntityAdded("supplier", created.name);
+      }
+      onClose();
+    } catch (e) {
+      setAddErrors({ name: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setSaving(false);
     }
-    onClose();
   }
 
   const iStyle: React.CSSProperties = { ...inputStyle, borderColor: "var(--border)" };
@@ -438,6 +441,19 @@ function AdminApprovalModal({ request, onEntityAdded, onClose }: {
             <div>
               <label style={labelStyle}>Category Name</label>
               <input type="text" value={catName} onChange={e => setCatName(e.target.value)} placeholder="e.g. Memory Card"
+                style={{ ...iStyle, borderColor: addErrors.name ? "#dc2626" : "var(--border)" }} autoFocus />
+              {addErrors.name && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{addErrors.name}</div>}
+            </div>
+          )}
+
+          {step === "add" && request.entityType === "subcategory" && (
+            <div>
+              <label style={labelStyle}>Under Category</label>
+              <div style={{ padding: "9px 12px", borderRadius: 8, background: "var(--bg-surface)", border: "1px solid var(--border)", fontSize: 13, color: "var(--text-primary)", fontWeight: 600, marginBottom: 12 }}>
+                {request.presetCategoryName || "—"}
+              </div>
+              <label style={labelStyle}>Subcategory Name</label>
+              <input type="text" value={subName} onChange={e => setSubName(e.target.value)} placeholder="e.g. Type-C"
                 style={{ ...iStyle, borderColor: addErrors.name ? "#dc2626" : "var(--border)" }} autoFocus />
               {addErrors.name && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{addErrors.name}</div>}
             </div>
@@ -521,7 +537,7 @@ function AdminApprovalModal({ request, onEntityAdded, onClose }: {
           <button onClick={onClose} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
           {step === "auth"
             ? <button onClick={handleAuth} style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Verify →</button>
-            : <button onClick={handleSave} style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Save {entityLabel}</button>
+            : <button onClick={() => { if (!saving) void handleSave(); }} disabled={saving} style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: saving ? "wait" : "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", opacity: saving ? 0.7 : 1 }}>{saving ? "Saving…" : `Save ${entityLabel}`}</button>
           }
         </div>
       </div>
@@ -705,14 +721,16 @@ function AddEditDeviceModal({ device, onSave, onClose }: {
 // ─── Add / Edit Product Modal ─────────────────────────────────────────────────
 
 function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
-  product: AccessoryProduct | null; existingProducts: AccessoryProduct[]; onSave: (p: AccessoryProduct) => void; onClose: () => void;
+  product: AccessoryProduct | null; existingProducts: AccessoryProduct[]; onSave: (p: AccessoryProduct) => Promise<unknown>; onClose: () => void;
 }) {
-  const { brands, categories, suppliers } = useInventory();
-  const blank: AccessoryProduct = { id: 0, code: "", name: "", brand: "", category: "", model: "", buyingPrice: 0, sellingPrice: 0, stock: 0, minStock: 5, supplier: "", addedDate: new Date().toISOString().slice(0, 10) };
+  const { brands, categories, subcategories, suppliers } = useInventory();
+  const blank: AccessoryProduct = { id: 0, code: "", name: "", brand: "", category: "", subcategory: "", model: "", buyingPrice: 0, sellingPrice: 0, stock: 0, minStock: 5, supplier: "", addedDate: new Date().toISOString().slice(0, 10), insight: "" };
   const [form, setForm] = useState<AccessoryProduct>(product ?? blank);
   const [errors, setErrors] = useState<Partial<Record<keyof AccessoryProduct, string>>>({});
   const [approvalReq, setApprovalReq] = useState<ApprovalRequest | null>(null);
   const [anyMismatch, setAnyMismatch] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const set = (k: keyof AccessoryProduct, v: string | number) => setForm(f => ({ ...f, [k]: v }));
 
@@ -720,11 +738,22 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
   const selectedCatObj = useMemo(() => categories.find(c => c.name === form.category), [categories, form.category]);
   const selectedBrandObj = useMemo(() => brands.find(b => b.name === form.brand), [brands, form.brand]);
 
-  const categoryOptions = useMemo(() => categories.map(c => c.name).sort(), [categories]);
+  // Deactivated entries stay picked if a product already has one (the value
+  // just won't appear for a *new* pick) — filtered here, not in the fetch,
+  // so an existing product's saved label never silently blanks out.
+  const categoryOptions = useMemo(() => categories.filter(c => c.active).map(c => c.name).sort(), [categories]);
+
+  const subcategoryOptions = useMemo(
+    () => subcategories
+      .filter(s => s.active && (!selectedCatObj || s.categoryId === selectedCatObj.id))
+      .map(s => s.name).sort(),
+    [subcategories, selectedCatObj]
+  );
 
   const brandOptions = useMemo(
     () => brands
       .filter(b =>
+        b.active &&
         (b.type === "accessory" || b.type === "both") &&
         (!selectedCatObj || b.categoryIds.length === 0 || b.categoryIds.includes(selectedCatObj.id))
       )
@@ -734,19 +763,20 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
 
   const supplierOptions = useMemo(
     () => suppliers
-      .filter(s => !selectedBrandObj || s.brandIds.length === 0 || s.brandIds.includes(selectedBrandObj.id))
+      .filter(s => s.active && (!selectedBrandObj || s.brandIds.length === 0 || s.brandIds.includes(selectedBrandObj.id)))
       .map(s => s.name).sort(),
     [suppliers, selectedBrandObj]
   );
 
   function handleCategoryChange(v: string) {
     const newCode = v ? generateCode(v, existingProducts.filter(p => p.id !== form.id)) : "";
-    setForm(f => ({ ...f, category: v, brand: "", supplier: "", code: newCode }));
+    setForm(f => ({ ...f, category: v, subcategory: "", brand: "", supplier: "", code: newCode }));
   }
   function handleBrandChange(v: string)    { setForm(f => ({ ...f, brand: v, supplier: "" })); }
 
   function handleEntityAdded(entityType: ApprovalRequest["entityType"], name: string) {
-    if (entityType === "category") setForm(f => ({ ...f, category: name, brand: "", supplier: "" }));
+    if (entityType === "category") setForm(f => ({ ...f, category: name, subcategory: "", brand: "", supplier: "" }));
+    else if (entityType === "subcategory") setForm(f => ({ ...f, subcategory: name }));
     else if (entityType === "brand") setForm(f => ({ ...f, brand: name, supplier: "" }));
     else setForm(f => ({ ...f, supplier: name }));
   }
@@ -757,6 +787,7 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
     if (!form.name.trim()) e.name = "Name is required";
     if (!form.brand.trim()) e.brand = "Brand is required";
     if (!form.category.trim()) e.category = "Category is required";
+    if (!form.subcategory.trim()) e.subcategory = "Subcategory is required";
     if (!form.supplier.trim()) e.supplier = "Supplier is required";
     if (form.buyingPrice <= 0) e.buyingPrice = "Must be greater than 0";
     if (form.sellingPrice <= 0) e.sellingPrice = "Must be greater than 0";
@@ -792,7 +823,7 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><X size={18} /></button>
         </div>
         <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* Row 1: Item Category + Item Brand (cascade) */}
+          {/* Row 1: Item Category + Subcategory (cascade) */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <ComboField
               label="Item Category"
@@ -806,6 +837,20 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
               onNewRequest={v => setApprovalReq({ entityType: "category", newName: v })}
             />
             <ComboField
+              label="Subcategory"
+              value={form.subcategory}
+              onChange={v => set("subcategory", v)}
+              options={subcategoryOptions}
+              entityType="subcategory"
+              error={errors.subcategory}
+              disabled={anyMismatch || !form.category}
+              onPromptChange={setAnyMismatch}
+              onNewRequest={v => setApprovalReq({ entityType: "subcategory", newName: v, presetCategoryName: form.category })}
+            />
+          </div>
+          {/* Row 2: Item Brand + Item Supplier (cascade) */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <ComboField
               label="Item Brand"
               value={form.brand}
               onChange={handleBrandChange}
@@ -816,11 +861,6 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
               onPromptChange={setAnyMismatch}
               onNewRequest={v => setApprovalReq({ entityType: "brand", newName: v, presetCategoryName: form.category, suggestedBrandType: "accessory" })}
             />
-          </div>
-          {/* Row 2: Item Name */}
-          {field("Item Name", "name", "text", "e.g. Tempered Glass")}
-          {/* Row 3: Item Supplier + Auto-generated Item Code */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <ComboField
               label="Item Supplier"
               value={form.supplier}
@@ -832,6 +872,10 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
               onPromptChange={setAnyMismatch}
               onNewRequest={v => setApprovalReq({ entityType: "supplier", newName: v, presetBrandName: form.brand })}
             />
+          </div>
+          {/* Row 3: Item Name + Auto-generated Item Code */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            {field("Item Name", "name", "text", "e.g. Tempered Glass")}
             <div>
               <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 6 }}>
                 Item Code
@@ -866,12 +910,33 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
             {field("Min Stock (Reorder At)", "minStock", "number")}
             {field("Date Added", "addedDate", "date")}
           </div>
+          {/* Row 7: Insight (optional) */}
+          {field("Insight (optional tip shown to cashiers)", "insight", "text", "e.g. Popular add-on")}
         </div>
-        <div style={{ padding: "16px 24px 20px", borderTop: "1px solid var(--border)", display: "flex", gap: 10, justifyContent: "flex-end", position: "sticky", bottom: 0, background: "var(--bg-card)" }}>
-          <button onClick={onClose} style={{ padding: "9px 20px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
-          <button onClick={() => { if (!anyMismatch && validate()) onSave({ ...form, id: form.id || Date.now() }); }} disabled={anyMismatch} style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: anyMismatch ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", opacity: anyMismatch ? 0.5 : 1 }}>
-            {product ? "Save Changes" : "Add Product"}
-          </button>
+        <div style={{ padding: "16px 24px 20px", borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 10, position: "sticky", bottom: 0, background: "var(--bg-card)" }}>
+          {saveError && <div style={{ fontSize: 12, color: "#dc2626" }}>{saveError}</div>}
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <button onClick={onClose} style={{ padding: "9px 20px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
+            <button
+              onClick={async () => {
+                if (anyMismatch || saving || !validate()) return;
+                setSaving(true);
+                setSaveError(null);
+                try {
+                  await onSave({ ...form, id: form.id || 0 });
+                  onClose();
+                } catch (e) {
+                  setSaveError(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              disabled={anyMismatch || saving}
+              style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: anyMismatch || saving ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", opacity: anyMismatch || saving ? 0.5 : 1 }}
+            >
+              {saving ? "Saving…" : product ? "Save Changes" : "Add Product"}
+            </button>
+          </div>
         </div>
       </div>
       {approvalReq && (
@@ -1269,41 +1334,77 @@ function MobileDevicesTab({ devices, setDevices }: {
 
 // ─── Accessories Tab ──────────────────────────────────────────────────────────
 
-function AccessoriesTab({ accessories, setAccessories }: {
-  accessories: AccessoryProduct[]; setAccessories: Dispatch<SetStateAction<AccessoryProduct[]>>;
+function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteProduct }: {
+  accessories: AccessoryProduct[];
+  loading: boolean;
+  configured: boolean;
+  saveProduct: (p: AccessoryProduct) => Promise<AccessoryProduct>;
+  deleteProduct: (id: number) => Promise<void>;
 }) {
   const isMobile = useIsMobile();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
+  const [subcategoryFilter, setSubcategoryFilter] = useState("All");
   const [stockFilter, setStockFilter] = useState("All");
   const [editProduct, setEditProduct] = useState<AccessoryProduct | null | "new">(null);
   const [adjustProduct, setAdjustProduct] = useState<AccessoryProduct | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AccessoryProduct | null>(null);
   const [labelProduct, setLabelProduct] = useState<AccessoryProduct | null>(null);
 
-  const { categories: categoryList } = useInventory();
+  const { categories: categoryList, subcategories: subcategoryList } = useInventory();
   const categories = useMemo(() => ["All", ...categoryList.map(c => c.name).sort()], [categoryList]);
+  // Narrowed to whichever main category is picked, same as the product form —
+  // filtering by subcategory only makes sense once a category is chosen.
+  const subcategoryOptionsForFilter = useMemo(() => {
+    const cat = categoryList.find(c => c.name === categoryFilter);
+    const pool = cat ? subcategoryList.filter(s => s.categoryId === cat.id) : subcategoryList;
+    return ["All", ...new Set(pool.map(s => s.name))].sort((a, b) => a === "All" ? -1 : b === "All" ? 1 : a.localeCompare(b));
+  }, [subcategoryList, categoryList, categoryFilter]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return accessories.filter(p => {
       if (categoryFilter !== "All" && p.category !== categoryFilter) return false;
+      if (subcategoryFilter !== "All" && p.subcategory !== subcategoryFilter) return false;
       if (stockFilter === "In Stock" && p.stock === 0) return false;
       if (stockFilter === "Low Stock" && (p.stock === 0 || p.stock >= p.minStock)) return false;
       if (stockFilter === "Out of Stock" && p.stock > 0) return false;
       if (q && !p.code.toLowerCase().includes(q) && !p.name.toLowerCase().includes(q) && !p.brand.toLowerCase().includes(q) && !p.supplier.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [accessories, search, categoryFilter, stockFilter]);
+  }, [accessories, search, categoryFilter, subcategoryFilter, stockFilter]);
 
   const inStock = accessories.filter(p => p.stock > 0).length;
   const lowStock = accessories.filter(p => p.stock > 0 && p.stock < p.minStock).length;
   const outOfStock = accessories.filter(p => p.stock === 0).length;
   const totalValue = accessories.reduce((s, p) => s + p.buyingPrice * p.stock, 0);
 
-  function handleSave(p: AccessoryProduct) {
-    setAccessories(prev => prev.find(x => x.id === p.id) ? prev.map(x => x.id === p.id ? p : x) : [...prev, p]);
-    setEditProduct(null);
+  async function handleAdjustStock(newStock: number) {
+    if (!adjustProduct || busy) return;
+    setBusy(true);
+    try {
+      await saveProduct({ ...adjustProduct, stock: newStock });
+      setAdjustProduct(null);
+    } catch (e) {
+      toast.dialog("error", "Could not adjust stock", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget || busy) return;
+    setBusy(true);
+    try {
+      await deleteProduct(deleteTarget.id);
+      setDeleteTarget(null);
+    } catch (e) {
+      toast.dialog("error", "Could not remove product", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -1328,8 +1429,11 @@ function AccessoriesTab({ accessories, setAccessories }: {
           <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by code, name, brand, supplier…" style={{ ...inputStyle, paddingLeft: 36, width: "100%", boxSizing: "border-box" as const }} />
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} style={{ ...selectStyle, flex: 1 }}>
+          <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setSubcategoryFilter("All"); }} style={{ ...selectStyle, flex: 1 }}>
             {categories.map(c => <option key={c}>{c}</option>)}
+          </select>
+          <select value={subcategoryFilter} onChange={e => setSubcategoryFilter(e.target.value)} style={{ ...selectStyle, flex: 1 }}>
+            {subcategoryOptionsForFilter.map(s => <option key={s}>{s}</option>)}
           </select>
           <select value={stockFilter} onChange={e => setStockFilter(e.target.value)} style={{ ...selectStyle, flex: 1 }}>
             {["All", "In Stock", "Low Stock", "Out of Stock"].map(s => <option key={s}>{s}</option>)}
@@ -1348,14 +1452,14 @@ function AccessoriesTab({ accessories, setAccessories }: {
           <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
             <thead>
               <tr>
-                {["Code", "Product", "Brand", "Category", "Compatible", "Stock", "Min", "Buying", "Selling", "Margin", "Supplier", ""].map(h => (
+                {["Code", "Product", "Brand", "Category", "Subcategory", "Compatible", "Stock", "Min", "Buying", "Selling", "Margin", "Supplier", ""].map(h => (
                   <th key={h} style={thStyle}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={12} style={{ ...tdBase, textAlign: "center", padding: 40, color: "var(--text-muted)" }}>No products match your filters</td></tr>
+                <tr><td colSpan={13} style={{ ...tdBase, textAlign: "center", padding: 40, color: "var(--text-muted)" }}>No products match your filters</td></tr>
               ) : filtered.map(p => {
                 const isOut = p.stock === 0;
                 const isLow = !isOut && p.stock < p.minStock;
@@ -1369,6 +1473,7 @@ function AccessoriesTab({ accessories, setAccessories }: {
                     <td style={tdBase}>
                       <span style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", fontSize: 11, padding: "2px 8px", borderRadius: 6 }}>{p.category}</span>
                     </td>
+                    <td style={{ ...tdBase, color: "var(--text-secondary)", fontSize: 12 }}>{p.subcategory || "—"}</td>
                     <td style={{ ...tdBase, color: "var(--text-secondary)", fontSize: 12 }}>{p.model}</td>
                     <td style={{ ...tdBase, fontWeight: 700, color: isOut ? "#dc2626" : isLow ? "#b45309" : "#16a34a" }}>
                       {p.stock}
@@ -1402,24 +1507,31 @@ function AccessoriesTab({ accessories, setAccessories }: {
           </table>
         </div>
         <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-          {filtered.length} of {accessories.length} products
+          {filtered.length} of {accessories.length} products{loading ? " · loading…" : ""}
         </div>
       </div>
 
+      {!configured && (
+        <div style={{ display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          <AlertTriangle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>Connect Supabase to manage and sell accessories — nothing here is saved right now.</p>
+        </div>
+      )}
+
       {editProduct !== null && (
-        <AddEditProductModal product={editProduct === "new" ? null : editProduct} existingProducts={accessories} onSave={handleSave} onClose={() => setEditProduct(null)} />
+        <AddEditProductModal product={editProduct === "new" ? null : editProduct} existingProducts={accessories} onSave={saveProduct} onClose={() => setEditProduct(null)} />
       )}
       {adjustProduct && (
         <StockAdjustModal
           product={adjustProduct}
-          onSave={newStock => { setAccessories(prev => prev.map(p => p.id === adjustProduct.id ? { ...p, stock: newStock } : p)); setAdjustProduct(null); }}
+          onSave={newStock => { if (!busy) void handleAdjustStock(newStock); }}
           onClose={() => setAdjustProduct(null)}
         />
       )}
       {deleteTarget && (
         <DeleteConfirmModal
           name={`${deleteTarget.name} (${deleteTarget.code})`}
-          onConfirm={() => { setAccessories(prev => prev.filter(x => x.id !== deleteTarget.id)); setDeleteTarget(null); }}
+          onConfirm={() => { if (!busy) void handleDelete(); }}
           onClose={() => setDeleteTarget(null)}
         />
       )}
@@ -1440,7 +1552,7 @@ function AccessoriesTab({ accessories, setAccessories }: {
 export default function InventoryManagement() {
   const [tab, setTab] = useState<InventoryTab>("Overview");
   const [devices, setDevices] = useState<DeviceItem[]>(INITIAL_DEVICES);
-  const [accessories, setAccessories] = useState<AccessoryProduct[]>(INITIAL_ACCESSORIES);
+  const { products: accessories, loading: accLoading, configured: accConfigured, saveProduct, deleteProduct } = useAccessories();
   const isMobile = useIsMobile();
 
   const lowStockCount = accessories.filter(p => p.stock >= 0 && p.stock < p.minStock).length;
@@ -1521,7 +1633,7 @@ export default function InventoryManagement() {
       <div className="fade-up fade-up-3" style={{ flex: 1, overflowY: "auto", paddingBottom: 32 }}>
         {tab === "Overview"        && <OverviewTab devices={devices} accessories={accessories} />}
         {tab === "Mobile Devices"  && <MobileDevicesTab devices={devices} setDevices={setDevices} />}
-        {tab === "Accessories"     && <AccessoriesTab accessories={accessories} setAccessories={setAccessories} />}
+        {tab === "Accessories"     && <AccessoriesTab accessories={accessories} loading={accLoading} configured={accConfigured} saveProduct={saveProduct} deleteProduct={deleteProduct} />}
         {tab === "Stock Receiving" && <StockReceiving />}
       </div>
     </div>

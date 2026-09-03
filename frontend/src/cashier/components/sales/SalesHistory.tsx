@@ -6,6 +6,8 @@ import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useSales } from "@/cashier/contexts/SalesContext";
 import type { TxCategory, TxStatus, SaleTx } from "@/cashier/contexts/SalesContext";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
+import { useAccessories } from "@/cashier/contexts/AccessoriesContext";
+import { useToast } from "@/lib/ui/toast";
 import ExportButtons from "@/cashier/components/shared/ExportButtons";
 import { exportToPdf, exportToExcel, exportToPng } from "@/cashier/utils/exportUtils";
 import {
@@ -353,8 +355,11 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
 
 /* ── Main Component ── */
 export default function SalesHistory() {
-  const { sales: txList, updateSale, returnSale } = useSales();
+  const { sales: txList, returnSale, voidSale } = useSales();
   const { addEntry } = useCashRegister();
+  const { reload: reloadAccessories } = useAccessories();
+  const toast = useToast();
+  const [voiding, setVoiding] = useState(false);
   const isMobile = useIsMobile();
   const containerRef = useRef<HTMLDivElement>(null);
   const [search,   setSearch]   = useState("");
@@ -386,9 +391,22 @@ export default function SalesHistory() {
   }), [filtered]);
 
   const handleVoidConfirm = () => {
-    if (!voidTarget) return;
-    updateSale(voidTarget.id, { status: "Voided" });
+    if (!voidTarget || voiding) return;
+    const target = voidTarget;
+    setVoiding(true);
     setVoidTarget(null);
+    void (async () => {
+      try {
+        // Restocks every accessory line the sale sold, atomically, before
+        // the status flips — see void_sale() in the migration.
+        await voidSale(target.id);
+        void reloadAccessories();
+      } catch (e) {
+        toast.dialog("error", "Could not void that sale", e instanceof Error ? e.message : String(e));
+      } finally {
+        setVoiding(false);
+      }
+    })();
   };
 
   const handleReturnConfirm = (amount: number, reason: string) => {
