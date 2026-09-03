@@ -6,6 +6,7 @@ import {
   resolveReceiptTokens,
   type ReceiptElement,
   type ReceiptData,
+  INVOICE_COLUMNS, invoiceColumns,
 } from "@/lib/repair/receiptElements";
 import { DEFAULT_FONT_FAMILY } from "@/lib/fonts";
 
@@ -101,6 +102,23 @@ function ElementBody({ el, data }: { el: ReceiptElement; data: ReceiptData }) {
     case "line":
       return <div style={{ width: "100%", height: "100%", background: el.color }} />;
 
+    case "shape":
+      return (
+        <div
+          style={{
+            width: "100%", height: "100%", boxSizing: "border-box",
+            background: el.fill || "transparent",
+            border: el.stroke && el.strokeWidth > 0 ? `${el.strokeWidth}mm solid ${el.stroke}` : "none",
+            borderRadius: el.shape === "ellipse" ? "50%" : `${Math.max(0, el.radius)}mm`,
+            // Backgrounds are dropped by default when printing; the design is
+            // the point here, so they are forced on the same way the rest of
+            // this template's colour is.
+            printColorAdjust: "exact",
+            WebkitPrintColorAdjust: "exact",
+          }}
+        />
+      );
+
     case "qr": {
       const value = resolveReceiptTokens(el.value, data) || data.trackUrl;
       // A square QR centred in whatever box it was given — a QR stretched to
@@ -152,41 +170,55 @@ function ElementBody({ el, data }: { el: ReceiptElement; data: ReceiptData }) {
     case "invoiceTable": {
       const th: React.CSSProperties = {
         padding: "1.2mm 1.6mm", border: `0.2mm solid ${el.borderColor}`, fontWeight: 700,
-        textAlign: "left", whiteSpace: "nowrap", fontSize: `${el.fontSize}pt`,
+        whiteSpace: "nowrap", fontSize: `${el.fontSize}pt`,
         background: el.headerBg, color: el.headerColor,
       };
       const td: React.CSSProperties = {
         padding: "1.4mm 1.6mm", border: `0.2mm solid ${el.borderColor}`, fontSize: `${el.fontSize}pt`,
         color: "#000", verticalAlign: "top",
       };
+
+      const cols = invoiceColumns(el);
+      // Widths are relative weights, so they are normalised here rather than
+      // being required to add up to 100 in the editor — a column can be
+      // dropped without every remaining width needing to be retyped.
+      const total = cols.reduce((n, c) => n + Math.max(1, c.width), 0);
+
       return (
         <table style={{ width: "100%", height: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontFamily: "'Plus Jakarta Sans', Arial, sans-serif" }}>
           <thead>
             <tr>
-              <th style={{ ...th, width: "6%" }}>No.</th>
-              <th style={th}>Item Type</th>
-              <th style={th}>Item Name</th>
-              <th style={th}>IMEI</th>
-              <th style={th}>Warranty</th>
-              <th style={{ ...th, textAlign: "right", width: "8%" }}>Qty</th>
-              <th style={{ ...th, textAlign: "right" }}>Advance</th>
-              <th style={{ ...th, textAlign: "right" }}>Unit Price</th>
-              <th style={{ ...th, textAlign: "right" }}>Discount</th>
-              <th style={{ ...th, textAlign: "right" }}>Line Total</th>
+              {cols.map((c, n) => {
+                const spec = INVOICE_COLUMNS.find(k => k.id === c.id)!;
+                return (
+                  <th key={`${c.id}-${n}`} style={{ ...th, textAlign: spec.align, width: `${(Math.max(1, c.width) / total) * 100}%` }}>
+                    {c.label || spec.label}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td style={td}>1</td>
-              <td style={td}>Repair</td>
-              <td style={td}>{data.jobId} {data.device}</td>
-              <td style={{ ...td, fontFamily: "monospace" }}>{data.imei || "—"}</td>
-              <td style={td}>{data.warranty || "—"}</td>
-              <td style={{ ...td, textAlign: "right" }}>1</td>
-              <td style={{ ...td, textAlign: "right" }}>{money(data.advance)}</td>
-              <td style={{ ...td, textAlign: "right" }}>{money(data.estimate)}</td>
-              <td style={{ ...td, textAlign: "right" }}>{money(data.discount)}</td>
-              <td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{money(data.lineTotal)}</td>
+              {cols.map((c, n) => {
+                const spec = INVOICE_COLUMNS.find(k => k.id === c.id)!;
+                const raw = spec.value(data);
+                return (
+                  <td
+                    key={`${c.id}-${n}`}
+                    style={{
+                      ...td,
+                      textAlign: spec.align,
+                      // The IMEI is read digit by digit off a printed page, so
+                      // it keeps the fixed pitch it has always had.
+                      fontFamily: c.id === "imei" ? "monospace" : undefined,
+                      fontWeight: c.id === "lineTotal" ? 700 : undefined,
+                    }}
+                  >
+                    {spec.money ? money(raw) : (raw && raw.trim() ? raw : "—")}
+                  </td>
+                );
+              })}
             </tr>
           </tbody>
         </table>

@@ -680,7 +680,15 @@ function TrackInner() {
               {/* HISTORY */}
               {history.length > 0 && (
                 <section className="card">
-                  <header><h2>Previous repairs on this device</h2><span className="hint">{history.length} record{history.length !== 1 ? "s" : ""}</span></header>
+                  <header>
+                    {/* Only claim it is the same phone when the IMEI says so.
+                        Without one this is the same customer's handset of the
+                        same make and model — likely, not certain, and a
+                        customer reading their own repair history deserves to
+                        know which of the two they are looking at. */}
+                    <h2>{history[0]?.matchedOn === "imei" ? "Previous repairs on this device" : "Earlier repairs on this model"}</h2>
+                    <span className="hint">{history.length} record{history.length !== 1 ? "s" : ""}</span>
+                  </header>
                   <div className="rows">
                     {history.map(h => {
                       const open = openRow === h.id;

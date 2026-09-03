@@ -414,17 +414,29 @@ export interface TrackedJobHistoryEntry {
   id: string; brand: string; model: string; issue: string;
   status: RepairJob["status"]; estimatedCost: number;
   completedAt?: string; createdAt?: string;
+  /** "imei": certainly the same handset. "device": same customer, same make
+   *  and model — likely, not certain. Drives what the page claims. */
+  matchedOn: "imei" | "device";
 }
 
 interface TrackJobHistoryRow {
   id: string; brand: string; model: string; issue: string;
   status: RepairJob["status"]; estimated_cost: number | string;
   completed_at: string | null; created_at: string | null;
+  matched_on: "imei" | "device" | null;
 }
 
-/** Other jobs for the same customer as `jobId` — "previous repairs on this
- *  device" on the tracking page. Same trust boundary as trackJob(): you have
- *  to already hold one exact job id to see anything at all. */
+/**
+ * Earlier repairs on the same handset as `jobId`.
+ *
+ * Matched on IMEI where the job carries one. This used to match on the
+ * customer's phone number, which on a dealer job is the dealer's switchboard —
+ * so one device's tracking link listed the dealer's whole book as "previous
+ * repairs on this device".
+ *
+ * Same trust boundary as trackJob(): you have to already hold one exact job id
+ * to see anything at all.
+ */
 export async function trackJobHistory(jobId: string): Promise<TrackedJobHistoryEntry[]> {
   const { data, error } = await getSupabaseBrowserClient()
     .rpc("track_job_history", { p_job_id: jobId.trim() });
@@ -439,6 +451,9 @@ export async function trackJobHistory(jobId: string): Promise<TrackedJobHistoryE
     estimatedCost: num(row.estimated_cost),
     completedAt: dateOnly(row.completed_at),
     createdAt: dateOnly(row.created_at),
+    // Older deployments of the function do not return it; the weaker claim is
+    // the safe assumption when we cannot tell.
+    matchedOn: row.matched_on ?? "device",
   }));
 }
 

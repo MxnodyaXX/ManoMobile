@@ -3,14 +3,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Type, Image as ImageIcon, Minus, QrCode, Table2,
-  Trash2, Copy, ArrowUp, ArrowDown, Upload, ClipboardCopy, X,
+  Type, Image as ImageIcon, Minus, QrCode, Table2, Square, Circle,
+  Trash2, Copy, ArrowUp, ArrowDown, Upload, ClipboardCopy, X, Plus, GripVertical,
 } from "lucide-react";
 import ReceiptRender from "@/cashier/components/shared/ReceiptRender";
 import { SHOP_DETAILS } from "@/lib/shop";
 import {
   blankReceiptElement, clampReceiptElement, copyReceiptElements, RECEIPT_TOKENS,
+  INVOICE_COLUMNS, invoiceColumns,
   type ReceiptElement, type ReceiptElementType, type ReceiptData, type TemplateKind,
+  type InvoiceColumn,
 } from "@/lib/repair/receiptElements";
 import { FONT_OPTIONS, DEFAULT_FONT_FAMILY } from "@/lib/fonts";
 
@@ -199,6 +201,7 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
         <button onClick={() => add("text")} style={btn}><Type size={13} /> Text</button>
         <button onClick={() => add("image")} style={btn}><ImageIcon size={13} /> Logo/Image</button>
         <button onClick={() => add("line")} style={btn}><Minus size={13} /> Line / Fill</button>
+        <button onClick={() => add("shape")} style={btn}><Square size={13} /> Shape</button>
         <button onClick={() => add("qr")} style={btn}><QrCode size={13} /> QR Code</button>
         {kind === "receipt" ? (
           <button onClick={() => add("table")} style={btn}><Table2 size={13} /> Job Details Table</button>
@@ -328,7 +331,7 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
                       onClick={() => setSelectedId(el.id)}
                       style={{ textAlign: "left", padding: "6px 9px", borderRadius: 7, fontSize: 11.5, fontFamily: ff, cursor: "pointer", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
                     >
-                      {i + 1}. {el.type === "text" ? `“${el.text.slice(0, 18)}”` : el.type === "invoiceTable" ? "Invoice Table" : el.type}
+                      {i + 1}. {el.type === "text" ? `“${el.text.slice(0, 18)}”` : el.type === "invoiceTable" ? "Invoice Table" : el.type === "shape" ? el.shape : el.type}
                     </button>
                   ))}
                 </div>
@@ -451,6 +454,85 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
                 </Field>
               )}
 
+              {selected.type === "shape" && (
+                <>
+                  <Field label="Shape">
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {SHAPES.map(sh => {
+                        const on = selected.shape === sh.id;
+                        return (
+                          <button
+                            key={sh.id}
+                            onClick={() => update(selected.id, { shape: sh.id })}
+                            style={{
+                              flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                              padding: "7px 8px", borderRadius: 7, cursor: "pointer", fontSize: 11.5, fontFamily: ff,
+                              border: `1px solid ${on ? "var(--accent)" : "var(--border)"}`,
+                              background: on ? "var(--accent-dim)" : "var(--bg-card)",
+                              color: on ? "var(--accent)" : "var(--text-secondary)",
+                              fontWeight: on ? 700 : 500,
+                            }}
+                          >
+                            <sh.icon size={13} /> {sh.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </Field>
+
+                  {/* A colour input cannot say "none", so the paint is a
+                      checkbox and the swatch is what it is set to. An outline
+                      with no fill is the common case on an invoice — a box
+                      around a total — so it has to be expressible. */}
+                  <PaintField
+                    key={`${selected.id}-fill`}
+                    label="Fill"
+                    colour={selected.fill}
+                    onChange={fill => update(selected.id, { fill })}
+                    fallback="#f3f4f6"
+                  />
+
+                  <PaintField
+                    key={`${selected.id}-stroke`}
+                    label="Outline"
+                    colour={selected.stroke}
+                    onChange={stroke => update(selected.id, { stroke })}
+                    fallback="#111111"
+                  />
+
+                  {selected.stroke !== "" && (
+                    <Field label="Outline thickness (mm)">
+                      <input
+                        type="number"
+                        step={0.1}
+                        min={0.1}
+                        value={selected.strokeWidth}
+                        onChange={e => update(selected.id, { strokeWidth: Math.max(0.1, Number(e.target.value) || 0.1) })}
+                        style={inputStyle}
+                      />
+                    </Field>
+                  )}
+
+                  {selected.shape === "rectangle" && (
+                    <Field label="Corner radius (mm)">
+                      <input
+                        type="number"
+                        step={0.5}
+                        min={0}
+                        value={selected.radius}
+                        onChange={e => update(selected.id, { radius: Math.max(0, Number(e.target.value) || 0) })}
+                        style={inputStyle}
+                      />
+                    </Field>
+                  )}
+
+                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                    Shapes paint in layer order, so send a filled one down the list
+                    to sit behind the text it is meant to frame.
+                  </p>
+                </>
+              )}
+
               {selected.type === "qr" && (
                 <>
                   <Field label="Encoded value">
@@ -510,9 +592,10 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
                   <Row label="Font (pt)">
                     <NumIn value={selected.fontSize} onChange={v => update(selected.id, { fontSize: Math.max(4, v) })} />
                   </Row>
-                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5 }}>
-                    Item, IMEI, warranty, advance, unit price, discount and line total always come from the job — only the styling is set here.
-                  </p>
+                  <InvoiceColumnsField
+                    columns={invoiceColumns(selected)}
+                    onChange={columns => update(selected.id, { columns })}
+                  />
                 </>
               )}
             </>
@@ -646,6 +729,233 @@ function CopyReceiptDesignDialog({ sources, target, replacing, onClose, onCopy }
       </div>
     </div>,
     document.body,
+  );
+}
+
+/**
+ * Choosing and sizing the invoice table's columns.
+ *
+ * Two jobs in one control because they are one decision in the shop's head:
+ * which fields the invoice shows, and how much room each gets. The proportion
+ * bar at the top is the sizing — dragging a divider moves width between the
+ * two columns either side of it and leaves every other column alone, which is
+ * how a table behaves everywhere else and means a drag can never quietly
+ * reflow the whole row.
+ */
+function InvoiceColumnsField({ columns, onChange }: {
+  columns: InvoiceColumn[]; onChange: (c: InvoiceColumn[]) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const barRef = useRef<HTMLDivElement>(null);
+  const total = columns.reduce((n, c) => n + Math.max(1, c.width), 0);
+  const unused = INVOICE_COLUMNS.filter(k => !columns.some(c => c.id === k.id));
+
+  const move = (i: number, by: number) => {
+    const j = i + by;
+    if (j < 0 || j >= columns.length) return;
+    const next = [...columns];
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange(next);
+  };
+
+  /**
+   * Drag a divider. Widths are shares of the table rather than millimetres, so
+   * they keep their meaning whatever the element is resized to; both
+   * neighbours keep a floor of 2% so a column can never be dragged away to
+   * nothing and left impossible to grab again.
+   */
+  const startDrag = (i: number) => (down: React.PointerEvent) => {
+    down.preventDefault();
+    const bar = barRef.current;
+    if (!bar) return;
+    const barW = bar.getBoundingClientRect().width;
+    if (barW <= 0) return;
+
+    const startX = down.clientX;
+    const a = Math.max(1, columns[i].width);
+    const pair = a + Math.max(1, columns[i + 1].width);
+    const MIN = total * 0.02;
+
+    const onMove = (m: PointerEvent) => {
+      const shift = ((m.clientX - startX) / barW) * total;
+      const nextA = Math.min(pair - MIN, Math.max(MIN, a + shift));
+      const next = [...columns];
+      next[i] = { ...next[i], width: Math.round(nextA * 10) / 10 };
+      next[i + 1] = { ...next[i + 1], width: Math.round((pair - nextA) * 10) / 10 };
+      onChange(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+      <label style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", fontFamily: ff }}>
+        Columns
+      </label>
+
+      {/* The table's proportions, to scale. Drag a divider to move width
+          between the two columns it separates. */}
+      <div
+        ref={barRef}
+        style={{ display: "flex", height: 30, borderRadius: 7, overflow: "hidden", border: "1px solid var(--border)", background: "var(--bg-card)", userSelect: "none" }}
+      >
+        {columns.map((c, i) => (
+          <div key={`${c.id}-${i}`} style={{ position: "relative", width: `${(Math.max(1, c.width) / total) * 100}%`, minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", background: i % 2 ? "var(--accent-dim)" : "transparent" }}>
+            <span style={{ fontSize: 9.5, color: "var(--text-muted)", fontFamily: ff, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "0 3px" }}>
+              {Math.round((Math.max(1, c.width) / total) * 100)}%
+            </span>
+            {i < columns.length - 1 && (
+              <div
+                onPointerDown={startDrag(i)}
+                title={`Resize ${c.label} / ${columns[i + 1].label}`}
+                style={{ position: "absolute", top: 0, right: -4, width: 9, height: "100%", cursor: "col-resize", zIndex: 1 }}
+              >
+                <div style={{ width: 1, height: "100%", margin: "0 auto", background: "var(--border)" }} />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* One row per column, in print order. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        {columns.map((c, i) => {
+          const spec = INVOICE_COLUMNS.find(k => k.id === c.id);
+          return (
+            <div key={`${c.id}-${i}`} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <GripVertical size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+              <input
+                type="text"
+                value={c.label}
+                onChange={e => {
+                  const next = [...columns];
+                  next[i] = { ...next[i], label: e.target.value };
+                  onChange(next);
+                }}
+                placeholder={spec?.label}
+                title={`Prints: ${spec?.label ?? c.id}`}
+                style={{ ...inputStyle, flex: 1, minWidth: 0 }}
+              />
+              <button onClick={() => move(i, -1)} disabled={i === 0} title="Move left"
+                style={{ ...miniBtn, opacity: i === 0 ? 0.35 : 1 }}><ArrowUp size={11} /></button>
+              <button onClick={() => move(i, 1)} disabled={i === columns.length - 1} title="Move right"
+                style={{ ...miniBtn, opacity: i === columns.length - 1 ? 0.35 : 1 }}><ArrowDown size={11} /></button>
+              <button
+                onClick={() => onChange(columns.filter((_, n) => n !== i))}
+                disabled={columns.length <= 1}
+                title="Remove column"
+                style={{ ...miniBtn, opacity: columns.length <= 1 ? 0.35 : 1, color: "#f87171" }}
+              ><X size={11} /></button>
+            </div>
+          );
+        })}
+      </div>
+
+      {adding ? (
+        <select
+          autoFocus
+          defaultValue=""
+          onChange={e => {
+            const spec = INVOICE_COLUMNS.find(k => k.id === e.target.value);
+            if (spec) {
+              // Seeded at the average of what is already there, so a new column
+              // lands looking like its neighbours rather than as a sliver
+              // nobody can see or grab.
+              const avg = Math.round((total / Math.max(1, columns.length)) * 10) / 10;
+              onChange([...columns, { id: spec.id, label: spec.label, width: avg }]);
+            }
+            setAdding(false);
+          }}
+          onBlur={() => setAdding(false)}
+          style={inputStyle}
+        >
+          <option value="" disabled>Choose a field…</option>
+          {unused.map(k => <option key={k.id} value={k.id}>{k.label}</option>)}
+        </select>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          disabled={unused.length === 0}
+          style={{ ...addBtn, opacity: unused.length === 0 ? 0.4 : 1 }}
+        >
+          <Plus size={12} /> Add column
+        </button>
+      )}
+
+      <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5 }}>
+        Every column reads from the job — the name here is only the printed heading.
+        Drag a divider above to move width between two columns.
+      </p>
+    </div>
+  );
+}
+
+const addBtn: React.CSSProperties = {
+  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+  padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, fontFamily: ff,
+  cursor: "pointer", background: "var(--bg-surface)", border: "1px solid var(--border)",
+  color: "var(--text-primary)",
+};
+
+const miniBtn: React.CSSProperties = {
+  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+  width: 26, height: 28, borderRadius: 7, cursor: "pointer",
+  background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-secondary)",
+};
+
+const SHAPES = [
+  { id: "rectangle" as const, label: "Rectangle", icon: Square },
+  { id: "ellipse"   as const, label: "Ellipse",   icon: Circle },
+];
+
+const inputStyle: React.CSSProperties = {
+  width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)",
+  borderRadius: 7, padding: "6px 8px", fontSize: 12, color: "var(--text-primary)",
+  fontFamily: ff, outline: "none",
+};
+
+/**
+ * A colour that is allowed to be absent.
+ *
+ * `<input type="color">` has no empty state — it always reports something — so
+ * the on/off lives in a checkbox beside it and "" is the stored value for off.
+ * Unticking keeps nothing; re-ticking restores the colour it was last set to,
+ * or `fallback` if it has never had one, so the swatch is never a surprise.
+ * Key this by element id — the remembered colour belongs to the shape you were
+ * editing, not to the panel.
+ */
+function PaintField({ label, colour, onChange, fallback }: {
+  label: string; colour: string; onChange: (c: string) => void; fallback: string;
+}) {
+  const [last, setLast] = useState(colour || fallback);
+
+  return (
+    <Field label={label}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontFamily: ff, color: "var(--text-secondary)", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={colour !== ""}
+            onChange={e => onChange(e.target.checked ? last : "")}
+            style={{ accentColor: "var(--accent)", cursor: "pointer" }}
+          />
+          {colour === "" ? "None" : "On"}
+        </label>
+        {colour !== "" && (
+          <input
+            type="color"
+            value={colour}
+            onChange={e => { setLast(e.target.value); onChange(e.target.value); }}
+            style={{ flex: 1, minWidth: 0, height: 30, background: "none", border: "1px solid var(--border)", borderRadius: 7, cursor: "pointer" }}
+          />
+        )}
+      </div>
+    </Field>
   );
 }
 

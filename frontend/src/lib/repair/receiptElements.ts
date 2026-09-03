@@ -13,7 +13,7 @@ import { DEFAULT_FONT_FAMILY } from "@/lib/fonts";
 
 export type TemplateKind = "receipt" | "issue";
 
-export type ReceiptElementType = "text" | "image" | "line" | "qr" | "table" | "invoiceTable";
+export type ReceiptElementType = "text" | "image" | "line" | "shape" | "qr" | "table" | "invoiceTable";
 
 interface BaseElement {
   id: string;
@@ -54,6 +54,31 @@ export interface ReceiptLineElement extends BaseElement {
   color: string;
 }
 
+/**
+ * A drawn shape — the panels, boxes and badges a designed invoice is built out
+ * of, as opposed to the rules a `line` already draws.
+ *
+ * Rectangle and ellipse only. Both are a single CSS box, so they survive the
+ * print pipeline exactly as they appear on the canvas; anything needing
+ * clip-path or SVG renders differently between the screen preview and the
+ * printer, which on a customer-facing document is worse than not offering it.
+ *
+ * `fill` and `stroke` both accept "" for none, so one element covers an
+ * outlined box, a solid block, and a tinted panel with a border.
+ */
+export interface ReceiptShapeElement extends BaseElement {
+  type: "shape";
+  shape: "rectangle" | "ellipse";
+  /** "" for no fill. */
+  fill: string;
+  /** "" for no outline. */
+  stroke: string;
+  /** Millimetres. */
+  strokeWidth: number;
+  /** Corner radius in mm. Ignored on an ellipse. */
+  radius: number;
+}
+
 export interface ReceiptQrElement extends BaseElement {
   type: "qr";
   /** May contain one {{token}} — normally {{trackUrl}}. */
@@ -90,10 +115,104 @@ export interface ReceiptInvoiceTableElement extends BaseElement {
   headerColor: string;
   borderColor: string;
   fontSize: number;
+  /**
+   * Which columns to print, in order, and how wide each one is.
+   *
+   * Optional, and absent on every design saved before columns were editable.
+   * Those keep printing DEFAULT_INVOICE_COLUMNS — the exact ten they were
+   * designed around — rather than silently changing shape underneath a shop
+   * that had already approved its invoice.
+   */
+  columns?: InvoiceColumn[];
+}
+
+export interface InvoiceColumn {
+  /** Which field this column prints. Unknown ids are skipped at render. */
+  id: string;
+  /** Header text. Seeded from the catalogue label, then editable — a shop
+   *  that says "Description" should not be stuck with "Item Name". */
+  label: string;
+  /** Share of the table width, relative rather than a percentage: the
+   *  renderer normalises against the total, so adding or removing a column
+   *  never means retyping every other width. */
+  width: number;
+}
+
+/**
+ * Every field a column can print.
+ *
+ * `value` is the whole of the binding — a column is a name, a formatter and a
+ * reader over the same ReceiptData the tokens resolve against, so nothing here
+ * can print something a {{token}} could not. The four with no field behind them
+ * (row number, item type, item name, quantity) are what the invoice has always
+ * synthesised for its single repair line.
+ */
+export const INVOICE_COLUMNS: {
+  id: string;
+  label: string;
+  align: "left" | "right";
+  /** Formatted as currency, and shown as an amount in the editor's preview. */
+  money?: boolean;
+  value: (d: ReceiptData) => string | undefined;
+}[] = [
+  { id: "index",       label: "No.",           align: "left",  value: () => "1" },
+  { id: "itemType",    label: "Item Type",     align: "left",  value: () => "Repair" },
+  { id: "itemName",    label: "Item Name",     align: "left",  value: d => `${d.jobId} ${d.device}`.trim() },
+  { id: "jobId",       label: "Job No.",       align: "left",  value: d => d.jobId },
+  { id: "device",      label: "Device",        align: "left",  value: d => d.device },
+  { id: "modelNumber", label: "Model No.",     align: "left",  value: d => d.modelNumber },
+  { id: "imei",        label: "IMEI",          align: "left",  value: d => d.imei },
+  { id: "fault",       label: "Fault",         align: "left",  value: d => d.fault },
+  { id: "warranty",    label: "Warranty",      align: "left",  value: d => d.warranty },
+  { id: "warrantyPeriod", label: "Warranty Period", align: "left", value: d => d.warrantyPeriod },
+  { id: "technician",  label: "Technician",    align: "left",  value: d => d.technician },
+  { id: "technicianRemarks", label: "Technician Remarks", align: "left", value: d => d.technicianRemarks },
+  { id: "remarks",     label: "Remarks",       align: "left",  value: d => d.remarks },
+  { id: "completionDate", label: "Completed",  align: "left",  value: d => d.completionDate },
+  { id: "date",        label: "Date",          align: "left",  value: d => d.date },
+  { id: "qty",         label: "Qty",           align: "right", value: () => "1" },
+  { id: "advance",     label: "Advance",       align: "right", money: true, value: d => d.advance },
+  { id: "estimate",    label: "Unit Price",    align: "right", money: true, value: d => d.estimate },
+  { id: "finalAmount", label: "Final Amount",  align: "right", money: true, value: d => d.finalAmount },
+  { id: "discount",    label: "Discount",      align: "right", money: true, value: d => d.discount },
+  { id: "lineTotal",   label: "Line Total",    align: "right", money: true, value: d => d.lineTotal },
+  { id: "balanceDue",  label: "Balance Due",   align: "right", money: true, value: d => d.balanceDue },
+  { id: "amountToBePaid", label: "Amount To Pay", align: "right", money: true, value: d => d.amountToBePaid },
+  { id: "paidAmount",  label: "Paid",          align: "right", money: true, value: d => d.paidAmount },
+  { id: "dueAmount",   label: "Due",           align: "right", money: true, value: d => d.dueAmount },
+  { id: "paymentType", label: "Payment Type",  align: "left",  value: d => d.paymentType },
+];
+
+/**
+ * The ten columns the invoice printed before any of this was configurable.
+ * Their widths reproduce the old layout: No. and Qty were pinned narrow and
+ * everything else shared what was left evenly.
+ */
+export const DEFAULT_INVOICE_COLUMNS: InvoiceColumn[] = [
+  { id: "index",     label: "No.",        width: 6 },
+  { id: "itemType",  label: "Item Type",  width: 11 },
+  { id: "itemName",  label: "Item Name",  width: 11 },
+  { id: "imei",      label: "IMEI",       width: 11 },
+  { id: "warranty",  label: "Warranty",   width: 11 },
+  { id: "qty",       label: "Qty",        width: 8 },
+  { id: "advance",   label: "Advance",    width: 11 },
+  { id: "estimate",  label: "Unit Price", width: 11 },
+  { id: "discount",  label: "Discount",   width: 11 },
+  { id: "lineTotal", label: "Line Total", width: 11 },
+];
+
+/**
+ * The columns to actually print — the element's own, or the original ten when
+ * it has none. Emptying the list is treated as "not configured" rather than as
+ * a table with no columns, which would print as an empty box nobody meant.
+ */
+export function invoiceColumns(el: ReceiptInvoiceTableElement): InvoiceColumn[] {
+  const chosen = (el.columns ?? []).filter(c => INVOICE_COLUMNS.some(k => k.id === c.id));
+  return chosen.length > 0 ? chosen : DEFAULT_INVOICE_COLUMNS;
 }
 
 export type ReceiptElement =
-  | ReceiptTextElement | ReceiptImageElement | ReceiptLineElement
+  | ReceiptTextElement | ReceiptImageElement | ReceiptLineElement | ReceiptShapeElement
   | ReceiptQrElement | ReceiptTableElement | ReceiptInvoiceTableElement;
 
 /**
@@ -228,6 +347,11 @@ export function blankReceiptElement(type: ReceiptElementType, page: { w: number;
       return { ...base, type, w: 24, h: 24, src: "/ManoMobileBlack.png" };
     case "line":
       return { ...base, type, w: Math.min(60, page.w - 8), h: 1, color: "#dc2626" };
+    case "shape":
+      // Outlined rather than filled by default: a new solid block dropped on a
+      // design hides whatever it lands on, and the first thing anybody would do
+      // is wonder where their text went.
+      return { ...base, type, w: 40, h: 20, shape: "rectangle", fill: "", stroke: "#111111", strokeWidth: 0.3, radius: 0 };
     case "qr":
       return { ...base, type, w: 24, h: 24, value: "{{trackUrl}}" };
     case "table":
@@ -325,7 +449,7 @@ export function isReceiptElement(v: unknown): v is ReceiptElement {
   if (typeof v !== "object" || v === null) return false;
   const e = v as Partial<ReceiptElement>;
   return typeof e.id === "string"
-    && (e.type === "text" || e.type === "image" || e.type === "line" || e.type === "qr" || e.type === "table" || e.type === "invoiceTable")
+    && (e.type === "text" || e.type === "image" || e.type === "line" || e.type === "shape" || e.type === "qr" || e.type === "table" || e.type === "invoiceTable")
     && typeof e.x === "number" && typeof e.y === "number"
     && typeof e.w === "number" && typeof e.h === "number";
 }
