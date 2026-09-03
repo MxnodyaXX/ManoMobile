@@ -262,6 +262,55 @@ export async function fetchJobsByImei(imei: string, excludeId?: string): Promise
     .map(rowToJob);
 }
 
+/**
+ * Take an unassigned job, atomically.
+ *
+ * Goes through claim_repair_job() rather than a plain update, because a claim
+ * from the browser is a read-modify-write: two technicians with the pool open
+ * both read "unassigned" and both write, and the second silently overwrites the
+ * first. The function makes the check part of the UPDATE, so the database picks
+ * the winner and the loser is told.
+ *
+ * Throws with a message worth showing — "already started by another technician"
+ * is the answer, not an error to swallow.
+ */
+export async function claimRepairJob(jobId: string): Promise<RepairJob> {
+  const { data, error } = await getSupabaseBrowserClient()
+    .rpc("claim_repair_job", { p_job_id: jobId });
+
+  if (error) {
+    if (/already been started/i.test(error.message)) {
+      throw new Error("This repair has already been started by another technician.");
+    }
+    if (/not permitted/i.test(error.message)) {
+      throw new Error("You are not permitted to claim unassigned repairs.");
+    }
+    if (/claim_repair_job/.test(error.message) || error.code === "42883") {
+      throw new Error("Claiming is not set up yet — run migration 20260902000019_technician_workflow.sql.");
+    }
+    throw new Error(error.message);
+  }
+  return rowToJob(data as JobRow);
+}
+
+/**
+ * Hand a job to somebody else, or put it back in the pool with a null target.
+ * Admin only, enforced in the function.
+ */
+export async function reassignRepairJob(jobId: string, to: string | null): Promise<RepairJob> {
+  const { data, error } = await getSupabaseBrowserClient()
+    .rpc("reassign_repair_job", { p_job_id: jobId, p_to: to });
+
+  if (error) {
+    throw new Error(
+      /Only an Admin/i.test(error.message)
+        ? "Only an Admin can reassign or release a repair."
+        : error.message,
+    );
+  }
+  return rowToJob(data as JobRow);
+}
+
 /** The narrow shape track_job() returns — see migrations
  *  20260819000015 / 20260819000016_public_job_tracking for why this isn't
  *  the full RepairJob (no phone, address, IMEI, passcode, signature, or

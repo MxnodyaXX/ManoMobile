@@ -20,7 +20,7 @@ import { lookupModelNumber, normaliseModelNumber, type ModelInfo } from "@/cashi
 import { useDeviceModelLookup, rememberDeviceModel } from "@/lib/repair/deviceModels";
 import { fetchStaffRules } from "@/lib/settings/staffRules";
 import { useDeviceFaults, FALLBACK_FAULTS } from "@/lib/repair/deviceFaults";
-import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2, AlertCircle, FileClock, ChevronDown, History } from "lucide-react";
+import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2, AlertCircle, FileClock, ChevronDown, History, Users } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1187,6 +1187,20 @@ function Step2({ data, onChange, isMobile, errors, dealers, technicians, techLoa
             )}
 
             {/* An empty roster is a setup problem, not "no one is free" — say so. */}
+            {/* Leaving this blank is a real choice, not an omission: the job
+                goes to the bench for whoever is free. Worth saying, because a
+                blank required-looking field reads as a step somebody missed. */}
+            {!data.assignedRepairman && (
+              <div style={{ display: "flex", gap: 9, padding: "11px 13px", borderRadius: 10, background: "var(--accent-dim)", border: "1px solid var(--accent-glow)" }}>
+                <Users size={15} style={{ color: "var(--accent)", flexShrink: 0, marginTop: 1 }} />
+                <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
+                  <strong style={{ color: "var(--text-primary)" }}>No technician chosen.</strong>{" "}
+                  This job goes to <strong>Available to claim</strong> and any technician can take it.
+                  Pick somebody only if it is meant for them.
+                </p>
+              </div>
+            )}
+
             {!techLoading && technicians.length === 0 && (
               <div style={{ display: "flex", gap: 9, padding: "11px 13px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)" }}>
                 <AlertCircle size={15} color="var(--warning)" style={{ flexShrink: 0, marginTop: 1 }} />
@@ -1567,9 +1581,16 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
     setForm(f => (f.dealerId ? f : { ...f, dealerId: lastDealerId }));
   }, [lastDealerId, dealers, initialDraft]);
 
-  // Fill the main technician in once the lookup lands, and only into an empty
-  // field on a fresh intake. A resumed draft keeps whatever it was saved with,
-  // including a deliberately blank assignment.
+  /**
+   * Fill the main technician in once the lookup lands, and only into an empty
+   * field on a fresh intake. A resumed draft keeps whatever it was saved with,
+   * including a deliberately blank assignment.
+   *
+   * Only runs when a main technician has actually been nominated. With none
+   * set, intake leaves the field blank and the job reaches the bench as work
+   * anybody may take — which is the whole of the "open pool" behaviour, with no
+   * setting to configure.
+   */
   useEffect(() => {
     if (!defaultTechId || defaultApplied.current || initialDraft) return;
     defaultApplied.current = true;

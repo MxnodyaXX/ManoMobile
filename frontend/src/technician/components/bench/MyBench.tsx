@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Wrench, ChevronDown } from "lucide-react";
 import { useRepair, type RepairJob, type JobStatus } from "@/cashier/contexts/RepairContext";
 import { useTechnicianRates } from "@/lib/settings/staffRules";
-import { isUnassigned } from "@/lib/repair/api";
+import { isUnassigned, claimRepairJob } from "@/lib/repair/api";
 import { useTech } from "@/technician/contexts/TechContext";
 import { useParts } from "@/cashier/contexts/PartsContext";
 import BenchCard, { type BenchAction } from "@/technician/components/bench/BenchCard";
@@ -49,11 +49,12 @@ const COLUMNS: {
   pick: (b: Buckets) => RepairJob[];
 }[] = [
   { key: "progress", title: "In progress", tint: "#34d399", empty: "Nothing started",     pick: b => b.inProgress },
-  { key: "todo",     title: "To start",    tint: undefined, empty: "Nothing waiting",     pick: b => b.toDo },
-  // Work belonging to nobody. It sits between the technician's own untouched
-  // jobs and their paused ones because that is when it gets picked up: after
-  // you have seen your own queue and found room in it.
+  // Straight after what is in hand. Unclaimed work is the only section with a
+  // deadline attached to reading it — a job nobody has taken is a phone nobody
+  // is working on — so it comes before this technician's own untouched queue,
+  // which will still be theirs in an hour.
   { key: "pool",     title: "Available to claim", tint: "#a78bfa", empty: "Nothing unassigned", pick: b => b.pool },
+  { key: "todo",     title: "To start",    tint: undefined, empty: "Nothing waiting",     pick: b => b.toDo },
   { key: "waiting",  title: "Waiting",     tint: "#fbbf24", empty: "Nothing on hold",     pick: b => b.waiting },
   { key: "ready",    title: "Finished",    tint: "#60a5fa", empty: "Nothing to collect",  pick: b => b.ready },
 ];
@@ -73,7 +74,7 @@ export default function MyBench() {
   // Finished work starts folded: it is the only section the technician has
   // nothing left to do about, and on a busy bench it is also the longest.
   const [sectionOpen, setSectionOpen] = useState<Record<SectionKey, boolean>>({
-    progress: true, todo: true, pool: true, waiting: true, ready: false,
+    progress: true, pool: true, todo: true, waiting: true, ready: false,
   });
   // One filter per section. Shared state would mean narrowing "to start" also
   // quietly hid jobs in a section the technician was not even looking at.
@@ -153,16 +154,17 @@ export default function MyBench() {
      */
     if (action === "claim") {
       setBusyId(job.id);
-      const result = await updateJob(job.id, {
-        technician: technicianName,
-        assignmentSource: "Self-Taken",
-      });
-      setBusyId(null);
-
-      if (!result.ok) {
-        setNotice(result.error ?? "That job could not be claimed.");
+      try {
+        // Through the database function, not updateJob: the check has to be
+        // part of the write or two technicians looking at the same pool can
+        // both win. See migration 20260902000019.
+        await claimRepairJob(job.id);
+      } catch (e) {
+        setBusyId(null);
+        setNotice(e instanceof Error ? e.message : "That job could not be claimed.");
         return;
       }
+      setBusyId(null);
       addActivity({
         jobId: job.id, type: "status_change",
         description: `Claimed by ${technicianName}`,
