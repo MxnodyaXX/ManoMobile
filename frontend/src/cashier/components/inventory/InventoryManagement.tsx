@@ -6,10 +6,10 @@ import {
   Smartphone, Package, AlertTriangle, XCircle,
   Plus, Search, Edit2, Trash2, X, Check,
   BarChart3, ArrowUpCircle, ArrowDownCircle, Sliders,
-  ChevronDown, ShieldAlert, Truck, Tag,
+  ChevronDown, ChevronRight, ShieldAlert, Truck, Tag, CornerDownRight,
 } from "lucide-react";
 import StockReceiving from "./StockReceiving";
-import { useInventory } from "@/cashier/contexts/InventoryContext";
+import { useInventory, type Category, type Subcategory } from "@/cashier/contexts/InventoryContext";
 import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
@@ -256,6 +256,286 @@ function ComboField({ label, value, onChange, options, entityType, onNewRequest,
       {error && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{error}</div>}
       {!error && !isActuallyDisabled && options.length === 0 && (
         <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>No {entityLabel.toLowerCase()}s — type a name to add one</div>
+      )}
+    </div>
+  );
+}
+
+// ─── CategoryComboField ───────────────────────────────────────────────────────
+
+/**
+ * Category and subcategory in a single dropdown.
+ *
+ * They used to be two ComboFields side by side, and the second one spent most
+ * of its life greyed out reading "Select category first" — a field whose main
+ * job was telling you it was not usable yet. It is really one decision, so it
+ * is now one control: the list shows the main categories, and a category opens
+ * to reveal the subcategories filed under it.
+ *
+ * Clicking a main category selects it and opens it, leaving the dropdown up —
+ * you have narrowed the choice, not finished it. Clicking a subcategory
+ * finishes and closes. A category with nothing under it has nothing left to
+ * offer, so that one closes too.
+ */
+function CategoryComboField({
+  categories, subcategories, category, subcategory, onPick,
+  error, disabled, onPromptChange, onNewCategory, onNewSubcategory,
+}: {
+  categories: Category[];
+  subcategories: Subcategory[];
+  category: string;
+  subcategory: string;
+  onPick: (category: string, subcategory: string) => void;
+  error?: string;
+  disabled?: boolean;
+  onPromptChange?: (active: boolean) => void;
+  onNewCategory: (typed: string) => void;
+  onNewSubcategory: (typed: string, parentCategory: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  // null means "showing the current selection"; a string means the user is
+  // typing, and the input is a search box until they leave it.
+  const [query, setQuery] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [prompt, setPromptText] = useState<string | null>(null);
+  const [dropPos, setDropPos] = useState({ top: 0, left: 0, width: 0 });
+  const inputRef = useRef<HTMLInputElement>(null);
+  const justSelected = useRef(false);
+
+  // The form greys out its other fields while an unknown name is pending, so
+  // the parent hears about the prompt at the same moment it is raised.
+  const setPrompt = (v: string | null) => {
+    setPromptText(v);
+    onPromptChange?.(v !== null);
+  };
+
+  const live = useMemo(() => categories.filter(c => c.active), [categories]);
+  const label = category ? (subcategory ? `${category} \u2192 ${subcategory}` : category) : "";
+
+  /**
+   * The list as drawn: every category that matches, or that holds a matching
+   * subcategory. A search hit inside a fold opens the fold — otherwise the
+   * only visible result of typing a subcategory's name would be its parent,
+   * still shut.
+   */
+  const tree = useMemo(() => {
+    const q = (query ?? "").trim().toLowerCase();
+    return live.map(c => {
+      const subs = subcategories.filter(s => s.active && s.categoryId === c.id);
+      const catHit = !q || c.name.toLowerCase().includes(q);
+      const subHits = q ? subs.filter(s => s.name.toLowerCase().includes(q)) : subs;
+      return {
+        cat: c,
+        subs: catHit ? subs : subHits,
+        forceOpen: !!q && subHits.length > 0,
+        show: catHit || subHits.length > 0,
+      };
+    }).filter(n => n.show);
+  }, [live, subcategories, query]);
+
+  const isActuallyDisabled = disabled && prompt === null;
+
+  // Reopening lands on whatever is already chosen, so the current pick is on
+  // screen rather than somewhere down a list the user has to find again.
+  function openDrop() {
+    const rect = inputRef.current?.getBoundingClientRect();
+    if (rect) setDropPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    setExpandedId(live.find(c => c.name === category)?.id ?? null);
+    setQuery("");
+    setOpen(true);
+    setPrompt(null);
+  }
+
+  function handleBlur() {
+    setTimeout(() => {
+      if (justSelected.current) { justSelected.current = false; return; }
+      setOpen(false);
+      const typed = (query ?? "").trim();
+      setQuery(null);
+      // Nothing anywhere in the tree matches what they typed, so it is either
+      // a typo or something that does not exist yet. Offer to add it.
+      const known = live.some(c => c.name.toLowerCase() === typed.toLowerCase())
+        || subcategories.some(s => s.name.toLowerCase() === typed.toLowerCase());
+      setPrompt(typed && !known ? typed : null);
+    }, 150);
+  }
+
+  function pickCategory(c: Category, hasSubs: boolean) {
+    onPick(c.name, "");
+    setExpandedId(c.id);
+    setPrompt(null);
+    if (hasSubs) {
+      // Still mid-decision — the list stays up. The guard is deliberately NOT
+      // armed here: the row suppresses mousedown so focus never left, meaning
+      // there is no pending blur to swallow, and an armed guard would instead
+      // eat the real blur later and leave the dropdown stuck open.
+      justSelected.current = false;
+      setQuery("");
+    } else {
+      justSelected.current = true;
+      setQuery(null);
+      setOpen(false);
+    }
+  }
+
+  function pickSubcategory(c: Category, sub: Subcategory) {
+    justSelected.current = true;
+    onPick(c.name, sub.name);
+    setQuery(null);
+    setOpen(false);
+    setPrompt(null);
+  }
+
+  const rowBase: React.CSSProperties = {
+    display: "flex", alignItems: "center", gap: 8, width: "100%",
+    padding: "9px 12px", fontSize: 13, cursor: "pointer", textAlign: "left",
+    background: "transparent", border: "none",
+    fontFamily: "'Plus Jakarta Sans', sans-serif",
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <label style={labelStyle}>Item Category &amp; Subcategory</label>
+      <div style={{ position: "relative" }}>
+        <input
+          ref={inputRef}
+          type="text"
+          value={query ?? label}
+          onChange={e => { setQuery(e.target.value); setPrompt(null); }}
+          onFocus={openDrop}
+          onBlur={handleBlur}
+          disabled={isActuallyDisabled}
+          placeholder={isActuallyDisabled ? "Unavailable" : "Search or pick a category\u2026"}
+          style={{
+            ...inputStyle, paddingRight: 32,
+            borderColor: error ? "#dc2626" : prompt !== null ? "#f59e0b" : "var(--border)",
+            opacity: isActuallyDisabled ? 0.5 : 1,
+            cursor: isActuallyDisabled ? "not-allowed" : "text",
+          }}
+        />
+        <ChevronDown size={14} style={{
+          position: "absolute", right: 10, top: "50%",
+          transform: `translateY(-50%) rotate(${open ? 180 : 0}deg)`,
+          color: "var(--text-muted)", pointerEvents: "none", transition: "transform 0.15s",
+        }} />
+      </div>
+
+      {open && createPortal(
+        <div style={{
+          position: "fixed", top: dropPos.top, left: dropPos.left, width: dropPos.width,
+          zIndex: 1200,
+          background: "var(--bg-card)", border: "1px solid var(--border)",
+          borderRadius: 8, maxHeight: 260, overflowY: "auto",
+          boxShadow: "0 4px 24px rgba(0,0,0,0.25)",
+          fontFamily: "'Plus Jakarta Sans', sans-serif",
+          padding: "4px 0",
+        }}>
+          {tree.length === 0 && (
+            <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--text-muted)" }}>
+              No match. Leave the field to add it as something new.
+            </div>
+          )}
+
+          {tree.map(({ cat, subs, forceOpen }) => {
+            const isOpen = forceOpen || expandedId === cat.id;
+            const isPicked = cat.name === category;
+            return (
+              <div key={cat.id}>
+                <div
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => pickCategory(cat, subs.length > 0)}
+                  style={{
+                    ...rowBase,
+                    fontWeight: 600,
+                    color: isPicked ? "var(--accent)" : "var(--text-primary)",
+                    background: isPicked ? "var(--accent-dim)" : "transparent",
+                  }}
+                  onMouseEnter={e => { if (!isPicked) (e.currentTarget as HTMLDivElement).style.background = "var(--bg-surface)"; }}
+                  onMouseLeave={e => { if (!isPicked) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+                >
+                  {subs.length > 0
+                    ? (isOpen ? <ChevronDown size={13} style={{ flexShrink: 0, opacity: 0.7 }} />
+                              : <ChevronRight size={13} style={{ flexShrink: 0, opacity: 0.7 }} />)
+                    : <span style={{ width: 13, flexShrink: 0 }} />}
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cat.name}</span>
+                  {/* A category with none is a dead end worth flagging here —
+                      the form still asks for a subcategory. */}
+                  <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>
+                    {subs.length > 0 ? subs.length : "none"}
+                  </span>
+                </div>
+
+                {isOpen && subs.map(sub => {
+                  const subPicked = isPicked && sub.name === subcategory;
+                  return (
+                    <div
+                      key={sub.id}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => pickSubcategory(cat, sub)}
+                      style={{
+                        ...rowBase,
+                        paddingLeft: 26, fontSize: 12.5,
+                        color: subPicked ? "var(--accent)" : "var(--text-secondary)",
+                        background: subPicked ? "var(--accent-dim)" : "transparent",
+                      }}
+                      onMouseEnter={e => { if (!subPicked) (e.currentTarget as HTMLDivElement).style.background = "var(--bg-surface)"; }}
+                      onMouseLeave={e => { if (!subPicked) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+                    >
+                      <CornerDownRight size={12} style={{ flexShrink: 0, opacity: 0.55 }} />
+                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub.name}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>,
+        document.body
+      )}
+
+      {/* One dropdown means the typed name could be either level, so both are
+          offered — but only where each makes sense. Nothing is under a
+          category that has not been chosen yet. */}
+      {prompt !== null && (
+        <div style={{
+          marginTop: 4, padding: "7px 12px", borderRadius: 8,
+          background: "#fffbeb", border: "1px solid #fcd34d",
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap",
+        }}>
+          <span style={{ fontSize: 12, color: "#92400e", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            No match for &quot;{prompt}&quot;. Add it as…
+          </span>
+          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => { const t = prompt; setPrompt(null); onNewCategory(t); }}
+              style={{ padding: "3px 10px", borderRadius: 6, border: "none", background: "#d97706", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+            >
+              Category
+            </button>
+            {category && (
+              <button
+                type="button"
+                onClick={() => { const t = prompt; setPrompt(null); onNewSubcategory(t, category); }}
+                style={{ padding: "3px 10px", borderRadius: 6, border: "none", background: "#d97706", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+              >
+                Under {category}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setPrompt(null)}
+              style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid #fcd34d", background: "transparent", color: "#92400e", fontSize: 11, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{error}</div>}
+      {!error && live.length === 0 && (
+        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>No categories — type a name to add one</div>
       )}
     </div>
   );
@@ -736,20 +1016,26 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
 
   // Cascade: category → brand → supplier
   const selectedCatObj = useMemo(() => categories.find(c => c.name === form.category), [categories, form.category]);
+
+  /**
+   * Whether this product still owes a subcategory.
+   *
+   * Only categories that actually have subcategories filed under them. Asking
+   * for one where none exists is a demand nobody can meet — the form was
+   * rejecting "Camera Lens Protectors" for a missing value the dropdown had
+   * nothing to offer for. A category with subcategories defined still requires
+   * one, since leaving it blank there means the shop skipped a distinction it
+   * had deliberately set up.
+   */
+  const requiresSubcategory = useMemo(
+    () => !!selectedCatObj && subcategories.some(s => s.active && s.categoryId === selectedCatObj.id),
+    [subcategories, selectedCatObj],
+  );
   const selectedBrandObj = useMemo(() => brands.find(b => b.name === form.brand), [brands, form.brand]);
 
   // Deactivated entries stay picked if a product already has one (the value
   // just won't appear for a *new* pick) — filtered here, not in the fetch,
   // so an existing product's saved label never silently blanks out.
-  const categoryOptions = useMemo(() => categories.filter(c => c.active).map(c => c.name).sort(), [categories]);
-
-  const subcategoryOptions = useMemo(
-    () => subcategories
-      .filter(s => s.active && (!selectedCatObj || s.categoryId === selectedCatObj.id))
-      .map(s => s.name).sort(),
-    [subcategories, selectedCatObj]
-  );
-
   const brandOptions = useMemo(
     () => brands
       .filter(b =>
@@ -768,9 +1054,18 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
     [suppliers, selectedBrandObj]
   );
 
-  function handleCategoryChange(v: string) {
-    const newCode = v ? generateCode(v, existingProducts.filter(p => p.id !== form.id)) : "";
-    setForm(f => ({ ...f, category: v, subcategory: "", brand: "", supplier: "", code: newCode }));
+  /**
+   * Both levels arrive together now. The item code is derived from the main
+   * category, and brand/supplier still hang off it, so changing the category
+   * clears them exactly as before — picking a subcategory within the category
+   * already chosen leaves them alone, since nothing they depend on moved.
+   */
+  function handleCategoryPick(cat: string, subcat: string) {
+    setForm(f => {
+      if (f.category === cat) return { ...f, subcategory: subcat };
+      const newCode = cat ? generateCode(cat, existingProducts.filter(p => p.id !== f.id)) : "";
+      return { ...f, category: cat, subcategory: subcat, brand: "", supplier: "", code: newCode };
+    });
   }
   function handleBrandChange(v: string)    { setForm(f => ({ ...f, brand: v, supplier: "" })); }
 
@@ -787,7 +1082,7 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
     if (!form.name.trim()) e.name = "Name is required";
     if (!form.brand.trim()) e.brand = "Brand is required";
     if (!form.category.trim()) e.category = "Category is required";
-    if (!form.subcategory.trim()) e.subcategory = "Subcategory is required";
+    if (requiresSubcategory && !form.subcategory.trim()) e.subcategory = `Pick a subcategory under ${form.category}`;
     if (!form.supplier.trim()) e.supplier = "Supplier is required";
     if (form.buyingPrice <= 0) e.buyingPrice = "Must be greater than 0";
     if (form.sellingPrice <= 0) e.sellingPrice = "Must be greater than 0";
@@ -823,31 +1118,19 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><X size={18} /></button>
         </div>
         <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* Row 1: Item Category + Subcategory (cascade) */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <ComboField
-              label="Item Category"
-              value={form.category}
-              onChange={handleCategoryChange}
-              options={categoryOptions}
-              entityType="category"
-              error={errors.category}
-              disabled={anyMismatch}
-              onPromptChange={setAnyMismatch}
-              onNewRequest={v => setApprovalReq({ entityType: "category", newName: v })}
-            />
-            <ComboField
-              label="Subcategory"
-              value={form.subcategory}
-              onChange={v => set("subcategory", v)}
-              options={subcategoryOptions}
-              entityType="subcategory"
-              error={errors.subcategory}
-              disabled={anyMismatch || !form.category}
-              onPromptChange={setAnyMismatch}
-              onNewRequest={v => setApprovalReq({ entityType: "subcategory", newName: v, presetCategoryName: form.category })}
-            />
-          </div>
+          {/* Row 1: category and subcategory, one accordion dropdown */}
+          <CategoryComboField
+            categories={categories}
+            subcategories={subcategories}
+            category={form.category}
+            subcategory={form.subcategory}
+            onPick={handleCategoryPick}
+            error={errors.category || errors.subcategory}
+            disabled={anyMismatch}
+            onPromptChange={setAnyMismatch}
+            onNewCategory={v => setApprovalReq({ entityType: "category", newName: v })}
+            onNewSubcategory={(v, parent) => setApprovalReq({ entityType: "subcategory", newName: v, presetCategoryName: parent })}
+          />
           {/* Row 2: Item Brand + Item Supplier (cascade) */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <ComboField
