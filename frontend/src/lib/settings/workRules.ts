@@ -18,6 +18,14 @@ export interface WorkRules {
   maxActiveJobs: number | null;
   /** Must a job be started in the system before it can be marked finished? */
   requireStartBeforeFinish: boolean;
+  /**
+   * Show elapsed time on in-progress repairs.
+   *
+   * Off hides the timers and stops the per-second re-render behind them. Start
+   * timestamps are still recorded either way — the bench orders by them, so
+   * dropping them to hide a clock would cost real information.
+   */
+  trackJobTime: boolean;
 }
 
 /** Permissive by default — matches a busy bench, and never blocks work that a
@@ -26,18 +34,20 @@ export const DEFAULT_WORK_RULES: WorkRules = {
   allowMultipleActiveJobs: true,
   maxActiveJobs: null,
   requireStartBeforeFinish: true,
+  trackJobTime: true,
 };
 
 interface SettingsRow {
   allow_multiple_active_jobs: boolean;
   max_active_jobs: number | null;
   require_start_before_finish: boolean;
+  track_job_time: boolean | null;
 }
 
 export async function fetchWorkRules(): Promise<WorkRules> {
   const { data, error } = await getSupabaseBrowserClient()
     .from("app_settings")
-    .select("allow_multiple_active_jobs, max_active_jobs, require_start_before_finish")
+    .select("allow_multiple_active_jobs, max_active_jobs, require_start_before_finish, track_job_time")
     .limit(1)
     .maybeSingle();
 
@@ -49,6 +59,9 @@ export async function fetchWorkRules(): Promise<WorkRules> {
     allowMultipleActiveJobs: row.allow_multiple_active_jobs,
     maxActiveJobs: row.max_active_jobs,
     requireStartBeforeFinish: row.require_start_before_finish,
+    // Null where the column has not been added yet, which reads as the
+    // behaviour the bench already had rather than as "off".
+    trackJobTime: row.track_job_time ?? true,
   };
 }
 
@@ -61,6 +74,7 @@ export async function saveWorkRules(rules: WorkRules): Promise<void> {
       allow_multiple_active_jobs: rules.allowMultipleActiveJobs,
       max_active_jobs: rules.allowMultipleActiveJobs ? rules.maxActiveJobs : null,
       require_start_before_finish: rules.requireStartBeforeFinish,
+      track_job_time: rules.trackJobTime,
       updated_by: user?.id ?? null,
     });
 

@@ -1862,6 +1862,20 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
         // Omitted when auto-generating, so the column default assigns the next
         // RM number — the browser must not pick it or two counters could clash.
         ...(form.autoJobNumber ? {} : { id: form.jobNumber.trim() }),
+      /**
+       * The repair this one repeats, when the IMEI says the device has been
+       * here before.
+       *
+       * Recorded at intake rather than asked for later: the lookup has already
+       * run and the answer is on screen, and a technician deciding what to
+       * refund needs to know what the customer paid last time. Newest first,
+       * so this is the most recent repair on the same handset.
+       *
+       * A link, not a claim about warranty — whether it is still covered is
+       * read off the earlier job when it matters, and a Cash Return is never
+       * gated on one.
+       */
+      rejobOf: imeiHistory[0]?.id ?? null,
       // A device from another shop has no end customer on file: the dealer
       // booked it, collects it, and is who we ring about it. Their details go
       // on the job so the receipt, the jobs list and every SMS still have a

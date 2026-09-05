@@ -4,13 +4,14 @@ import { useEffect, useState } from "react";
 import { Wrench, ChevronDown } from "lucide-react";
 import { useRepair, type RepairJob, type JobStatus } from "@/cashier/contexts/RepairContext";
 import { useTechnicianRates } from "@/lib/settings/staffRules";
+import { useWorkRules } from "@/lib/settings/workRules";
 import { isUnassigned, claimRepairJob } from "@/lib/repair/api";
 import { useTech } from "@/technician/contexts/TechContext";
 import { useParts } from "@/cashier/contexts/PartsContext";
 import BenchCard, { type BenchAction } from "@/technician/components/bench/BenchCard";
 import PersonalInsights from "@/technician/components/bench/PersonalInsights";
 import BenchFilters, {
-  applyBenchFilter, isFiltering, EMPTY_FILTER, type BenchFilter,
+  applyBenchFilter, isFiltering, EMPTY_FILTER, type BenchFilter, type BenchView,
 } from "@/technician/components/bench/BenchFilters";
 import StatusUpdateModal from "@/technician/components/jobs/StatusUpdateModal";
 import DeviceDetailsModal from "@/technician/components/jobs/DeviceDetailsModal";
@@ -76,16 +77,24 @@ export default function MyBench() {
   const [sectionOpen, setSectionOpen] = useState<Record<SectionKey, boolean>>({
     progress: true, pool: true, todo: true, waiting: true, ready: false,
   });
-  // One filter per section. Shared state would mean narrowing "to start" also
-  // quietly hid jobs in a section the technician was not even looking at.
-  const [filters, setFilters] = useState<Record<SectionKey, BenchFilter>>({
-    progress: EMPTY_FILTER, todo: EMPTY_FILTER, pool: EMPTY_FILTER, waiting: EMPTY_FILTER, ready: EMPTY_FILTER,
-  });
+  // One filter for the whole bench. It was per section, which is fine at six
+  // jobs and useless at fifty: looking for one job number means searching
+  // every section in turn to find out which one it is in.
+  const [filter, setFilter] = useState<BenchFilter>(EMPTY_FILTER);
+  // "" is every section. The pills set this; it is a narrowing of what is on
+  // screen, not a filter on the jobs, so the counts stay honest either way.
+  const [only, setOnly] = useState<string>("");
+  const [view, setView] = useState<BenchView>("cards");
 
   const mine = jobs.filter(j => j.technician === technicianName);
 
   // Permissive until the rules load and if they cannot be read at all — the
   // bench must not quietly hide available work because of a slow fetch.
+  // Defaults to on until the row loads, so a slow fetch never blanks a timer
+  // that is about to come back.
+  const { rules: shopRules } = useWorkRules();
+  const showTimer = shopRules.trackJobTime;
+
   const ratesFor = useTechnicianRates();
   const canClaim = ratesFor(technicianName)?.canClaimUnassigned ?? true;
   const byOldest = (a: RepairJob, b: RepairJob) =>
@@ -129,12 +138,13 @@ export default function MyBench() {
   const ready      = mine.filter(j => j.status !== "Delivered"  &&  isFinished(j)).sort(byOldest);
 
   // One interval for the whole screen rather than one per card: a bench with
-  // six jobs open should not run six timers.
+  // six jobs open should not run six timers. And none at all where the shop
+  // has turned timing off — there would be nothing on screen for it to move.
   useEffect(() => {
-    if (inProgress.length === 0) return;
+    if (inProgress.length === 0 || !showTimer) return;
     const id = setInterval(() => tick(n => n + 1), 1000);
     return () => clearInterval(id);
-  }, [inProgress.length]);
+  }, [inProgress.length, showTimer]);
 
   const openJob = modal ? mine.find(j => j.id === modal.jobId) ?? null : null;
 
@@ -205,6 +215,18 @@ export default function MyBench() {
   const pendingFor = (jobId: string) =>
     partRequests.filter(r => r.jobId === jobId && r.status === "Pending").length;
 
+  const buckets: Buckets = { inProgress, toDo, pool: unassigned, waiting, ready };
+  // Everything on the bench, for the toolbar's dealer/brand lists and its
+  // "n of m" count. A job can only sit in one bucket, so this does not
+  // double-count.
+  const everything = COLUMNS.flatMap(c => c.pick(buckets));
+  const filtered = COLUMNS.map(col => {
+    const all = col.pick(buckets);
+    return { col, all, list: applyBenchFilter(all, filter) };
+  });
+  const shownTotal = filtered.reduce((n, f) => n + f.list.length, 0);
+  const searching = isFiltering(filter);
+
   // "Nothing at all" has to mean nothing to claim either, or the screen tells
   // a technician their bench is empty while unassigned work sits below it.
   const nothingAtAll = mine.length === 0 && unassigned.length === 0;
@@ -264,12 +286,29 @@ export default function MyBench() {
           finished work does not, so it starts folded — the bench should open
           on what is left to do, not on a wall of everything. */}
       {!nothingAtAll && (
+        <BenchFilters
+          jobs={everything}
+          value={filter}
+          onChange={setFilter}
+          shown={shownTotal}
+          view={view}
+          onViewChange={setView}
+          active={only}
+          onActiveChange={setOnly}
+          sections={filtered.map(({ col, list }) => ({
+            key: col.key, title: col.title, tint: col.tint, count: list.length,
+          }))}
+        />
+      )}
+
+      {!nothingAtAll && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {COLUMNS.map(col => {
-            const all  = col.pick({ inProgress, toDo, pool: unassigned, waiting, ready });
-            const f    = filters[col.key];
-            const list = applyBenchFilter(all, f);
-            const open = sectionOpen[col.key];
+          {filtered.map(({ col, all, list }) => {
+            if (only !== "" && only !== col.key) return null;
+            // A search opens whatever holds a hit. Leaving a matching section
+            // folded is the same as not finding it — and "Finished" starts
+            // folded, so that is exactly where a search would go quiet.
+            const open = (searching && list.length > 0) || sectionOpen[col.key];
             return (
               <section key={col.key} style={{
                 background: "var(--bg-card)", border: "1px solid var(--border)",
@@ -293,13 +332,8 @@ export default function MyBench() {
                     color: list.length ? (col.tint ?? "var(--text-secondary)") : "var(--text-muted)",
                     background: "var(--bg-secondary)", border: "1px solid var(--border)",
                   }}>
-                    {all.length}
+                    {searching ? `${list.length}/${all.length}` : all.length}
                   </span>
-                  {isFiltering(f) && (
-                    <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff }}>
-                      filtered
-                    </span>
-                  )}
                   <ChevronDown
                     size={16}
                     style={{ marginLeft: "auto", color: "var(--text-muted)", transform: open ? "rotate(180deg)" : undefined, transition: "transform 0.18s" }}
@@ -308,24 +342,26 @@ export default function MyBench() {
 
                 {open && (
                   <div style={{ padding: "0 16px 16px" }}>
-                    {all.length > 0 && (
-                      <BenchFilters
-                        jobs={all}
-                        value={f}
-                        shown={list.length}
-                        onChange={next => setFilters(prev => ({ ...prev, [col.key]: next }))}
-                      />
-                    )}
                     {list.length === 0 ? (
                       <p style={{
                         fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff,
                         padding: "16px 12px", textAlign: "center",
                         border: "1px dashed var(--border)", borderRadius: 11,
                       }}>
-                        {all.length === 0 ? col.empty : "Nothing matches that search"}
+                        {all.length === 0 ? col.empty : "Nothing here matches that search"}
                       </p>
                     ) : (
-                      <div style={{
+                      <div style={view === "list" ? {
+                        display: "flex", flexDirection: "column", gap: 6,
+                      } : view === "compact" ? {
+                        display: "grid", gap: 8, alignItems: "start",
+                        /* Five across at full width, dropping to four and then
+                           three as the space narrows — the 19% floor is what
+                           caps the row at five, and 230px is where a compact
+                           tile stops holding a job number, a device and its
+                           buttons on one line. */
+                        gridTemplateColumns: "repeat(auto-fill, minmax(max(230px, 19%), 1fr))",
+                      } : {
                         display: "grid",
                         gap: 14,
                         alignItems: "start",
@@ -344,6 +380,8 @@ export default function MyBench() {
                           <BenchCard
                             key={j.id}
                             job={j}
+                            variant={view === "list" ? "row" : view === "compact" ? "compact" : "card"}
+                            showTimer={showTimer}
                             startedAt={jobMeta[j.id]?.startedAt ?? (j.startedAt ? new Date(j.startedAt) : undefined)}
                             partsPending={pendingFor(j.id)}
                             onAction={handle}

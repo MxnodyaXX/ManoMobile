@@ -13,7 +13,16 @@ import { fetchJobs, fetchDealers, insertJob, patchJob, upsertDealer, deleteDeale
 /** Mirrors the job_priority enum in the database. */
 export type JobPriority = "Low" | "Normal" | "High" | "Urgent";
 
-export type CompletionType = "Normal" | "Return" | "FOC";
+/**
+ * How a repair ended.
+ *
+ * "Cash Return" is not a variation of "Return". A Return means the shop is not
+ * taking the customer's money; a Cash Return means it is giving back money
+ * already taken — a movement out of the till, which has to be authorised,
+ * recorded and reconciled. Merged, a shop cannot tell the jobs it simply did
+ * not bill from the jobs it owes cash on.
+ */
+export type CompletionType = "Normal" | "Return" | "FOC" | "Cash Return";
 
 export type JobStatus = "Non-Issued" | "Issued" | "Pending" | "Completed" | "Delivered" | "Cancelled";
 
@@ -69,6 +78,27 @@ export interface RepairJob {
   priority: JobPriority;
   estimatedCost: number;
   advancePaid: number;
+  /**
+   * When the intake advance was handed back, or null.
+   *
+   * advancePaid is deliberately NOT reduced when this is set: Rs. 5,000 was
+   * received, and that stays true after Rs. 5,000 goes back. The two figures
+   * together are the transaction trail; one figure quietly edited down is not.
+   * The amount, reason and CR- reference live in cash_returns.
+   */
+  advanceRefundedOn?: string | null;
+  /**
+   * What the shop owes back on a Cash Return job, as set by the technician.
+   *
+   * Owed, not paid. The technician decides money should go back and how much;
+   * they are not holding the till, so the payment itself is a separate act by
+   * a cashier. Everything downstream — the jobs list, Sales Management,
+   * billing, the accounts — reads this one field rather than keeping a second
+   * refund record in step with it.
+   */
+  cashReturnAmount?: number | null;
+  /** The earlier repair this job repeats, when it is a re-job. */
+  rejobOf?: string | null;
   createdAt: string;
   estimatedCompletion: string;
   imei?: string;

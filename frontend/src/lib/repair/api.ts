@@ -54,6 +54,11 @@ interface JobRow {
   priority: RepairJob["priority"];
   estimated_cost: number | string;
   advance_paid: number | string;
+  /** Set when the advance was given back. The amount and reason are in
+   *  cash_returns; this is the flag the jobs list reads. */
+  advance_refunded_on: string | null;
+  cash_return_amount: number | string | null;
+  rejob_of: string | null;
   written_off: number | string | null;
   original_estimate: number | string | null;
   revised_estimate: number | string | null;
@@ -122,6 +127,9 @@ export function rowToJob(row: JobRow): RepairJob {
     priority: row.priority,
     estimatedCost: num(row.estimated_cost),
     advancePaid: num(row.advance_paid),
+    advanceRefundedOn: row.advance_refunded_on ?? null,
+    cashReturnAmount: optNum(row.cash_return_amount),
+    rejobOf: row.rejob_of ?? null,
     // Part of the bill forgiven at handover — see migration 20260901000017.
     writtenOff: num(row.written_off),
     originalEstimate: optNum(row.original_estimate),
@@ -177,6 +185,8 @@ export function jobToRow(job: Partial<RepairJob>): Record<string, unknown> {
   set("priority", job.priority);
   set("estimated_cost", job.estimatedCost);
   set("advance_paid", job.advancePaid);
+  set("cash_return_amount", job.cashReturnAmount);
+  set("rejob_of", job.rejobOf);
   set("written_off", job.writtenOff);
   set("original_estimate", job.originalEstimate);
   set("revised_estimate", job.revisedEstimate);

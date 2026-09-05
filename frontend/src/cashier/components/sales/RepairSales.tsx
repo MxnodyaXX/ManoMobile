@@ -6,18 +6,19 @@ import { useSales } from "@/cashier/contexts/SalesContext";
 import {
   Search, ArrowLeft, Printer, ChevronDown,
   Building2, CheckCircle, Clock, Wrench, TrendingUp, AlertCircle,
-  CreditCard, X, BookUser, Undo2,
+  CreditCard, X, BookUser, Undo2, RotateCcw,
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import CreditCustomerPicker, { type POSCreditCustomer } from "./CreditCustomerPicker";
 import JobIssuePrintable, { type IssueInvoiceData } from "@/cashier/components/repair/JobIssuePrintable";
 import { useRepair, findDealer, isInHouseDealer, dealerKey } from "@/cashier/contexts/RepairContext";
-import type { RepairJob } from "@/cashier/contexts/RepairContext";
+import type { RepairJob, CompletionType } from "@/cashier/contexts/RepairContext";
 import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 import InvoiceNoBadge from "@/cashier/components/sales/InvoiceNoBadge";
 import { usePersistInvoiceDocument } from "@/lib/sales/invoiceDoc";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { useMyPermissions } from "@/lib/settings/staffRules";
+import { useJobRefunds, refundRepairAdvance } from "@/lib/accounts/cashReturns";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,20 @@ interface CompletedRepair {
   advance: number;
   unitPrice: number;
   discount: number;
+  /**
+   * How the job ended: Normal, Return (device came back unrepaired) or FOC
+   * (done and not charged for). "Rs. 0" in the price column is the one thing
+   * that does not tell these apart — or tell them from a job nobody has
+   * priced yet.
+   */
+  completionType?: CompletionType;
+  /** What the shop owes back, as the technician set it on a Cash Return job. */
+  cashReturnAmount?: number;
+  /** The earlier repair this job repeats — printed on the refund so the
+   *  invoice says which job the money is coming back from. */
+  rejobOf?: string | null;
+  /** Set once everything owed has actually been handed back. */
+  advanceRefundedOn?: string | null;
   /** Only actually shown for an outside dealer's jobs — see the Step 2 table,
    *  where the customer/advance columns swap for these plus a fault column. */
   issue: string;
@@ -47,6 +62,37 @@ interface DealerProfile {
   totalEarned: number;
   outstanding: number;
 }
+
+/**
+ * What kind of job this was, in one word.
+ *
+ * Normal is left blank rather than labelled: it is the overwhelming majority,
+ * and a column where nearly every row says the same thing trains the eye to
+ * skip it — which is exactly when the one row that says Returned gets missed.
+ */
+function JobTypeTag({ type }: { type?: CompletionType }) {
+  const cfg = type === "Cash Return"
+    ? { label: "CASH RETURN", color: "#60a5fa", tint: "rgba(96,165,250,0.10)", edge: "rgba(96,165,250,0.30)" }
+    : type === "Return"
+      ? { label: "RETURNED", color: "#f87171", tint: "rgba(248,113,113,0.10)", edge: "rgba(248,113,113,0.30)" }
+      : type === "FOC"
+        ? { label: "FOC", color: "#a78bfa", tint: "rgba(167,139,250,0.10)", edge: "rgba(167,139,250,0.30)" }
+        : null;
+
+  if (!cfg) return <span style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff }}>Repair</span>;
+
+  return (
+    <span style={{
+      display: "inline-block", fontSize: 10, fontWeight: 800, letterSpacing: "0.06em",
+      padding: "2px 7px", borderRadius: 6,
+      color: cfg.color, background: cfg.tint, border: `1px solid ${cfg.edge}`, fontFamily: ff,
+    }}>
+      {cfg.label}
+    </span>
+  );
+}
+
+const ff = "'Plus Jakarta Sans', sans-serif";
 
 // ─── Live data only ───────────────────────────────────────────────────────────
 
@@ -502,8 +548,21 @@ export default function RepairSales() {
    * shop money. Without it the Discount column stays read-only text — the
    * cashier can see what was taken off, they just cannot take it off.
    */
-  const { can: mayDo } = useMyPermissions();
+  const { can: mayDo, isAdminCashier } = useMyPermissions();
   const mayDiscount = mayDo("canDiscount");
+  // Same gate the database enforces on refund_repair_advance — an ordinary
+  // cashier can see that money is owed back without being able to pay it out.
+  const mayRefundAdvance = isAdminCashier;
+  // ── The refundable invoice ───────────────────────────────────────────────
+  //
+  // A returned job with an advance on it is a bill in reverse, so it goes
+  // through this same screen rather than a side door: same job selection, same
+  // Bill Info, same Payment card, with the direction flipped and one extra
+  // line. What follows is the state that only that mode uses.
+  const [refundNow, setRefundNow]       = useState("");
+  const [refunding, setRefunding]       = useState(false);
+  const [refundError, setRefundError]   = useState<string | null>(null);
+  const [refundDone, setRefundDone]     = useState<string | null>(null);
   // Whose till the invoice came off, for the sales ledger.
   const { profile } = useAuth();
   const { updateJob, jobs, dealers } = useRepair();
@@ -624,6 +683,10 @@ export default function RepairSales() {
         warranty: j.jobWarranty || "NO WARRANTY [NORMAL]",
         advance: j.advancePaid,
         unitPrice: j.estimatedCost,
+        completionType: j.completionType,
+        cashReturnAmount: j.completionType === "Cash Return" ? (j.cashReturnAmount ?? 0) : 0,
+        rejobOf: j.rejobOf ?? null,
+        advanceRefundedOn: j.advanceRefundedOn ?? null,
         // Was hard-coded 0, so the column rendered a dash on every row and
         // sales.discount recorded "none given" whatever happened at the counter.
         // Applied here so grandTotal, totalDiscount, netDue and the invoice all
@@ -652,6 +715,88 @@ export default function RepairSales() {
   );
 
   const selectedRepairs = invoiceable.filter(r => checkedIds.has(r.id));
+
+  // The refund position of whatever is selected, from v_job_refunds — the one
+  // place the refund arithmetic lives, so this screen and the jobs list can
+  // never disagree about what is owed.
+  const { byJob: refundByJob, reload: reloadRefunds } =
+    useJobRefunds(selectedRepairs.map(r => r.id));
+
+  /**
+   * Is this a bill or a bill in reverse?
+   *
+   * Two ways a job can owe money out, and the screen recognises both on its
+   * own rather than sending the cashier to a separate refund process:
+   *
+   *   Cash Return — the technician decided money should go back and said how
+   *   much. That figure is the amount; it already accounts for what the
+   *   customer paid.
+   *
+   *   Return / FOC with an advance — nobody named a figure, so what is owed is
+   *   whatever part of the advance is not covering a charge.
+   *
+   * v_job_refunds decides which, so nothing here has to branch on the reason
+   * and the billing screen cannot disagree with the jobs list about the total.
+   *
+   * One job at a time: the amount returned belongs to a single job, and
+   * splitting one payment across several by any rule this code invented would
+   * be a number nobody could explain to a customer.
+   */
+  const refundCandidates = selectedRepairs.filter(r => {
+    const pos = refundByJob.get(r.id);
+    if (pos) return pos.refundable > 0;
+    // Before the position loads, fall back to what the job itself says, so the
+    // screen does not flash a normal bill at a Cash Return job.
+    return (r.cashReturnAmount ?? 0) > 0
+      || ((r.completionType === "Return" || r.completionType === "FOC") && r.advance > r.unitPrice);
+  });
+  const refundMode      = refundCandidates.length > 0;
+  const refundJob       = refundCandidates.length === 1 ? refundCandidates[0] : null;
+  const tooManyToRefund = refundCandidates.length > 1;
+
+  const refundPos = refundJob ? refundByJob.get(refundJob.id) ?? null : null;
+  const isCashReturn = refundJob?.completionType === "Cash Return";
+
+  const refundSubtotal  = refundJob ? refundJob.unitPrice : 0;
+  const refundAdvance   = refundJob ? refundJob.advance : 0;
+  const refundable      = refundPos
+    ? refundPos.refundable
+    : isCashReturn
+      ? (refundJob?.cashReturnAmount ?? 0)
+      : Math.max(0, refundAdvance - refundSubtotal);
+  const alreadyRefunded = refundPos?.refunded ?? 0;
+  const stillRefundable = Math.max(0, refundable - alreadyRefunded);
+
+  const refundNowDisplay = refundNow === "" ? String(stillRefundable) : refundNow;
+  const refundNowAmt     = Math.max(0, parseFloat(refundNowDisplay) || 0);
+  const refundRemaining  = Math.max(0, stillRefundable - refundNowAmt);
+
+  const canRefund =
+    !!refundJob && refundNowAmt > 0 && refundNowAmt <= stillRefundable
+    && !refunding && mayRefundAdvance;
+
+  const processRefund = async () => {
+    if (!refundJob || !canRefund) return;
+    setRefunding(true);
+    setRefundError(null);
+    try {
+      const cr = await refundRepairAdvance(
+        refundJob.id,
+        refundNowAmt,
+        isCashReturn
+          ? `Cash Return on ${refundJob.id}`
+          : `Advance refunded on returned job ${refundJob.id}`,
+        payMethod,
+      );
+      setRefundDone(cr.ref);
+      setRefundNow("");
+      reloadRefunds();
+    } catch (e) {
+      setRefundError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefunding(false);
+    }
+  };
 
   // Billing calculations
   const lineSubtotal  = selectedRepairs.reduce((s, r) => s + r.unitPrice, 0);
@@ -1092,8 +1237,8 @@ export default function RepairSales() {
                       dates that actually matter to a dealer chasing up a job —
                       when it came in, when it was finished. */}
                   {(isManoMobile
-                    ? ["", "Job ID", "Customer", "Brand / Model", "IMEI No.", "Warranty", "Unit Price", "Discount", "Line Total", "Advance Paid", "Balance"]
-                    : ["", "Job ID", "Brand / Model", "IMEI No.", "Fault", "Job Accepted", "Finished", "Warranty", "Estimate", "Discount", "Line Total", "Balance"]
+                    ? ["", "Job ID", "Job Type", "Customer", "Brand / Model", "IMEI No.", "Warranty", "Unit Price", "Discount", "Line Total", "Advance Paid", "Balance"]
+                    : ["", "Job ID", "Job Type", "Brand / Model", "IMEI No.", "Fault", "Job Accepted", "Finished", "Warranty", "Estimate", "Discount", "Line Total", "Balance"]
                   ).map((h, i) => (
                     <th key={h} style={{ padding: "9px 14px", textAlign: h === "" ? "center" : "left", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.06em", textTransform: "uppercase" as const, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
                       {i === 0 ? (
@@ -1117,6 +1262,9 @@ export default function RepairSales() {
                   // refund, not a balance, and showing it as "− Rs. 200 to
                   // collect" would read as money owed to the shop.
                   const balance   = Math.max(0, lineTotal - r.advance);
+                  // Money out. Shown in brackets wherever a total would be, so
+                  // no extra column is needed to say which way it goes.
+                  const owesBack  = r.cashReturnAmount ?? 0;
                   return (
                     <tr
                       key={r.id}
@@ -1129,6 +1277,7 @@ export default function RepairSales() {
                         <input type="checkbox" checked={checked} onChange={() => toggleCheck(r.id)} onClick={(e) => e.stopPropagation()} style={{ accentColor: "var(--accent)", width: 14, height: 14, cursor: "pointer" }} />
                       </td>
                       <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.id}</span></td>
+                      <td style={{ padding: "11px 14px" }}><JobTypeTag type={r.completionType} /></td>
                       {isManoMobile && (
                         <td style={{ padding: "11px 14px" }}><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.customerName}</p></td>
                       )}
@@ -1172,7 +1321,13 @@ export default function RepairSales() {
                           </span>
                         )}
                       </td>
-                      <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Rs. {lineTotal.toLocaleString()}</span></td>
+                      <td style={{ padding: "11px 14px" }}>
+                        {/* Brackets rather than an extra column: this is the
+                            same total, pointing the other way. */}
+                        <span style={{ fontSize: 12, fontWeight: 700, color: owesBack > 0 ? "#60a5fa" : "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                          {owesBack > 0 ? `(Rs. ${owesBack.toLocaleString()})` : `Rs. ${lineTotal.toLocaleString()}`}
+                        </span>
+                      </td>
                       {isManoMobile && (
                         <td style={{ padding: "11px 14px" }}>
                           <span style={{ fontSize: 12, color: r.advance > 0 ? "#4ade80" : "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
@@ -1181,8 +1336,8 @@ export default function RepairSales() {
                         </td>
                       )}
                       <td style={{ padding: "11px 14px" }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: balance > 0 ? "var(--text-primary)" : "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                          {balance > 0 ? `Rs. ${balance.toLocaleString()}` : "Settled"}
+                        <span style={{ fontSize: 12, fontWeight: 700, color: owesBack > 0 ? "#60a5fa" : balance > 0 ? "var(--text-primary)" : "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                          {owesBack > 0 ? `(Rs. ${owesBack.toLocaleString()})` : balance > 0 ? `Rs. ${balance.toLocaleString()}` : "Settled"}
                         </span>
                       </td>
                     </tr>
@@ -1228,6 +1383,72 @@ export default function RepairSales() {
                 ))}
               </div>
 
+              {/* A returned job with an advance on it is money going out, so
+                  the whole card flips rather than the cashier being sent to a
+                  separate refund screen. Same job selection, same card, one
+                  extra line and the opposite direction. */}
+              {refundMode ? (
+                <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                    <RotateCcw size={12} style={{ color: "var(--accent)" }} />
+                    <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.06em", color: "var(--accent)", fontFamily: ff }}>
+                      REFUNDABLE INVOICE
+                    </span>
+                  </div>
+
+                  {tooManyToRefund ? (
+                    <p style={{ fontSize: 12, color: "#fbbf24", lineHeight: 1.55, fontFamily: ff, padding: "9px 11px", borderRadius: 8, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)" }}>
+                      {refundCandidates.length} returned jobs with advances are selected. Refund one at a
+                      time — Other Charges and the amount returned belong to a single job, and splitting
+                      one deduction across several would be a figure nobody could explain to a customer.
+                    </p>
+                  ) : (
+                    <>
+                      {/* What the money is, said in the terms the job used.
+                          A Cash Return carries a figure the technician set; a
+                          returned job with an advance carries the arithmetic
+                          that produced one. Showing both framings on every
+                          refund would mean half of it was always noise. */}
+                      {(isCashReturn
+                        ? [
+                            { label: "Charged for this repair", value: fmtRs(refundSubtotal), color: "var(--text-muted)" },
+                            { label: "Cash Return Amount", value: fmtRs(refundable), color: "#60a5fa" },
+                          ]
+                        : [
+                            { label: "Subtotal",     value: fmtRs(refundSubtotal), color: "var(--text-muted)" },
+                            { label: "Advance Paid", value: `+ ${fmtRs(refundAdvance)}`, color: "#4ade80" },
+                          ]
+                      ).map(row => (
+                        <div key={row.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, fontFamily: ff }}>
+                          <span style={{ color: "var(--text-muted)" }}>{row.label}</span>
+                          <span style={{ fontWeight: 600, color: row.color }}>{row.value}</span>
+                        </div>
+                      ))}
+
+                      {refundJob?.rejobOf && (
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12, fontFamily: ff }}>
+                          <span style={{ color: "var(--text-muted)" }}>Re-job of</span>
+                          <span style={{ fontWeight: 600, color: "var(--text-secondary)" }}>{refundJob.rejobOf}</span>
+                        </div>
+                      )}
+
+                      {alreadyRefunded > 0 && (
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, fontFamily: ff }}>
+                          <span style={{ color: "var(--text-muted)" }}>Already Refunded</span>
+                          <span style={{ fontWeight: 600, color: "var(--text-secondary)" }}>− {fmtRs(alreadyRefunded)}</span>
+                        </div>
+                      )}
+
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 16, fontWeight: 800, fontFamily: ff, paddingTop: 10, borderTop: "1px solid var(--border)", marginTop: 8 }}>
+                        <span style={{ color: "var(--text-secondary)" }}>
+                          {alreadyRefunded > 0 ? "Still to Refund" : "Amount to be Refunded"}
+                        </span>
+                        <span style={{ color: "var(--accent)" }}>{fmtRs(stillRefundable)}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
               <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                 {[
                   { label: "Subtotal",        value: fmtRs(lineSubtotal), color: "var(--text-primary)" },
@@ -1290,6 +1511,7 @@ export default function RepairSales() {
                   <span style={{ color: "var(--text-primary)" }}>Rs. {netDue.toLocaleString()}</span>
                 </div>
               </div>
+              )}
             </div>
 
             {/* ── Payment ── */}
@@ -1330,7 +1552,71 @@ export default function RepairSales() {
               )}
 
 
-                {/* Amount received now — editable */}
+                {/* Money out rather than money in. Same card, same method
+                    buttons — the method is how the cash physically moves, and
+                    that question is the same in both directions. */}
+                {refundMode ? (
+                  refundJob && (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 13, fontFamily: ff, marginTop: 4 }}>
+                        <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>Amount Refunded Now</span>
+                        <input
+                          type="number" min={0} max={stillRefundable}
+                          value={refundNowDisplay}
+                          onChange={e => setRefundNow(e.target.value)}
+                          style={{ width: 120, padding: "7px 10px", borderRadius: 7, border: "1px solid rgba(96,165,250,0.5)", background: "var(--bg-primary)", color: "var(--text-primary)", fontSize: 14, fontWeight: 700, outline: "none", textAlign: "right", fontFamily: ff }}
+                        />
+                      </div>
+
+                      {/* A part-payment leaves a debt the shop owes the
+                          customer, and it stays visible until it is cleared.
+                          Nothing about handing back Rs. 6,000 of Rs. 10,000
+                          settles the other Rs. 4,000. */}
+                      {refundNowAmt > 0 && refundRemaining > 0 && (
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "9px 11px", borderRadius: 8, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)", marginTop: 6 }}>
+                          <span style={{ fontSize: 12.5, color: "var(--text-secondary)", fontFamily: ff }}>Remaining Refund Balance</span>
+                          <span style={{ fontSize: 13, fontWeight: 800, color: "#fbbf24", fontFamily: ff }}>{fmtRs(refundRemaining)}</span>
+                        </div>
+                      )}
+
+                      {refundNowAmt > stillRefundable && (
+                        <p style={{ fontSize: 11.5, color: "#f87171", fontFamily: ff, lineHeight: 1.5, marginTop: 6 }}>
+                          Only {fmtRs(stillRefundable)} is still refundable on {refundJob.id}.
+                        </p>
+                      )}
+                      {refundError && (
+                        <p style={{ fontSize: 11.5, color: "#f87171", fontFamily: ff, lineHeight: 1.5, marginTop: 6 }}>{refundError}</p>
+                      )}
+                      {refundDone && (
+                        <p style={{ fontSize: 11.5, color: "#4ade80", fontFamily: ff, lineHeight: 1.5, marginTop: 6 }}>
+                          Refund recorded · {refundDone}. The advance stays on the job as money received.
+                        </p>
+                      )}
+
+                      {!mayRefundAdvance && (
+                        <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.55, marginTop: 6 }}>
+                          Paying a refund out needs an admin cashier. An Admin can grant it under
+                          Permissions → Cashiers.
+                        </p>
+                      )}
+
+                      <button
+                        onClick={processRefund}
+                        disabled={!canRefund}
+                        style={{
+                          marginTop: 10, width: "100%", minHeight: 42, borderRadius: 9,
+                          fontSize: 13, fontWeight: 700, fontFamily: ff,
+                          border: "1px solid var(--accent)", background: "var(--accent)",
+                          color: "var(--accent-fg)",
+                          cursor: canRefund ? "pointer" : "not-allowed",
+                          opacity: canRefund ? 1 : 0.45,
+                        }}
+                      >
+                        {refunding ? "Recording…" : `Process Refund · ${fmtRs(refundNowAmt)}`}
+                      </button>
+                    </>
+                  )
+                ) : (
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4 }}>
                   <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>Amount Received Now</span>
                   <input
@@ -1340,11 +1626,12 @@ export default function RepairSales() {
                     style={{ width: 120, padding: "7px 10px", borderRadius: 7, border: `1px solid ${isCredit ? "rgba(251,191,36,0.5)" : "rgba(74,222,128,0.4)"}`, background: "var(--bg-primary)", color: "var(--text-primary)", fontSize: 14, fontWeight: 700, outline: "none", textAlign: "right", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
                   />
                 </div>
+                )}
 
                 {/* Offered only when there is something left to forgive, and only
                     to somebody trusted to take money off a bill — it is the same
                     decision as a discount, made after billing instead of before. */}
-                {isCredit && mayDiscount && (
+                {!refundMode && isCredit && mayDiscount && (
                   <label style={{
                     display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer",
                     marginTop: 8, padding: "8px 10px", borderRadius: 8,
@@ -1368,6 +1655,7 @@ export default function RepairSales() {
                   </label>
                 )}
 
+                {!refundMode && (
                 <div style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 8 }}>
                   {isCredit && writeOffBalance ? (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)" }}>
@@ -1392,8 +1680,9 @@ export default function RepairSales() {
                     </div>
                   )}
                 </div>
+                )}
 
-                {isCredit && !writeOffBalance && (
+                {!refundMode && isCredit && !writeOffBalance && (
                   <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 8, lineHeight: 1.55 }}>
                     {isManoMobile
                       ? "Due amount will be credited to the selected customer's credit profile."
@@ -1668,6 +1957,7 @@ export default function RepairSales() {
           </button>
         </div>
       )}
+
     </div>
   );
 }

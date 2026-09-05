@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import {
   Search, CreditCard, AlertCircle, CheckCircle,
   X, DollarSign, Wallet, Store,
-  History, Plus, Sparkles, Loader2, Undo2, FileText, ChevronDown,
+  History, Plus, Sparkles, Loader2, Undo2, RotateCcw, FileText, ChevronDown,
 } from "lucide-react";
 import {
   useCreditAccounts, useCreditEntries, openCreditAccount, recordPayment, writeOff,
@@ -32,6 +32,7 @@ const SOURCE_LABEL: Record<TxCategory, string> = {
 import { useMyPermissions } from "@/lib/settings/staffRules";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import { useToast } from "@/lib/ui/toast";
+import { recordDealerCashReturn } from "@/lib/accounts/cashReturns";
 
 /**
  * Credit accounts — who owes the shop money.
@@ -128,6 +129,140 @@ function ModalHead({ title, sub, onClose }: { title: string; sub: string; onClos
         <X size={14} />
       </button>
     </div>
+  );
+}
+
+// ─── Cash Return ──────────────────────────────────────────────────────────────
+
+/**
+ * Return cash to a dealer.
+ *
+ * Separate from Record Payment because they are opposite movements that happen
+ * to push the balance the same way. A payment is money in; this is money out.
+ * On one screen the difference is a word, and in the accounts it is the whole
+ * difference between takings that are right and takings overstated by twice
+ * the amount.
+ *
+ * The job is asked for rather than optional-in-passing: it is what turns
+ * "balance reduced by 8,500" on the dealer's statement into "Cash Return —
+ * RM-041", which is the difference between a statement they accept and one
+ * they query.
+ */
+function CashReturnModal({ account, onClose, onDone }: {
+  account: CreditAccount;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const { jobs } = useRepair();
+  const [amount, setAmount] = useState("");
+  const [jobId, setJobId] = useState("");
+  const [method, setMethod] = useState("Cash");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Only this dealer's jobs, and only ones actually charged to the account —
+  // a job that was paid at the counter has no charge here to return.
+  const chargedJobs = jobs
+    .filter(j => account.dealerId != null && j.dealerId === account.dealerId)
+    .slice(0, 200);
+
+  const amt = parseFloat(amount) || 0;
+  const canSave = amt > 0 && reason.trim() !== "" && !busy;
+  const newBal = account.balance - amt;
+
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      const cr = await recordDealerCashReturn(account.id, amt, reason.trim(), jobId || null, method);
+      toast.success(`${rs(amt)} returned to ${account.name} · ${cr.ref}`);
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <ModalHead title="Cash Return" sub={`${account.name} · ${account.holderKind}`} onClose={onClose} />
+
+      <div style={{ margin: "14px 18px 0", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+        {[
+          { label: "Total Charged",  val: rs(account.totalCharged),  color: "var(--text-primary)" },
+          { label: "Already Returned", val: rs(account.totalRefunded), color: "var(--accent)" },
+          { label: "Balance Due",    val: rs(account.balance),       color: "var(--danger)" },
+        ].map(r => (
+          <div key={r.label} style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", borderRadius: 9, padding: "9px 12px", textAlign: "center" }}>
+            <p style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase", fontFamily: ff, marginBottom: 4 }}>{r.label}</p>
+            <p style={{ fontSize: 13, fontWeight: 700, color: r.color }}>{r.val}</p>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+        <div>
+          <label style={labelSt}>Amount Returned (Rs.)</label>
+          <input
+            type="number" min={1} step="0.01" value={amount} autoFocus
+            onChange={e => setAmount(e.target.value)}
+            placeholder="0.00"
+            style={inputSt}
+          />
+          {amt > 0 && (
+            <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff, marginTop: 5 }}>
+              Balance after this return: <strong style={{ color: newBal < 0 ? "var(--warning)" : "var(--text-primary)" }}>{rs(newBal)}</strong>
+              {newBal < 0 && " — the account would be in credit, which is allowed but worth checking."}
+            </p>
+          )}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div>
+            <label style={labelSt}>Against Job</label>
+            <select value={jobId} onChange={e => setJobId(e.target.value)} style={{ ...inputSt, cursor: "pointer" }}>
+              <option value="">Not job-specific</option>
+              {chargedJobs.map(j => (
+                <option key={j.id} value={j.id}>
+                  {j.id} — {[j.brand, j.model].filter(Boolean).join(" ")}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={labelSt}>Paid Back By</label>
+            <select value={method} onChange={e => setMethod(e.target.value)} style={{ ...inputSt, cursor: "pointer" }}>
+              {["Cash", "Bank Transfer", "Cheque", "Card reversal"].map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label style={labelSt}>Reason</label>
+          <input
+            type="text" value={reason} onChange={e => setReason(e.target.value)}
+            placeholder="e.g. Device unrepairable, returned to dealer"
+            style={inputSt}
+          />
+          <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, marginTop: 5 }}>
+            This goes on the dealer&apos;s statement next to the reduced balance, so write what they would need to read.
+          </p>
+        </div>
+
+        {error && (
+          <p style={{ fontSize: 12, color: "var(--danger)", fontFamily: ff, lineHeight: 1.5 }}>{error}</p>
+        )}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "12px 18px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
+        <button onClick={onClose} style={{ padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: ff }}>Cancel</button>
+        <button onClick={save} disabled={!canSave}
+          style={{ padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--accent-fg)", cursor: canSave ? "pointer" : "not-allowed", opacity: canSave ? 1 : 0.45, fontFamily: ff }}>
+          {busy ? "Recording…" : "Record Cash Return"}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -365,6 +500,11 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
     "Charge":    { color: "var(--danger)",  tint: "rgba(248,113,113,0.10)", edge: "rgba(248,113,113,0.30)", icon: CreditCard, sign: "+" },
     "Payment":   { color: "var(--success)", tint: "rgba(52,211,153,0.10)",  edge: "rgba(52,211,153,0.30)",  icon: Wallet,     sign: "−" },
     "Write-off": { color: "var(--warning)", tint: "rgba(251,191,36,0.10)",  edge: "rgba(251,191,36,0.30)",  icon: Undo2,      sign: "−" },
+    // Deliberately not green. A refund reduces the balance the same way a
+    // payment does, but nothing was collected — reading it as takings is the
+    // mistake this whole distinction exists to prevent, and colour is the
+    // first thing anybody reads on this list.
+    "Refund":    { color: "var(--accent)",  tint: "rgba(96,165,250,0.10)",  edge: "rgba(96,165,250,0.30)",  icon: RotateCcw,  sign: "−" },
   };
 
   return (
@@ -633,6 +773,7 @@ export default function CreditCustomers() {
   // rest of the table off screen and the point is to compare against it.
   const [openHistory, setOpenHistory] = useState<string | null>(null);
   const [offTarget, setOffTarget] = useState<CreditAccount | null>(null);
+  const [retTarget, setRetTarget] = useState<CreditAccount | null>(null);
   const [showAdd, setShowAdd] = useState(false);
 
   const q = search.trim().toLowerCase();
@@ -657,7 +798,7 @@ export default function CreditCustomers() {
     { label: "Over limit",  value: String(overLimit),       tone: overLimit > 0 ? TONE.danger : TONE.success },
   ];
 
-  const refresh = () => { void reload(); setPayTarget(null); setOffTarget(null); setShowAdd(false); };
+  const refresh = () => { void reload(); setPayTarget(null); setOffTarget(null); setRetTarget(null); setShowAdd(false); };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, flex: 1, minHeight: 0 }}>
@@ -861,6 +1002,14 @@ export default function CreditCustomers() {
                           <DollarSign size={11} strokeWidth={2.4} />Pay
                         </button>
                       )}
+                      {/* Dealers only. A walk-in's advance is refunded from
+                          the job it was taken on, where the amount is known
+                          and can be capped — not from a balance screen. */}
+                      {a.holderKind === "Dealer" && isAdminCashier && (
+                        <button onClick={() => setRetTarget(a)} title="Record a cash return" style={pill(TONE.accent)}>
+                          <RotateCcw size={12} />
+                        </button>
+                      )}
                       {a.balance > 0 && isAdminCashier && (
                         <button onClick={() => setOffTarget(a)} title="Write off as bad debt" style={pill(TONE.warning)}>
                           <Undo2 size={12} />
@@ -886,6 +1035,7 @@ export default function CreditCustomers() {
 
       {payTarget  && <RecordPaymentModal account={payTarget}  onClose={() => setPayTarget(null)}  onDone={refresh} />}
       {offTarget  && <WriteOffModal      account={offTarget}  onClose={() => setOffTarget(null)}  onDone={refresh} />}
+      {retTarget  && <CashReturnModal    account={retTarget}  onClose={() => setRetTarget(null)}  onDone={refresh} />}
       {showAdd    && <OpenAccountModal   onClose={() => setShowAdd(false)} onDone={refresh} />}
     </div>
   );

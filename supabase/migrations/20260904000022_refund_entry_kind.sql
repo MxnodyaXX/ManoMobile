@@ -1,0 +1,36 @@
+-- ============================================================================
+-- Mano Mobile — money going back out
+--
+-- Every financial movement in this system so far moves one way. A repair is
+-- charged, a sale is paid, a balance is written off. Nothing records the shop
+-- handing money back, and two ordinary situations need exactly that:
+--
+--   A customer pays Rs. 5,000 in advance on a Rs. 10,000 repair. The phone
+--   turns out to be unrepairable, so the handset and the Rs. 5,000 both go
+--   back. Today the only way to represent that is to edit the advance down to
+--   zero, which erases the fact that Rs. 5,000 was ever received — the cash
+--   drawer was short by five thousand for a day and the books would not say why.
+--
+--   A dealer's job is billed to their account and then returned. The charge has
+--   to come off their balance, and the report has to say which job it was for.
+--   Deleting the charge would make the balance right and the history wrong.
+--
+-- ── Refund is its own kind ──────────────────────────────────────────────────
+-- Not a negative Charge, and not a Payment.
+--
+-- A negative Charge would break the "amount is always positive, the kind says
+-- which way it moves" rule the entries table is built on, and every sum that
+-- filters on kind would quietly start meaning something else.
+--
+-- A Payment is money the shop RECEIVED. Folding a refund into it would put
+-- money the shop paid out into total_paid, and the takings would be overstated
+-- by twice the refund — once for not deducting it, once for adding it as
+-- income. That is the single most expensive mistake available here.
+--
+-- ── Why this is its own migration file ──────────────────────────────────────
+-- Postgres will not let a new enum value be used in the same transaction that
+-- added it. The table, the functions and the view that all reference 'Refund'
+-- are therefore in 20260904000023, which runs after this has committed.
+-- ============================================================================
+
+alter type credit_entry_kind add value if not exists 'Refund';

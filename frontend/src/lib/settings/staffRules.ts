@@ -260,6 +260,9 @@ export function mergeRules(shop: WorkRules, override?: StaffRuleOverride | null)
     allowMultipleActiveJobs: override.allowMultipleActiveJobs ?? shop.allowMultipleActiveJobs,
     maxActiveJobs: override.maxActiveJobs ?? shop.maxActiveJobs,
     requireStartBeforeFinish: override.requireStartBeforeFinish ?? shop.requireStartBeforeFinish,
+    // No per-person override: whether the shop times its work is a decision
+    // about the shop, not about one technician.
+    trackJobTime: shop.trackJobTime,
     canClaimUnassigned: override.canClaimUnassigned,
     canTransferToAgent: override.canTransferToAgent,
     canUsePartsWithoutApproval: override.canUsePartsWithoutApproval,

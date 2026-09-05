@@ -19,7 +19,13 @@ import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/c
 
 export type HolderKind = "Customer" | "Dealer";
 export type CreditStatus = "Active" | "Overdue" | "Settled";
-export type EntryKind = "Charge" | "Payment" | "Write-off";
+/**
+ * Refund is money the shop PAID OUT — a returned advance, or a dealer's job
+ * reversed off their account. It reduces the balance like a payment does and
+ * is counted separately from one, because a payment is money received and
+ * folding the two together would overstate the takings by twice the refund.
+ */
+export type EntryKind = "Charge" | "Payment" | "Write-off" | "Refund";
 
 export interface CreditAccount {
   id: string;
@@ -39,6 +45,8 @@ export interface CreditAccount {
   totalCharged: number;
   totalPaid: number;
   totalWrittenOff: number;
+  /** Handed back, not received. Never part of totalPaid. */
+  totalRefunded: number;
   balance: number;
   firstChargeOn: string | null;
   lastPaymentOn: string | null;
@@ -97,6 +105,7 @@ const toAccount = (r: AccountRow): CreditAccount => ({
   totalCharged: num(r.total_charged),
   totalPaid: num(r.total_paid),
   totalWrittenOff: num(r.total_written_off),
+  totalRefunded: num(r.total_refunded),
   balance: num(r.balance),
   firstChargeOn: (r.first_charge_on as string | null) ?? null,
   lastPaymentOn: (r.last_payment_on as string | null) ?? null,

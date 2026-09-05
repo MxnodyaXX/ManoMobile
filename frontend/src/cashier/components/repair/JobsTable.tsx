@@ -24,10 +24,11 @@ import {
   Search, Filter, ChevronDown, MoreHorizontal,
   CheckCircle, Clock, AlertCircle, XCircle, Wrench,
   X, CheckSquare, Send, Printer, ShieldCheck, CreditCard,
-  Truck, Ban, FileText, Package, Tag, Info, Save, Pencil, BellRing,
+  Truck, Ban, FileText, Package, Tag, Info, Save, Pencil, BellRing, RotateCcw,
 } from "lucide-react";
 import { notifyJobEvent } from "@/lib/sms/notify";
 import { useToast } from "@/lib/ui/toast";
+import { useJobCashReturns, refundRepairAdvance } from "@/lib/accounts/cashReturns";
 
 interface FinishJobData {
   actionTaken: string;
@@ -110,6 +111,50 @@ interface ColSpec {
 const muted = { fontSize: 11.5, color: "var(--text-muted)" } as const;
 const plain = { fontSize: 12.5, color: "var(--text-primary)" } as const;
 
+/**
+ * A job nobody is being billed for.
+ *
+ * Return: the device came back unrepaired. FOC: the work was done and not
+ * charged for. Both end with a final bill of zero, and "Rs. 0" in a money
+ * column is the one thing that does not distinguish them from each other or
+ * from a job somebody simply has not priced yet.
+ */
+const NOT_CHARGED: Record<string, { label: string; color: string; tint: string; edge: string }> = {
+  Return: { label: "RETURN", color: "#f87171", tint: "rgba(248,113,113,0.10)", edge: "rgba(248,113,113,0.30)" },
+  FOC:    { label: "FOC",    color: "#a78bfa", tint: "rgba(167,139,250,0.10)", edge: "rgba(167,139,250,0.30)" },
+  // Its own blue, distinct from Return's red and FOC's violet, because it is
+  // the only one of the three where the shop owes money out.
+  "Cash Return": { label: "CASH RETURN", color: "#60a5fa", tint: "rgba(96,165,250,0.10)", edge: "rgba(96,165,250,0.30)" },
+};
+
+/** What the shop owes back on this job, or 0. */
+const cashReturnOf = (j: RepairJob) =>
+  j.completionType === "Cash Return" ? (j.cashReturnAmount ?? 0) : 0;
+
+const isNotCharged = (j: RepairJob) => !!j.completionType && j.completionType in NOT_CHARGED;
+
+/** The badge that replaces a money figure, or null when there is a real one. */
+function outcomeBadge(j: RepairJob) {
+  const cfg = j.completionType ? NOT_CHARGED[j.completionType] : undefined;
+  if (!cfg) return null;
+  return (
+    <span
+      title={
+        cfg.label === "CASH RETURN" ? "Returned and money owed back to the customer"
+          : cfg.label === "RETURN" ? "Returned unrepaired — nothing charged"
+          : "Free of charge — nothing billed"
+      }
+      style={{
+        display: "inline-block", fontSize: 10, fontWeight: 800, letterSpacing: "0.06em",
+        padding: "2px 7px", borderRadius: 6,
+        color: cfg.color, background: cfg.tint, border: `1px solid ${cfg.edge}`,
+      }}
+    >
+      {cfg.label}
+    </span>
+  );
+}
+
 const COLUMNS: Record<ColId, ColSpec> = {
   jobId: {
     label: "Job ID",
@@ -166,6 +211,7 @@ const COLUMNS: Record<ColId, ColSpec> = {
     render: j => <span style={{ fontSize: 11, fontWeight: 600, color: priorityColor[j.priority] }}>● {j.priority}</span>,
   },
   estCost: { label: "Est. Cost", align: "right", render: j => <span style={plain}>{rs(j.estimatedCost)}</span>, sum: j => j.estimatedCost },
+
   // Once a job is completed, estimatedCost holds the FINAL charge — the quote
   // survives in originalEstimate, so the two can be shown side by side.
   quotedCost: {
@@ -189,25 +235,80 @@ const COLUMNS: Record<ColId, ColSpec> = {
   finalBill: {
     label: "Final Bill",
     align: "right",
-    render: j => <span style={{ ...plain, fontWeight: 700 }}>{rs(j.estimatedCost)}</span>,
-    sum: j => j.estimatedCost,
+    render: j => {
+      // Brackets, the accounting convention for a negative, rather than a
+      // badge: this IS the bill, it is simply pointing the other way. A row
+      // reading "(Rs. 5,000)" says money leaves the shop without needing a
+      // second column to explain it.
+      const back = cashReturnOf(j);
+      if (back > 0) {
+        return (
+          <span title="Owed back to the customer" style={{ fontSize: 12.5, fontWeight: 700, color: "#60a5fa", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            ({rs(back)})
+          </span>
+        );
+      }
+      return outcomeBadge(j) ?? <span style={{ ...plain, fontWeight: 700 }}>{rs(j.estimatedCost)}</span>;
+    },
+    // Money out nets off money in, so a day's column total is what the shop
+    // actually billed rather than the gross of two opposite movements.
+    sum: j => (cashReturnOf(j) > 0 ? -cashReturnOf(j) : j.estimatedCost),
   },
   advance: {
     label: "Advance Paid",
     align: "right",
-    render: j => j.advancePaid > 0
-      ? <span style={{ fontSize: 12, fontWeight: 600, color: "#4ade80" }}>{rs(j.advancePaid)}</span>
-      : <span style={{ fontSize: 12, color: "var(--text-muted)" }}>—</span>,
-    sum: j => j.advancePaid,
+    render: j => j.advancePaid <= 0
+      ? <span style={{ fontSize: 12, color: "var(--text-muted)" }}>—</span>
+      // Struck through once it has gone back. The figure stays on screen
+      // because it is still true that the money was taken — what changed is
+      // that the shop no longer holds it, and a row that just showed a smaller
+      // number would hide that anything happened at all.
+      : j.advanceRefundedOn
+        ? <span title={`Advance refunded on ${fmtDate(j.advanceRefundedOn)}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, justifyContent: "flex-end" }}>
+            <span style={{ fontSize: 12, color: "var(--text-muted)", textDecoration: "line-through" }}>{rs(j.advancePaid)}</span>
+            <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.04em", padding: "1px 5px", borderRadius: 5, color: "#60a5fa", background: "rgba(96,165,250,0.10)", border: "1px solid rgba(96,165,250,0.30)" }}>REFUNDED</span>
+          </span>
+        : <span style={{ fontSize: 12, fontWeight: 600, color: "#4ade80" }}>{rs(j.advancePaid)}</span>,
+    // The refunded ones no longer count towards money the shop is holding.
+    sum: j => (j.advanceRefundedOn ? 0 : j.advancePaid),
   },
   balance: {
     label: "Balance",
     align: "right",
     render: j => {
+      const back = cashReturnOf(j);
+      if (back > 0) {
+        return (
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: "#60a5fa", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            ({rs(back)})
+          </span>
+        );
+      }
+      const badge = outcomeBadge(j);
+      if (badge) {
+        // A returned or free-of-charge job is not owed anything, so the number
+        // is the wrong thing to print. What IS still outstanding is an advance
+        // the shop is holding for work it is not doing — which is money owed
+        // the other way, and the one fact this row was not saying.
+        const owedBack = j.advancePaid > 0 && !j.advanceRefundedOn ? j.advancePaid : 0;
+        return (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+            {badge}
+            {owedBack > 0 && (
+              <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fbbf24" }} title="Advance taken on a job that is not being charged for">
+                {rs(owedBack)} to refund
+              </span>
+            )}
+          </div>
+        );
+      }
       const b = j.estimatedCost - j.advancePaid;
       return <span style={{ fontSize: 12.5, fontWeight: 600, color: b > 0 ? "#f87171" : "#4ade80" }}>{rs(b)}</span>;
     },
-    sum: j => j.estimatedCost - j.advancePaid,
+    // A return owes nothing, so it contributes nothing to the column total.
+    // Left in as a plain subtraction it contributed MINUS the advance, quietly
+    // reducing the outstanding figure for the whole shop.
+    sum: j => (cashReturnOf(j) > 0 ? -cashReturnOf(j) : isNotCharged(j) ? 0 : j.estimatedCost - j.advancePaid),
   },
   estCompletion: { label: "Est. Completion", render: j => <span style={muted}>{fmtDate(j.estimatedCompletion)}</span> },
   /** Quote with the date it is promised for — one column, two lines. */
@@ -1226,6 +1327,11 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
           </div>
         </div>
 
+        {/* The money that came in and, where it applies, the money that went
+            back. Directly under the header because on a returned device it is
+            the first thing anybody opening the job needs to know. */}
+        <AdvanceRefundPanel job={job} mayRefund={mayCancelAny} />
+
         {/* How to unlock it, and what it means once unlocked. Shown only to
             somebody who can actually do it — telling everyone else about a
             shortcut that does nothing is worse than saying nothing. */}
@@ -1432,6 +1538,163 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
       </div>
     </div>,
     document.body
+  );
+}
+
+// ─── Advance Refund ───────────────────────────────────────────────────────────
+
+/**
+ * Giving an intake advance back.
+ *
+ * The case this exists for: Rs. 5,000 taken at the counter against a Rs. 10,000
+ * estimate, the phone turns out to be unrepairable, and both the handset and
+ * the money go back.
+ *
+ * The advance itself is never edited down. Rs. 5,000 was received — that stays
+ * true after Rs. 5,000 is handed back, and the customer is holding a receipt
+ * that says so. What appears here instead is the second half of the story: the
+ * refund, its reason, its date and its CR- reference, sitting beside the
+ * original amount so the pair reads as the transaction trail it is.
+ *
+ * Writing it is one database call (see refund_repair_advance) because it is
+ * three linked facts — the money out, the flag on the job, and the reversal of
+ * any credit charge the job raised. Done from here one at a time, a failure
+ * halfway leaves the shop having paid out money it has no record of.
+ */
+function AdvanceRefundPanel({ job, mayRefund }: { job: RepairJob; mayRefund: boolean }) {
+  const { returns, reload } = useJobCashReturns(job.id);
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [method, setMethod] = useState("Cash");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refund = returns.find(r => r.kind === "Advance Refund") ?? null;
+  const amt = parseFloat(amount) || 0;
+  // What the database will actually allow back: only the part of the advance
+  // that is not covering a charge. On a normal repair that is nothing — the
+  // advance comes off the bill instead.
+  const refundable = Math.max(0, job.advancePaid - job.estimatedCost);
+  const canSave = amt > 0 && amt <= refundable && reason.trim() !== "" && !busy;
+
+  // Nothing was taken, so there is nothing to give back and no panel to show.
+  if (job.advancePaid <= 0 && !refund) return null;
+
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      const cr = await refundRepairAdvance(job.id, amt, reason.trim(), method);
+      toast.success(`Rs. ${amt.toLocaleString()} refunded · ${cr.ref}`);
+      setOpen(false);
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const boxSt: React.CSSProperties = {
+    padding: "7px 10px", borderRadius: 7, border: "1px solid var(--border)",
+    background: "var(--bg-card)", color: "var(--text-primary)", fontSize: 12,
+    fontFamily: "'Plus Jakarta Sans', sans-serif", width: "100%", boxSizing: "border-box", outline: "none",
+  };
+
+  if (refund) {
+    return (
+      <div style={{
+        display: "flex", alignItems: "flex-start", gap: 9, padding: "9px 20px",
+        borderBottom: "1px solid var(--border)",
+        background: "rgba(96,165,250,0.08)",
+      }}>
+        <RotateCcw size={12} style={{ color: "var(--accent)", flexShrink: 0, marginTop: 2 }} />
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.6 }}>
+          <strong style={{ color: "var(--accent)" }}>Advance refunded.</strong>{" "}
+          Rs. {refund.amount.toLocaleString()} returned on{" "}
+          {new Date(refund.returnedOn).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+          {refund.method ? ` by ${refund.method}` : ""} · <strong>{refund.ref}</strong>
+          <br />
+          <span style={{ color: "var(--text-muted)" }}>Reason: {refund.reason}</span>
+          {/* Both halves, deliberately. The advance is not edited down, so the
+              trail reads: this much came in, this much went back. */}
+          <br />
+          <span style={{ color: "var(--text-muted)" }}>
+            Rs. {job.advancePaid.toLocaleString()} was received at intake and Rs. {refund.amount.toLocaleString()} returned.
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // Only a job that is not being charged for owes its advance back. Elsewhere
+  // the advance settles the bill, and the database refuses the refund anyway.
+  if (!mayRefund || refundable <= 0) return null;
+
+  return (
+    <div style={{ padding: "9px 20px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
+      {!open ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+          <RotateCcw size={11} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+          <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            Rs. {job.advancePaid.toLocaleString()} was taken in advance on this job.
+          </p>
+          <button
+            onClick={() => { setAmount(String(refundable)); setOpen(true); }}
+            style={{
+              marginLeft: "auto", display: "flex", alignItems: "center", gap: 5,
+              padding: "5px 11px", borderRadius: 7, fontSize: 11.5, fontWeight: 600,
+              border: "1px solid var(--accent)", background: "transparent",
+              color: "var(--accent)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif",
+            }}
+          >
+            <RotateCcw size={11} /> Refund advance
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "140px 160px 1fr", gap: 8 }}>
+            <div>
+              <label style={labelSt}>Amount (Rs.)</label>
+              <input type="number" min={1} max={refundable} step="0.01" autoFocus
+                value={amount} onChange={e => setAmount(e.target.value)} style={boxSt} />
+            </div>
+            <div>
+              <label style={labelSt}>Paid back by</label>
+              <select value={method} onChange={e => setMethod(e.target.value)} style={{ ...boxSt, cursor: "pointer" }}>
+                {["Cash", "Bank Transfer", "Cheque", "Card reversal"].map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={labelSt}>Reason</label>
+              <input value={reason} onChange={e => setReason(e.target.value)}
+                placeholder="e.g. Device unrepairable, returned to customer" style={boxSt} />
+            </div>
+          </div>
+
+          {amt > refundable && (
+            <p style={{ fontSize: 11, color: "#f87171", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              Only Rs. {refundable.toLocaleString()} is refundable — the rest of the advance covers the Rs. {job.estimatedCost.toLocaleString()} charged.
+            </p>
+          )}
+          {error && (
+            <p style={{ fontSize: 11.5, color: "#f87171", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>{error}</p>
+          )}
+
+          <div style={{ display: "flex", gap: 7, justifyContent: "flex-end" }}>
+            <button onClick={() => { setOpen(false); setError(null); }}
+              style={{ padding: "6px 13px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              Cancel
+            </button>
+            <button onClick={save} disabled={!canSave}
+              style={{ padding: "6px 13px", borderRadius: 7, fontSize: 11.5, fontWeight: 700, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--accent-fg)", cursor: canSave ? "pointer" : "not-allowed", opacity: canSave ? 1 : 0.45, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              {busy ? "Recording…" : "Record refund"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2171,9 +2434,18 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
                     {cols.map(id => (
                       <td key={id} style={{ padding: "13px 14px", textAlign: COLUMNS[id].align ?? "left", whiteSpace: "nowrap", verticalAlign: "top" }}>
                         {id === "status" ? (
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, background: meta.bg, border: `1px solid ${meta.border}`, color: meta.color, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
-                            <StatusIcon size={9} strokeWidth={2.5} />{label}
-                          </span>
+                          // The outcome rides with the status rather than only
+                          // in the money columns: "Non-Issued" is a stage, and
+                          // it says nothing about whether the phone was fixed,
+                          // returned, or done for free. Every view carries the
+                          // status column, so this is the one place the answer
+                          // is always visible.
+                          <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, background: meta.bg, border: `1px solid ${meta.border}`, color: meta.color, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
+                              <StatusIcon size={9} strokeWidth={2.5} />{label}
+                            </span>
+                            {outcomeBadge(job)}
+                          </div>
                         ) : COLUMNS[id].render(job)}
                       </td>
                     ))}

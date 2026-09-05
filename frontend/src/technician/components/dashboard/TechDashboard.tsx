@@ -10,6 +10,7 @@ import { useTech } from "@/technician/contexts/TechContext";
 import StatusUpdateModal from "@/technician/components/jobs/StatusUpdateModal";
 import PartRequestModal from "@/technician/components/parts/PartRequestModal";
 import { useParts } from "@/cashier/contexts/PartsContext";
+import { useWorkRules } from "@/lib/settings/workRules";
 import InsightModal, { type InsightColumn, type InsightRow, type InsightSummary } from "@/cashier/components/dashboard/InsightModal";
 
 const TA = "#34d399";
@@ -50,6 +51,9 @@ export default function TechDashboard() {
   const [partsViewJob, setPartsViewJob] = useState<string | null>(null);
   const [openStat, setOpenStat] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Defaults to on until the row loads, so a slow fetch never blanks a timer
+  // that is about to come back.
+  const { rules: shopRules } = useWorkRules();
 
   const myJobs = jobs.filter(j => j.technician === technicianName);
   /**
@@ -65,15 +69,16 @@ export default function TechDashboard() {
   // Kept for the Request Parts / parts-view modals, which act on one job.
   const activeJob = activeJobs[0];
 
-  // Tick every second for live timer
+  // Tick every second for live timer — not at all where the shop has turned
+  // timing off, since there would be nothing on screen for it to move.
   useEffect(() => {
-    if (activeJobs.length > 0) {
+    if (activeJobs.length > 0 && shopRules.trackJobTime) {
       timerRef.current = setInterval(() => tick(n => n + 1), 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [activeJobs.length]);
+  }, [activeJobs.length, shopRules.trackJobTime]);
 
   /**
    * Each tile knows the rows behind its number, so a count is never a dead end.
@@ -246,6 +251,9 @@ export default function TechDashboard() {
       {activeJobs.length > 0 ? activeJobs.map((activeJob, idx) => (() => {
         const meta = jobMeta[activeJob.id];
         const elapsed = meta?.startedAt ? fmtElapsed(meta.startedAt) : "00:00";
+        // Same shop-wide rule the bench reads — a timer switched off in one
+        // place and still running in another is worse than either setting.
+        const timed = shopRules.trackJobTime;
         const pc = PRIORITY_CFG[activeJob.priority];
         const jobParts = partRequests.filter(r => r.jobId === activeJob.id);
         const REQ_CFG: Record<string, { color: string; bg: string; border: string }> = {
@@ -293,7 +301,7 @@ export default function TechDashboard() {
                 </div>
               </div>
               <div style={{ textAlign: "center", padding: "0 10px", borderLeft: `1px solid ${TA}22` }}>
-                <p style={{ fontSize: 28, fontWeight: 800, color: TA, fontFamily: ff, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{elapsed}</p>
+                {timed && <p style={{ fontSize: 28, fontWeight: 800, color: TA, fontFamily: ff, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{elapsed}</p>}
                 <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff }}>Time on job</p>
               </div>
               {jobParts.length > 0 && (

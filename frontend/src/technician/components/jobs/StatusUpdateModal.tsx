@@ -80,6 +80,14 @@ const COMPLETION_TYPES = [
     color: "#f87171",
   },
   {
+    // Not a variation of Return. A Return means we are not taking the
+    // customer's money; this means we are giving back money already taken.
+    id: "Cash Return" as const,
+    label: "Cash Return",
+    blurb: "Could not be repaired and the customer is owed money back — usually a repair that did not hold. Enter what should be returned.",
+    color: "#60a5fa",
+  },
+  {
     id: "FOC" as const,
     label: "FOC",
     blurb: "Repaired free of charge. Nothing to pay.",
@@ -173,6 +181,26 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
   const [notesOpen, setNotesOpen] = useState(false);
   const [partsOpen, setPartsOpen] = useState(false);
   const [warrantyDays, setWarrantyDays] = useState(CHECKING_WARRANTY);
+  // What the shop owes back. Seeded from the original repair when this is a
+  // re-job, because that is nearly always the figure — the customer paid it
+  // for a repair that has not held.
+  const [cashReturnAmount, setCashReturnAmount] = useState("");
+
+  /**
+   * The repair this job repeats, if it does.
+   *
+   * Read from the register rather than refetched: the technician needs to see
+   * that this handset was already repaired for Rs. 5,000, because that is
+   * nearly always the figure that should go back.
+   */
+  const rejobOf = job.rejobOf ? jobs.find(j => j.id === job.rejobOf) ?? null : null;
+  const rejobWarranty = (() => {
+    if (!rejobOf?.completedAt) return "Unknown";
+    const w = rejobOf.jobWarranty ?? "";
+    if (!w || /^NO WARRANTY/i.test(w)) return "No warranty";
+    if (/CHECKING/i.test(w)) return "Being checked";
+    return `Within warranty · ${w}`;
+  })();
 
   /**
    * Model number and IMEI, filled in at the bench.
@@ -252,13 +280,14 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
   // Nothing is charged for a Return or an FOC, whatever was quoted. The
   // original estimate stays on the job; this is the final charge.
   const chargeable   = completionType === "Normal";
+  const cashReturn   = completionType === "Cash Return";
   const revisedNum   = chargeable ? (parseFloat(revisedCost) || 0) : 0;
   // What the box shows. Derived rather than written into state so switching
   // Return -> Normal brings the original figure back instead of leaving a zero
   // the technician has to retype.
   const shownCost    = chargeable ? revisedCost : "0";
   // A device that was not repaired cannot carry a repair warranty.
-  const canWarrant   = completionType !== "Return";
+  const canWarrant   = completionType !== "Return" && completionType !== "Cash Return";
   const needsApproval = isManoMobileJob && revisedNum > originalEstimate + 0.001 && !job.approval;
   // Margin on this job. A Return charges nothing but the parts are usually
   // still gone, and an FOC is a loss by definition — so the shortfall is shown
@@ -354,8 +383,13 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
       // forcing a sentence out of a busy bench just produces "done". A Return
       // is different: nothing was repaired, and that explanation is printed on
       // the customer's receipt, so it stays required.
-      if (completionType === "Return" && completionNotes.trim().length <= 5) {
+      if ((completionType === "Return" || completionType === "Cash Return") && completionNotes.trim().length <= 5) {
         return "Explain why the repair could not be completed (at least 6 characters).";
+      }
+      // A Cash Return with no figure is a job that says money is owed without
+      // saying how much, which nobody downstream can act on.
+      if (completionType === "Cash Return" && !(parseFloat(cashReturnAmount) > 0)) {
+        return "Enter the amount that should be returned to the customer.";
       }
       if (needsApproval && !approvalCaptured) {
         return "The final cost is above the quote — capture the customer's approval first.";
@@ -375,7 +409,8 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
     if (!selectedNext) return false;
     if (selectedNext === "Pending")   return pauseReason.trim().length > 3;
     if (selectedNext === "Completed") {
-      return (completionType !== "Return" || completionNotes.trim().length > 5)
+      return ((completionType !== "Return" && completionType !== "Cash Return") || completionNotes.trim().length > 5)
+        && (completionType !== "Cash Return" || parseFloat(cashReturnAmount) > 0)
         && (!needsApproval || approvalCaptured)
         && labourValue.trim() !== ""
         && (!needsLossAck || lossAccepted);
@@ -495,6 +530,9 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
       completedPatch.estimatedCost = revisedNum;
       completedPatch.revisedEstimate = revisedNum;
       completedPatch.completionType = completionType;
+      // Owed, not paid. The technician says money should go back and how much;
+      // a cashier records the money actually leaving the till.
+      completedPatch.cashReturnAmount = cashReturn ? parseFloat(cashReturnAmount) || 0 : null;
       if (approval) completedPatch.approval = approval;
 
       if (testsAnswered > 0) {
@@ -763,12 +801,70 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                       );
                     })}
                   </div>
-                  {completionType !== "Normal" && (
+                  {completionType !== "Normal" && completionType !== "Cash Return" && (
                     <p style={{ fontSize: 11.5, color: "#fbbf24", fontFamily: ff, lineHeight: 1.5 }}>
                       {completionType === "Return"
                         ? "Nothing will be charged and no warranty is issued. Explain below what could not be repaired — it goes on the customer's receipt."
                         : "Nothing will be charged. A warranty can still be issued for the work done."}
                     </p>
+                  )}
+
+                  {/* The figure the whole downstream flow runs on: the cashier's
+                      list, Sales Management, the billing screen and the dealer's
+                      account all read this one number off the job. */}
+                  {cashReturn && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "13px 15px", borderRadius: 11, background: "rgba(96,165,250,0.07)", border: "1px solid rgba(96,165,250,0.35)" }}>
+                      {/* Everything known about why this device is back, so the
+                          amount is a decision rather than a guess. Shown only
+                          where it exists — most jobs have no earlier one. */}
+                      {rejobOf && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 18px", paddingBottom: 10, borderBottom: "1px solid rgba(96,165,250,0.25)" }}>
+                          {[
+                            { k: "Re-job", v: "Yes" },
+                            { k: "Original job", v: rejobOf.id },
+                            { k: "Original repair", v: `Rs. ${rejobOf.estimatedCost.toLocaleString()}` },
+                            { k: "Warranty", v: rejobWarranty },
+                          ].map(r => (
+                            <span key={r.k} style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff }}>
+                              {r.k}: <strong style={{ color: "var(--text-primary)" }}>{r.v}</strong>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                        <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+                          <p style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff, marginBottom: 2 }}>
+                            Cash Return Amount *
+                          </p>
+                          <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                            What the shop owes back. Recorded as owed — a cashier pays it out and confirms it separately.
+                          </p>
+                        </div>
+                        <input
+                          type="number" min={0} step="0.01"
+                          value={cashReturnAmount}
+                          onChange={e => setCashReturnAmount(e.target.value)}
+                          placeholder="0.00"
+                          style={{
+                            width: 150, padding: "9px 11px", borderRadius: 9, fontSize: 15, fontWeight: 700,
+                            textAlign: "right", outline: "none", fontFamily: ff,
+                            border: `1px solid ${parseFloat(cashReturnAmount) > 0 ? "rgba(96,165,250,0.6)" : "var(--border)"}`,
+                            background: "var(--bg-primary)", color: "var(--text-primary)",
+                          }}
+                        />
+                      </div>
+
+                      {rejobOf && parseFloat(cashReturnAmount || "0") !== rejobOf.estimatedCost && rejobOf.estimatedCost > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setCashReturnAmount(String(rejobOf.estimatedCost))}
+                          style={{ alignSelf: "flex-start", padding: "5px 10px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, cursor: "pointer", border: "1px solid rgba(96,165,250,0.4)", background: "transparent", color: "#60a5fa", fontFamily: ff }}
+                        >
+                          Use the original repair amount · Rs. {rejobOf.estimatedCost.toLocaleString()}
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
 

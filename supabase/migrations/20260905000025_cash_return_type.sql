@@ -1,0 +1,28 @@
+-- ============================================================================
+-- Mano Mobile — Cash Return as a way a job ends
+--
+-- A repair can end in four ways, not three:
+--
+--   Normal       repaired and charged.
+--   Return       could not be repaired; device goes back, nothing charged.
+--   FOC          repaired and not charged for.
+--   Cash Return  device goes back AND money the shop already took goes back.
+--
+-- The fourth is not a variation of Return. A Return means "we are not taking
+-- your money"; a Cash Return means "we are giving you back money you already
+-- paid us", and that is a movement out of the till that has to be authorised,
+-- recorded and reconciled. Treated as one, a shop cannot tell the jobs it
+-- simply did not bill from the jobs it owes cash on.
+--
+-- The case that forces it: a phone repaired for Rs. 5,000 comes back with the
+-- same fault, is booked in as a warranty re-job, and this time cannot be fixed.
+-- Nothing about that is a Return — the customer is Rs. 5,000 down on a repair
+-- that did not hold, and the shop owes it back. It can equally happen outside
+-- any warranty, so nothing here is gated on one.
+--
+-- Its own migration file because Postgres will not let a new enum value be used
+-- in the transaction that added it; everything that references 'Cash Return' is
+-- in 20260905000026.
+-- ============================================================================
+
+alter type completion_type add value if not exists 'Cash Return';

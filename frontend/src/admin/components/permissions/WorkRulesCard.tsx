@@ -149,6 +149,15 @@ export default function WorkRulesCard() {
           )}
 
           {row(
+            "time",
+            "Time each job",
+            "Repairs in progress show a live timer on the bench and on the technician dashboard.",
+            "No timers are shown. The shop still records when each job was started — the bench is ordered by it — but nobody is shown a clock counting up on their own work.",
+            draft.trackJobTime,
+            () => apply({ ...draft, trackJobTime: !draft.trackJobTime }, "time"),
+          )}
+
+          {row(
             "start",
             "Require Start before finishing",
             "A repair must be started in the system before it can be marked finished.",
