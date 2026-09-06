@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/lib/ui/theme";
 import { Palette as PaletteIcon, Check, AlertCircle, Sun, Moon, Eye } from "lucide-react";
 import {
   PALETTES, COMFORT_LEVELS, applyPalette, fetchAppearance, saveAppearance,
@@ -184,7 +184,7 @@ export default function Appearance() {
           {/* Each palette carries its own light and dark values, so previewing
               one without being able to see both halves is half a decision. */}
           <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10 }}>
-            {[{ id: "light", icon: Sun, label: "Light" }, { id: "dark", icon: Moon, label: "Dark" }].map(m => {
+            {([{ id: "light", icon: Sun, label: "Light" }, { id: "dark", icon: Moon, label: "Dark" }] as const).map(m => {
               const active = (m.id === "dark") === isDark;
               const Icon = m.icon;
               return (

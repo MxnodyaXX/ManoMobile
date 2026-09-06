@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/lib/ui/theme";
 import { applyPalette, fetchAppearance, DEFAULT_APPEARANCE, type Appearance } from "@/lib/settings/appearance";
 
 /**

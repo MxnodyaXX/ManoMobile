@@ -273,7 +273,12 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
 }) {
   const { dealers } = useRepair();
   const invoiceRef = useRef<HTMLDivElement>(null);
-  const lineTotals  = repairs.reduce((s, r) => s + r.unitPrice - r.discount, 0);
+  // Cash Returns subtract, so the printed TOTAL is what the dealer actually
+  // owes rather than the gross of repairs done in both directions.
+  const lineTotals  = repairs.reduce(
+    (s, r) => s + ((r.cashReturnAmount ?? 0) > 0 ? -(r.cashReturnAmount ?? 0) : r.unitPrice - r.discount),
+    0,
+  );
   const grandTotal  = Math.max(0, lineTotals - invoiceDiscount);
   const paidAmount  = totalAdvance + amountReceivedNow;
   const paymentType = isCredit ? "CREDIT" : "CASH / FULL";
@@ -446,19 +451,25 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
             </thead>
             <tbody>
               {repairs.map((r, i) => {
-                const lineTotal = r.unitPrice - r.discount;
+                // A Cash Return prints as its own line at a negative total —
+                // the dealer has to be able to see which job took the money off
+                // their bill, not just that the bill came down.
+                const back      = r.cashReturnAmount ?? 0;
+                const lineTotal = back > 0 ? -back : r.unitPrice - r.discount;
                 return (
                   <tr key={r.id}>
                     <td style={invTd}>{i + 1}.</td>
-                    <td style={invTd}>Repair</td>
+                    <td style={invTd}>{back > 0 ? "Cash Return" : "Repair"}</td>
                     <td style={invTd}>{r.id} | {r.brand} | {r.model}</td>
                     <td style={invTd}>{r.imei || "—"}</td>
-                    <td style={invTd}>{r.warranty}</td>
+                    <td style={invTd}>{back > 0 ? "—" : r.warranty}</td>
                     <td style={{ ...invTd, textAlign: "right" as const }}>1</td>
                     <td style={{ ...invTd, textAlign: "right" as const }}>{r.advance.toLocaleString()}</td>
-                    <td style={{ ...invTd, textAlign: "right" as const }}>{r.unitPrice.toLocaleString()}</td>
-                    <td style={{ ...invTd, textAlign: "right" as const }}>{r.discount > 0 ? r.discount.toLocaleString() : "—"}</td>
-                    <td style={{ ...invTd, textAlign: "right" as const, fontWeight: 700, fontStyle: "normal" }}>{lineTotal.toLocaleString()}</td>
+                    <td style={{ ...invTd, textAlign: "right" as const }}>{back > 0 ? `(${back.toLocaleString()})` : r.unitPrice.toLocaleString()}</td>
+                    <td style={{ ...invTd, textAlign: "right" as const }}>{back === 0 && r.discount > 0 ? r.discount.toLocaleString() : "—"}</td>
+                    <td style={{ ...invTd, textAlign: "right" as const, fontWeight: 700, fontStyle: "normal" }}>
+                      {lineTotal < 0 ? `(${Math.abs(lineTotal).toLocaleString()})` : lineTotal.toLocaleString()}
+                    </td>
                   </tr>
                 );
               })}
@@ -704,6 +715,11 @@ export default function RepairSales() {
     ];
   }, [jobs, dealers, rowDiscounts]);
 
+  // Declared here rather than down with the billing figures: whether the shop
+  // is billing its own customer or an outside dealer decides how a Cash Return
+  // settles, and that question is asked while the rows are still being picked.
+  const isManoMobile = isInHouseDealer(dealers, selectedDealer);
+
   const q = search.toLowerCase();
   const dealerRepairs = invoiceable.filter(r =>
     !!selectedDealer && dealerKey(dealers, r.dealer) === dealerKey(dealers, selectedDealer) &&
@@ -743,6 +759,10 @@ export default function RepairSales() {
    * be a number nobody could explain to a customer.
    */
   const refundCandidates = selectedRepairs.filter(r => {
+    // An external dealer is never refunded in cash. Their Cash Return is the
+    // negative line above, netted off the bill they are about to be sent — a
+    // cash refund AND a reduced bill would be the same money twice.
+    if (!isManoMobile) return false;
     const pos = refundByJob.get(r.id);
     if (pos) return pos.refundable > 0;
     // Before the position loads, fall back to what the job itself says, so the
@@ -799,7 +819,17 @@ export default function RepairSales() {
   };
 
   // Billing calculations
-  const lineSubtotal  = selectedRepairs.reduce((s, r) => s + r.unitPrice, 0);
+  // What each selected job contributes to the bill. A Cash Return contributes
+  // its amount NEGATIVELY — it is a repair transaction pointing the other way,
+  // which is what makes "12,500 less 5,000 = 7,500" fall out of the same sum
+  // the invoice has always done rather than needing a second calculation.
+  const lineOf = (r: CompletedRepair) =>
+    (r.cashReturnAmount ?? 0) > 0 ? -(r.cashReturnAmount ?? 0) : r.unitPrice;
+
+  const cashReturnTotal = selectedRepairs.reduce((s, r) => s + (r.cashReturnAmount ?? 0), 0);
+  const repairsTotal    = selectedRepairs.reduce((s, r) => s + ((r.cashReturnAmount ?? 0) > 0 ? 0 : r.unitPrice), 0);
+
+  const lineSubtotal  = selectedRepairs.reduce((s, r) => s + lineOf(r), 0);
   const lineDiscounts = selectedRepairs.reduce((s, r) => s + r.discount, 0);
   // What the lines come to before anything is taken off the bill as a whole.
   const afterLines    = lineSubtotal - lineDiscounts;
@@ -825,7 +855,6 @@ export default function RepairSales() {
   const effectiveReceived = parseFloat(receivedDisplay) || 0;
   const finalDue          = Math.max(0, netDue - effectiveReceived);
   const isCredit          = finalDue > 0;
-  const isManoMobile      = isInHouseDealer(dealers, selectedDealer);
   // Written off means nothing goes on account, so there is no account to pick
   // — the customer section goes back to plain name and number.
   const useCreditPicker   = isManoMobile && isCredit && !writeOffBalance;
@@ -1375,12 +1404,22 @@ export default function RepairSales() {
 
               {/* Selected items */}
               <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 13 }}>
-                {selectedRepairs.map(r => (
-                  <div key={r.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                    <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "60%" }}>{r.id} · {r.brand} {r.model}</span>
-                    <span style={{ fontWeight: 600, color: "var(--text-primary)", flexShrink: 0 }}>Rs. {(r.unitPrice - r.discount).toLocaleString()}</span>
-                  </div>
-                ))}
+                {selectedRepairs.map(r => {
+                  const back = r.cashReturnAmount ?? 0;
+                  return (
+                    <div key={r.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                      <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "60%" }}>
+                        {r.id} · {r.brand} {r.model}
+                        {/* Named on its own line so the dealer can see which
+                            job took the money off, not just that something did. */}
+                        {back > 0 && <span style={{ color: "#60a5fa", fontWeight: 600 }}> · Cash Return</span>}
+                      </span>
+                      <span style={{ fontWeight: 600, color: back > 0 ? "#60a5fa" : "var(--text-primary)", flexShrink: 0 }}>
+                        {back > 0 ? `(Rs. ${back.toLocaleString()})` : `Rs. ${(r.unitPrice - r.discount).toLocaleString()}`}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* A returned job with an advance on it is money going out, so
@@ -1451,7 +1490,13 @@ export default function RepairSales() {
               ) : (
               <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                 {[
-                  { label: "Subtotal",        value: fmtRs(lineSubtotal), color: "var(--text-primary)" },
+                  ...(cashReturnTotal > 0
+                    ? [
+                        { label: "Completed Repairs", value: fmtRs(repairsTotal), color: "var(--text-primary)" },
+                        { label: "Less: Cash Returns", value: `(${fmtRs(cashReturnTotal)})`, color: "#60a5fa" },
+                      ]
+                    : []),
+                  { label: cashReturnTotal > 0 ? "Subtotal after returns" : "Subtotal", value: fmtRs(lineSubtotal), color: "var(--text-primary)" },
                   // Shown apart, not summed, because they answer different
                   // questions later: what was conceded on the work, and what
                   // was conceded on the relationship.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useTheme } from "next-themes";
+import { useTheme } from "@/lib/ui/theme";
 import { Bell, Search, Sun, Moon, User, Menu } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";

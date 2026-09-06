@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/lib/ui/theme";
 import { Table2, BarChart3 } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 
