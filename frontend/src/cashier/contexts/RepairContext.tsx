@@ -99,6 +99,24 @@ export interface RepairJob {
   cashReturnAmount?: number | null;
   /** The earlier repair this job repeats, when it is a re-job. */
   rejobOf?: string | null;
+  /**
+   * The invoice this job was billed on, set when the sale is recorded.
+   *
+   * Read-only here: it is stamped by the sales path, and several jobs share
+   * one number whenever they were billed together — which is exactly what
+   * makes an invoice-wise view of repair income possible.
+   */
+  invoiceNo?: string | null;
+  /**
+   * Why the model number and IMEI could not be read, when they could not be.
+   *
+   * The point is to tell two blanks apart: "nobody has looked yet", which
+   * somebody should chase, and "this was looked at and cannot be known", which
+   * is settled. Without it the second keeps getting re-opened, and a technician
+   * pushed to fill the box invents a model number — harder to undo than an
+   * empty one, because it looks like data.
+   */
+  deviceUnidentifiedReason?: string | null;
   createdAt: string;
   estimatedCompletion: string;
   imei?: string;

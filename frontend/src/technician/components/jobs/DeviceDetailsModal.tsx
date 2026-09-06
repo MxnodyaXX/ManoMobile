@@ -53,6 +53,10 @@ export default function DeviceDetailsModal({ job, onClose }: {
       if (draft.model.trim()) patch.model = draft.model.trim();
     }
     if (need.imei && draft.imei.trim()) patch.imei = draft.imei.trim();
+    // The same record the completion form writes, so the ⋯ route and the
+    // finish-job route cannot leave the job saying different things about why
+    // it has no model number.
+    patch.deviceUnidentifiedReason = draft.unavailableReason.trim() || null;
 
     const res = await updateJob(job.id, patch);
     setBusy(false);

@@ -14,6 +14,7 @@ import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/Access
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import { useToast } from "@/lib/ui/toast";
+import { useTableSort, SortHeader } from "@/lib/ui/useTableSort";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1659,6 +1660,23 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
     });
   }, [accessories, search, categoryFilter, subcategoryFilter, stockFilter]);
 
+  const { sorted: rows, sort, toggle: toggleSort } = useTableSort(filtered, {
+    code:        p => p.code,
+    product:     p => p.name,
+    brand:       p => p.brand,
+    category:    p => p.category,
+    subcategory: p => p.subcategory,
+    compatible:  p => p.model,
+    stock:       p => p.stock,
+    min:         p => p.minStock,
+    buying:      p => p.buyingPrice,
+    selling:     p => p.sellingPrice,
+    // The number behind the badge, not the badge — a margin sorted as text
+    // would put 9% after 10%.
+    margin:      p => (p.sellingPrice > 0 ? (p.sellingPrice - p.buyingPrice) / p.sellingPrice : 0),
+    supplier:    p => p.supplier,
+  });
+
   const inStock = accessories.filter(p => p.stock > 0).length;
   const lowStock = accessories.filter(p => p.stock > 0 && p.stock < p.minStock).length;
   const outOfStock = accessories.filter(p => p.stock === 0).length;
@@ -1735,15 +1753,25 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
           <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
             <thead>
               <tr>
-                {["Code", "Product", "Brand", "Category", "Subcategory", "Compatible", "Stock", "Min", "Buying", "Selling", "Margin", "Supplier", ""].map(h => (
-                  <th key={h} style={thStyle}>{h}</th>
+                {([
+                  ["code", "Code"], ["product", "Product"], ["brand", "Brand"],
+                  ["category", "Category"], ["subcategory", "Subcategory"],
+                  ["compatible", "Compatible"], ["stock", "Stock"], ["min", "Min"],
+                  ["buying", "Buying"], ["selling", "Selling"], ["margin", "Margin"],
+                  ["supplier", "Supplier"], ["", ""],
+                ] as const).map(([key, h]) => (
+                  <SortHeader
+                    key={h || "actions"} label={h} sortKey={key}
+                    sort={sort} onSort={toggleSort} sortable={key !== ""}
+                    style={thStyle}
+                  />
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr><td colSpan={13} style={{ ...tdBase, textAlign: "center", padding: 40, color: "var(--text-muted)" }}>No products match your filters</td></tr>
-              ) : filtered.map(p => {
+              ) : rows.map(p => {
                 const isOut = p.stock === 0;
                 const isLow = !isOut && p.stock < p.minStock;
                 const m = p.sellingPrice - p.buyingPrice;

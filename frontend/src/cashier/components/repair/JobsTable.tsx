@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { notifyJobEvent } from "@/lib/sms/notify";
 import { useToast } from "@/lib/ui/toast";
+import { useTableSort, SortHeader, type SortValue } from "@/lib/ui/useTableSort";
 import { useJobCashReturns, refundRepairAdvance } from "@/lib/accounts/cashReturns";
 
 interface FinishJobData {
@@ -106,7 +107,20 @@ interface ColSpec {
    *  job itself — Parts/Labour needs live PartsContext data the column spec
    *  doesn't have access to, so it's left out rather than summed wrong. */
   sum?: (job: RepairJob) => number;
+  /**
+   * What this column sorts on — the underlying value, not the rendered cell.
+   *
+   * A cell showing "Rs. 8,500" or "(Rs. 5,000)" sorts as a number; one showing
+   * a formatted date sorts as a date. Ordering the rendered string instead is
+   * how "Rs. 9,000" ends up after "Rs. 10,000". Columns with no `sortOn` are
+   * simply not sortable, which is right for a column of buttons.
+   */
+  sortOn?: (job: RepairJob) => SortValue;
 }
+
+/** Sort order for priority. Alphabetical would put Urgent between Normal and
+ *  nothing useful — the ranking is the meaning. */
+const PRIORITY_ORDER: Record<string, number> = { Urgent: 0, High: 1, Normal: 2, Low: 3 };
 
 const muted = { fontSize: 11.5, color: "var(--text-muted)" } as const;
 const plain = { fontSize: 12.5, color: "var(--text-primary)" } as const;
@@ -157,6 +171,7 @@ function outcomeBadge(j: RepairJob) {
 
 const COLUMNS: Record<ColId, ColSpec> = {
   jobId: {
+    sortOn: j => j.id,
     label: "Job ID",
     // For an outside dealer's job, their own number is what gets quoted over
     // the phone and matched against their docket — so it leads, bold, with
@@ -178,6 +193,7 @@ const COLUMNS: Record<ColId, ColSpec> = {
     ),
   },
   customer: {
+    sortOn: j => j.customerName,
     label: "Customer",
     render: j => (
       <>
@@ -186,10 +202,11 @@ const COLUMNS: Record<ColId, ColSpec> = {
       </>
     ),
   },
-  device: { label: "Device", render: j => <p style={plain}>{[j.brand, j.model].filter(Boolean).join(" ") || "—"}</p> },
+  device: { sortOn: j => [j.brand, j.model].filter(Boolean).join(" "), label: "Device", render: j => <p style={plain}>{[j.brand, j.model].filter(Boolean).join(" ") || "—"}</p> },
   // Device and its fault belong together: one column, two lines, the way the
   // customer column already pairs a name with a phone number.
   deviceIssue: {
+    sortOn: j => [j.brand, j.model].filter(Boolean).join(" "),
     label: "Device / Issue",
     render: j => (
       <>
@@ -200,21 +217,24 @@ const COLUMNS: Record<ColId, ColSpec> = {
       </>
     ),
   },
-  issue: { label: "Issue", render: j => <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{j.issue || "—"}</span> },
+  issue: { sortOn: j => j.issue, label: "Issue", render: j => <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{j.issue || "—"}</span> },
   technician: {
+    sortOn: j => j.technician,
     label: "Technician",
     render: j => <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{j.technician || "Unassigned"}</span>,
   },
   status: { label: "Status", render: () => null },   // rendered specially (badge + icon)
   priority: {
+    sortOn: j => PRIORITY_ORDER[j.priority] ?? 99,
     label: "Priority",
     render: j => <span style={{ fontSize: 11, fontWeight: 600, color: priorityColor[j.priority] }}>● {j.priority}</span>,
   },
-  estCost: { label: "Est. Cost", align: "right", render: j => <span style={plain}>{rs(j.estimatedCost)}</span>, sum: j => j.estimatedCost },
+  estCost: { sortOn: j => j.estimatedCost, label: "Est. Cost", align: "right", render: j => <span style={plain}>{rs(j.estimatedCost)}</span>, sum: j => j.estimatedCost },
 
   // Once a job is completed, estimatedCost holds the FINAL charge — the quote
   // survives in originalEstimate, so the two can be shown side by side.
   quotedCost: {
+    sortOn: j => j.originalEstimate ?? j.estimatedCost,
     label: "Estimated Cost",
     align: "right",
     render: j => <span style={plain}>{rs(j.originalEstimate ?? j.estimatedCost)}</span>,
@@ -222,6 +242,7 @@ const COLUMNS: Record<ColId, ColSpec> = {
   },
   /** Everything the customer has actually handed over, advance plus settlement. */
   paidAmount: {
+    sortOn: j => j.advancePaid,
     label: "Paid Amount",
     align: "right",
     render: j => {
@@ -233,6 +254,7 @@ const COLUMNS: Record<ColId, ColSpec> = {
     sum: j => j.advancePaid,
   },
   finalBill: {
+    sortOn: j => (cashReturnOf(j) > 0 ? -cashReturnOf(j) : j.estimatedCost),
     label: "Final Bill",
     align: "right",
     render: j => {
@@ -255,6 +277,7 @@ const COLUMNS: Record<ColId, ColSpec> = {
     sum: j => (cashReturnOf(j) > 0 ? -cashReturnOf(j) : j.estimatedCost),
   },
   advance: {
+    sortOn: j => (j.advanceRefundedOn ? 0 : j.advancePaid),
     label: "Advance Paid",
     align: "right",
     render: j => j.advancePaid <= 0
@@ -273,6 +296,7 @@ const COLUMNS: Record<ColId, ColSpec> = {
     sum: j => (j.advanceRefundedOn ? 0 : j.advancePaid),
   },
   balance: {
+    sortOn: j => (cashReturnOf(j) > 0 ? -cashReturnOf(j) : isNotCharged(j) ? 0 : j.estimatedCost - j.advancePaid),
     label: "Balance",
     align: "right",
     render: j => {
@@ -310,9 +334,10 @@ const COLUMNS: Record<ColId, ColSpec> = {
     // reducing the outstanding figure for the whole shop.
     sum: j => (cashReturnOf(j) > 0 ? -cashReturnOf(j) : isNotCharged(j) ? 0 : j.estimatedCost - j.advancePaid),
   },
-  estCompletion: { label: "Est. Completion", render: j => <span style={muted}>{fmtDate(j.estimatedCompletion)}</span> },
+  estCompletion: { sortOn: j => j.estimatedCompletion, label: "Est. Completion", render: j => <span style={muted}>{fmtDate(j.estimatedCompletion)}</span> },
   /** Quote with the date it is promised for — one column, two lines. */
   costDue: {
+    sortOn: j => j.estimatedCost,
     label: "Est. Cost / Due",
     align: "right",
     render: j => (
@@ -325,6 +350,7 @@ const COLUMNS: Record<ColId, ColSpec> = {
   },
   /** Same pairing for a finished job, where estimatedCost is the final charge. */
   quotedDue: {
+    sortOn: j => j.originalEstimate ?? j.estimatedCost,
     label: "Estimated Cost / Due",
     align: "right",
     sum: j => j.originalEstimate ?? j.estimatedCost,
@@ -335,9 +361,10 @@ const COLUMNS: Record<ColId, ColSpec> = {
       </>
     ),
   },
-  created: { label: "Registered", render: j => <span style={muted}>{fmtDate(j.createdAt)}</span> },
-  started: { label: "Started", render: j => <span style={muted}>{fmtDate(j.startedAt)}</span> },
+  created: { sortOn: j => j.createdAt, label: "Registered", render: j => <span style={muted}>{fmtDate(j.createdAt)}</span> },
+  started: { sortOn: j => j.startedAt, label: "Started", render: j => <span style={muted}>{fmtDate(j.startedAt)}</span> },
   paused: {
+    sortOn: j => j.pausedAt,
     label: "On Hold Since",
     render: j => (
       <>
@@ -354,6 +381,7 @@ const COLUMNS: Record<ColId, ColSpec> = {
   // (status Completed) — an Issued/Delivered row uses this same column
   // definition too, and has nothing to wait for any more.
   completed: {
+    sortOn: j => j.completedAt,
     label: "Completed",
     render: j => {
       const days = daysWaiting(j);
@@ -367,7 +395,7 @@ const COLUMNS: Record<ColId, ColSpec> = {
       );
     },
   },
-  issued: { label: "Issued On", render: j => <span style={muted}>{fmtDate(j.handover?.handedOverAt)}</span> },
+  issued: { sortOn: j => j.handover?.handedOverAt, label: "Issued On", render: j => <span style={muted}>{fmtDate(j.handover?.handedOverAt)}</span> },
   // What the shop actually paid for parts on this job — quantity × catalog
   // cost price, summed over its approved/issued part requests (Pending and
   // Rejected ones aren't real cost yet). The info icon opens the line-item
@@ -2091,7 +2119,7 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
   const [dateFilter, setDateFilter] = useState<"All" | "Today" | "Week" | "Month">("All");
   const showDateFilter = view === "Issued" || view === "Non-Issued";
 
-  const jobs = useMemo(() => allJobs.filter(j => {
+  const filteredJobs = useMemo(() => allJobs.filter(j => {
     const q = search.toLowerCase();
     const matchView     = jobMatchesView(j, view);
     const matchSearch   = !search || j.customerName.toLowerCase().includes(q) || j.id.toLowerCase().includes(q) || (j.dealerJobNo ?? "").toLowerCase().includes(q) || j.model.toLowerCase().includes(q) || j.brand.toLowerCase().includes(q) || (findDealer(dealers, j)?.name ?? j.dealer ?? "").toLowerCase().includes(q);
@@ -2101,6 +2129,22 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
     const matchDate      = dateFilter === "All" || isWithinDateFilter(j.createdAt, dateFilter);
     return matchView && matchSearch && matchPriority && matchBrand && matchDealer && matchDate;
   }), [allJobs, view, search, priorityFilter, brandFilter, dealerFilter, dealers, dateFilter]);
+
+  // Sorting sits after filtering, so it orders what is actually on screen. The
+  // accessors come straight off the column specs, which means a column added
+  // later is sortable the moment it declares `sortOn` — no second list to keep
+  // in step with this one.
+  const { sorted: jobs, sort, toggle: toggleSort } = useTableSort(
+    filteredJobs,
+    useMemo(() => {
+      const out: Record<string, (j: RepairJob) => SortValue> = {};
+      for (const id of cols) {
+        const on = COLUMNS[id].sortOn;
+        if (on) out[id] = on;
+      }
+      return out;
+    }, [cols]),
+  );
 
   // Column totals for the footer — only the columns currently shown that
   // actually declared a `sum`, over whatever rows are visible right now
@@ -2413,7 +2457,16 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
                 {cols.map(id => (
-                  <th key={id} style={{ position: "sticky", top: 0, zIndex: 1, padding: "12px 14px", textAlign: COLUMNS[id].align ?? "left", fontSize: 11, color: "var(--text-secondary)", fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase" as const, whiteSpace: "nowrap", fontFamily: "'Plus Jakarta Sans', sans-serif", background: "var(--bg-secondary)" }}>{COLUMNS[id].label}</th>
+                  <SortHeader
+                    key={id}
+                    label={COLUMNS[id].label}
+                    sortKey={id}
+                    sort={sort}
+                    onSort={toggleSort}
+                    sortable={!!COLUMNS[id].sortOn}
+                    align={COLUMNS[id].align ?? "left"}
+                    style={{ position: "sticky", top: 0, zIndex: 1, padding: "12px 14px", fontSize: 11, color: "var(--text-secondary)", fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase" as const, whiteSpace: "nowrap", fontFamily: "'Plus Jakarta Sans', sans-serif", background: "var(--bg-secondary)" }}
+                  />
                 ))}
                 <th style={{ position: "sticky", top: 0, zIndex: 1, padding: "12px 14px", background: "var(--bg-secondary)" }}></th>
               </tr>

@@ -1,19 +1,27 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useHydrated } from "@/lib/ui/useHydrated";
 
 /**
  * Light/dark mode.
  *
- * Replaces next-themes, which is otherwise fine but renders its pre-paint
- * script as a React element inside a client component. React 19 warns on every
- * load that a script created client-side never executes — true, and harmless
- * there, since the copy in the server HTML had already run. Still a warning
- * nobody can act on, printed on every page.
+ * Replaces next-themes, and drops the pre-paint script both it and an earlier
+ * version of this file rendered.
  *
- * Here the script is emitted by `next/script` at `beforeInteractive` from the
- * root layout, which puts it in the initial HTML's <head> rather than in the
- * React tree at all. Same no-flash behaviour, nothing for React to re-create.
+ * That script existed to set `light`/`dark` on <html> before the first paint,
+ * to stop the page flashing the wrong palette. In this app it never could:
+ * globals.css is the only stylesheet and it has no `.dark` or `[data-theme]`
+ * rule anywhere. The colours are CSS custom properties written onto
+ * documentElement by applyPalette() from AppearanceProvider's effect, which
+ * runs after mount whatever the class says. The script was setting a class
+ * nothing styles, and paying for it with React's "script tag while rendering"
+ * warning on every load — React re-creates any executable inline script it
+ * renders on the client, so no placement avoids that.
+ *
+ * The class and color-scheme are still applied, from the effect below, because
+ * `color-scheme` drives the native controls — scrollbars, date pickers, the
+ * form widgets the palette cannot reach.
  *
  * The API is deliberately the three fields the app already used — `theme`,
  * `setTheme`, `resolvedTheme` — so no call site had to change shape.
@@ -22,32 +30,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 export type Theme = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
 
-/** Where the choice is kept. Must match THEME_SCRIPT below. */
+/** Where the choice is kept. */
 export const THEME_STORAGE_KEY = "theme";
 
 const DEFAULT_THEME: Theme = "light";
-
-/**
- * The pre-paint bootstrap, as source.
- *
- * Runs before the first paint, straight from the HTML — this is the whole
- * reason a theme needs a script at all. Without it the page paints in the
- * default palette and then snaps to the stored one, which is the flash every
- * theme switcher exists to avoid.
- *
- * Deliberately hand-written and self-contained rather than serialised from a
- * function: it has to run with no bundler, no modules and no React, and it
- * must never throw — a browser with site data blocked has to get a themed page,
- * not a blank one.
- */
-export const THEME_SCRIPT = `(function(){try{
-var s=localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)})||${JSON.stringify(DEFAULT_THEME)};
-var t=s==="system"?(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):s;
-var d=document.documentElement;
-d.classList.remove("light","dark");
-d.classList.add(t);
-d.style.colorScheme=t;
-}catch(e){}})();`;
 
 const SYSTEM_QUERY = "(prefers-color-scheme: dark)";
 
@@ -65,7 +51,12 @@ const storedTheme = (): Theme | null => {
   }
 };
 
-/** Put the resolved mode on <html>, the same way THEME_SCRIPT does. */
+/**
+ * Put the resolved mode on <html>.
+ *
+ * The class is for anything reading it in JS; `color-scheme` is the part that
+ * does visible work, telling the browser to draw its own controls dark.
+ */
 function applyTheme(resolved: ResolvedTheme) {
   const el = document.documentElement;
   el.classList.remove("light", "dark");
@@ -84,15 +75,24 @@ interface ThemeValue {
 const ThemeContext = createContext<ThemeValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // Read on the client during the first render, so a component reading the
-  // theme immediately after hydration sees the same value the script already
-  // applied to <html> rather than the default it is about to be corrected to.
   const [theme, setThemeState] = useState<Theme>(() =>
     typeof window === "undefined" ? DEFAULT_THEME : storedTheme() ?? DEFAULT_THEME,
   );
   const [system, setSystem] = useState<ResolvedTheme>(() => systemTheme());
 
-  const resolvedTheme: ResolvedTheme = theme === "system" ? system : theme;
+  /**
+   * The stored choice is deliberately withheld from the first client render.
+   *
+   * It is read from localStorage in the initialiser above, which also runs
+   * while hydrating — so a consumer drawing anything theme-dependent (a chart's
+   * colours, a Sun/Moon icon) would render "dark" against server HTML that said
+   * "light", and React would discard the tree. Holding the default for one
+   * render costs nothing visible: the palette is applied by AppearanceProvider's
+   * effect either way, which lands no earlier than this does.
+   */
+  const hydrated = useHydrated();
+  const effective: Theme = hydrated ? theme : DEFAULT_THEME;
+  const resolvedTheme: ResolvedTheme = effective === "system" ? system : effective;
 
   const setTheme = useCallback((next: Theme) => {
     setThemeState(next);
@@ -129,8 +129,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<ThemeValue>(
-    () => ({ theme, setTheme, resolvedTheme }),
-    [theme, setTheme, resolvedTheme],
+    () => ({ theme: effective, setTheme, resolvedTheme }),
+    [effective, setTheme, resolvedTheme],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

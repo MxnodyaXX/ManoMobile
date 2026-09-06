@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, ArrowRight, Inbox } from "lucide-react";
+import { X, ArrowRight, Inbox, ChevronDown } from "lucide-react";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
@@ -18,6 +18,25 @@ export interface InsightRow {
   cells: Record<string, string>;
   /** Muted styling for rows that are informational rather than countable. */
   dim?: boolean;
+}
+
+/**
+ * Rows gathered under one heading, with the heading's own total.
+ *
+ * The invoice case is what this exists for: a repair charged and a Cash Return
+ * against it are two jobs, one piece of paper and one net figure. Listed flat
+ * they read as unrelated records and the arithmetic behind the invoice total is
+ * nowhere on screen.
+ */
+export interface InsightGroup {
+  id: string;
+  title: string;
+  subtitle?: string;
+  /** The group's own total, already formatted. */
+  value: string;
+  /** Money out — shown in the same blue the rest of the app uses for it. */
+  negative?: boolean;
+  rows: InsightRow[];
 }
 
 export interface InsightSummary {
@@ -38,19 +57,32 @@ export interface InsightSummary {
  * and "zero" mean very different things to a shop owner.
  */
 export default function InsightModal({
-  title, subtitle, columns, rows, summary, note, emptyText, actionLabel, onAction, onClose,
+  title, subtitle, columns, rows, summary, groups, groupLabel, note, emptyText, actionLabel, onAction, onClose,
 }: {
   title: string;
   subtitle?: string;
   columns: InsightColumn[];
   rows: InsightRow[];
   summary?: InsightSummary[];
+  groups?: InsightGroup[];
+  groupLabel?: string;
   note?: string;
   emptyText?: string;
   actionLabel?: string;
   onAction?: () => void;
   onClose: () => void;
 }) {
+  /**
+   * Flat rows or grouped. Purely how the same numbers are laid out — the
+   * summary above is computed from the jobs either way, so switching can never
+   * move a total.
+   *
+   * Off by default: the flat list is what the shop already knows, and grouping
+   * only earns its place when somebody is asking how an invoice added up.
+   */
+  const [grouped, setGrouped] = useState(false);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const canGroup = !!groups && groups.length > 0;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -88,6 +120,17 @@ export default function InsightModal({
             <p style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>{title}</p>
             {subtitle && <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{subtitle}</p>}
           </div>
+          {canGroup && (
+            <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", flexShrink: 0, fontSize: 12, color: "var(--text-secondary)" }}>
+              <input
+                type="checkbox"
+                checked={grouped}
+                onChange={e => setGrouped(e.target.checked)}
+                style={{ accentColor: "var(--accent)", width: 14, height: 14, cursor: "pointer" }}
+              />
+              {groupLabel ?? "Group"}
+            </label>
+          )}
           <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}>
             <X size={16} />
           </button>
@@ -115,6 +158,66 @@ export default function InsightModal({
               <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6, maxWidth: 420, margin: "0 auto" }}>
                 {emptyText ?? "Nothing to show for this period."}
               </p>
+            </div>
+          ) : grouped && groups ? (
+            <div>
+              {groups.map(g => {
+                const isOpen = !!open[g.id];
+                return (
+                  <div key={g.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                    <button
+                      onClick={() => setOpen(o => ({ ...o, [g.id]: !o[g.id] }))}
+                      aria-expanded={isOpen}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10, width: "100%",
+                        padding: "12px 18px", cursor: "pointer", textAlign: "left",
+                        background: isOpen ? "var(--bg-secondary)" : "none", border: "none", fontFamily: ff,
+                      }}
+                    >
+                      <ChevronDown
+                        size={14}
+                        style={{ color: "var(--text-muted)", flexShrink: 0, transform: isOpen ? "rotate(180deg)" : undefined, transition: "transform 0.18s" }}
+                      />
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>{g.title}</span>
+                        {g.subtitle && <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>{g.subtitle}</span>}
+                      </span>
+                      <span style={{
+                        fontSize: 14, fontWeight: 800, flexShrink: 0, fontVariantNumeric: "tabular-nums",
+                        color: g.negative ? "#60a5fa" : "var(--text-primary)",
+                      }}>
+                        {g.value}
+                      </span>
+                    </button>
+
+                    {/* Capped and scrolled rather than pushed down the page: an
+                        invoice covering twenty jobs would otherwise bury every
+                        invoice after it. */}
+                    {isOpen && (
+                      <div style={{ maxHeight: 240, overflow: "auto", borderTop: "1px solid var(--border)" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                          <tbody>
+                            {g.rows.map(r => (
+                              <tr key={r.id} style={{ opacity: r.dim ? 0.65 : 1 }}>
+                                {columns.map(c => (
+                                  <td key={c.key} style={{
+                                    ...td,
+                                    textAlign: c.numeric ? "right" : "left",
+                                    fontVariantNumeric: c.numeric ? "tabular-nums" : undefined,
+                                    fontWeight: c.numeric ? 600 : 400,
+                                  }}>
+                                    {r.cells[c.key] ?? "—"}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <table style={{ width: "100%", borderCollapse: "collapse" }}>

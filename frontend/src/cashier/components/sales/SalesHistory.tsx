@@ -8,12 +8,16 @@ import type { TxCategory, TxStatus, SaleTx } from "@/cashier/contexts/SalesConte
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import { useAccessories } from "@/cashier/contexts/AccessoriesContext";
 import { useToast } from "@/lib/ui/toast";
+import { useInvoiceDocument, printInvoiceDocument } from "@/lib/sales/invoiceDoc";
+import { useTableSort, SortHeader } from "@/lib/ui/useTableSort";
 import ExportButtons from "@/cashier/components/shared/ExportButtons";
 import { exportToPdf, exportToExcel, exportToPng } from "@/cashier/utils/exportUtils";
 import {
   Search, Printer, XCircle, RotateCcw,
-  ChevronDown, FileText, AlertTriangle, X, CheckCircle,
+  ChevronDown, FileText, AlertTriangle, X, CheckCircle, AlertCircle,
 } from "lucide-react";
+
+const ff = "'Plus Jakarta Sans', sans-serif";
 
 
 const STATUS_CFG: Record<TxStatus, { color: string; bg: string; border: string }> = {
@@ -237,114 +241,128 @@ function ReturnModal({ tx, onConfirm, onClose }: {
 }
 
 /* ── Receipt Modal ── */
+/**
+ * The invoice behind a past sale.
+ *
+ * Shows the document that was actually issued — the one laid out in the canvas
+ * template editor and stored, byte for byte, when the sale was completed. Not a
+ * fresh render from the sale row: a template gets redesigned, prices get
+ * corrected, a job gets edited, and a reprint that re-derived any of that would
+ * hand the customer a second piece of paper that disagrees with the first.
+ *
+ * Where no document was stored, the sale's own figures are shown instead and
+ * the modal says so plainly rather than silently printing something that looks
+ * like the original but is not.
+ */
 function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
-  const handlePrint = () => {
-    const id = "__receipt__";
-    const existing = document.getElementById(id);
-    if (existing) existing.remove();
-
-    const now = new Date().toLocaleString("en-GB");
-    const div = document.createElement("div");
-    div.id = id;
-    div.innerHTML = `
-      <style>
-        @media print {
-          body > *:not(#${id}) { display: none !important; }
-          #${id} { display: block !important; font-family: 'Courier New', monospace; font-size: 12px; max-width: 280px; margin: 0 auto; }
-        }
-        #${id} { display: none; }
-        .r-center { text-align: center; }
-        .r-bold   { font-weight: bold; }
-        .r-line   { border-top: 1px dashed #000; margin: 6px 0; }
-        .r-row    { display: flex; justify-content: space-between; margin: 3px 0; }
-      </style>
-      <div>
-        <div class="r-center r-bold" style="font-size:16px">MANO MOBILE CENTRE</div>
-        <div class="r-center" style="font-size:10px">Colombo, Sri Lanka | +94 77 123 4567</div>
-        <div class="r-line"></div>
-        <div class="r-center r-bold">SALES RECEIPT</div>
-        <div class="r-line"></div>
-        <div class="r-row"><span>${tx.invoiceNo}</span><span>${tx.date}</span></div>
-        <div class="r-row"><span>Customer:</span><span>${tx.customer}</span></div>
-        <div class="r-row"><span>Category:</span><span>${tx.category}</span></div>
-        <div class="r-line"></div>
-        <div style="margin: 4px 0">${tx.items}</div>
-        <div class="r-line"></div>
-        <div class="r-row r-bold"><span>TOTAL</span><span>${fmtRs(tx.total)}</span></div>
-        <div class="r-row"><span>Status:</span><span>${tx.status}</span></div>
-        <div class="r-line"></div>
-        <div class="r-center" style="font-size:10px">Printed: ${now}</div>
-        <div class="r-center" style="font-size:10px">Thank you for your business!</div>
-      </div>
-    `;
-    document.body.appendChild(div);
-    window.print();
-    setTimeout(() => { const el = document.getElementById(id); if (el) el.remove(); }, 2000);
-  };
-
+  const { doc, loading } = useInvoiceDocument(tx.invoiceNo);
   const cfg = STATUS_CFG[tx.status];
 
   return createPortal(
-    <div style={{ position: "fixed", inset: 0, zIndex: 1010, display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 1010, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)" }} />
       <div style={{
-        position: "relative", zIndex: 1, width: 460,
+        position: "relative", zIndex: 1, width: "100%", maxWidth: doc ? 900 : 460,
+        maxHeight: "calc(100vh - 40px)", display: "flex", flexDirection: "column",
         background: "var(--bg-card)", border: "1px solid var(--border)",
-        borderRadius: 16, padding: 28,
+        borderRadius: 16, overflow: "hidden",
       }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 22px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
             <div style={{
-              width: 36, height: 36, borderRadius: 9,
+              width: 36, height: 36, borderRadius: 9, flexShrink: 0,
               background: "var(--accent-dim)", border: "1px solid var(--accent-glow)",
               display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)",
             }}>
               <FileText size={15} />
             </div>
-            <div>
+            <div style={{ minWidth: 0 }}>
               <p style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)" }}>{tx.invoiceNo}</p>
-              <p style={{ fontSize: 11, color: "var(--text-muted)" }}>{fmtDate(tx.date)}</p>
+              <p style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                {fmtDate(tx.date)} · {tx.customer} · <span style={{ color: cfg.color }}>{tx.status}</span>
+              </p>
             </div>
           </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", flexShrink: 0 }}>
             <X size={16} />
           </button>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-          {[
-            ["Customer",  tx.customer],
-            ["Category",  tx.category],
-            ["Total",     fmtRs(tx.total)],
-            ["Status",    tx.status],
-          ].map(([k, v]) => (
-            <div key={k} style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: "10px 12px" }}>
-              <p style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>{k}</p>
-              <p style={{ fontSize: 13, color: "var(--text-primary)", fontWeight: 600 }}>{v}</p>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: doc ? 0 : "22px" }}>
+          {loading && (
+            <p style={{ fontSize: 12.5, color: "var(--text-muted)", padding: 22, textAlign: "center", fontFamily: ff }}>
+              Loading the invoice…
+            </p>
+          )}
+
+          {/* The stored document, exactly as it printed. Rendered on a white
+              sheet because that is the paper it was designed against — the
+              app's dark surfaces behind it would misrepresent the layout. */}
+          {!loading && doc && (
+            <div style={{ background: "#525659", padding: 20, display: "flex", justifyContent: "center" }}>
+              <div
+                style={{ background: "#fff", boxShadow: "0 4px 24px rgba(0,0,0,0.35)", maxWidth: "100%", overflowX: "auto" }}
+                dangerouslySetInnerHTML={{ __html: doc.html }}
+              />
             </div>
-          ))}
+          )}
+
+          {!loading && !doc && (
+            <>
+              <div style={{ display: "flex", gap: 9, padding: "11px 13px", borderRadius: 9, marginBottom: 16, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)" }}>
+                <AlertCircle size={14} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+                <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.55, fontFamily: ff }}>
+                  No printed invoice was stored for this sale, so there is nothing to reprint.
+                  The figures below are the sale record itself. Sales completed from the Repair,
+                  Mobile and Others screens keep their invoice; older sales and accessory
+                  counter sales do not.
+                </p>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+                {[
+                  ["Customer",  tx.customer],
+                  ["Category",  tx.category],
+                  ["Total",     fmtRs(tx.total)],
+                  ["Status",    tx.status],
+                ].map(([k, v]) => (
+                  <div key={k} style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: "10px 12px" }}>
+                    <p style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>{k}</p>
+                    <p style={{ fontSize: 13, color: "var(--text-primary)", fontWeight: 600 }}>{v}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: "10px 14px" }}>
+                <p style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Items</p>
+                <p style={{ fontSize: 13, color: "var(--text-primary)" }}>{tx.items}</p>
+              </div>
+            </>
+          )}
         </div>
 
-        <div style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: "10px 14px", marginBottom: 20 }}>
-          <p style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Items</p>
-          <p style={{ fontSize: 13, color: "var(--text-primary)" }}>{tx.items}</p>
-        </div>
-
-        <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ display: "flex", gap: 10, padding: "14px 22px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
           <button onClick={onClose} style={{
             flex: 1, padding: "10px 0", borderRadius: 9, border: "1px solid var(--border)",
             background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13,
-            fontFamily: "'Plus Jakarta Sans', sans-serif",
+            fontFamily: ff,
           }}>
             Close
           </button>
-          <button onClick={handlePrint} style={{
-            flex: 1, padding: "10px 0", borderRadius: 9, border: "1px solid var(--accent-glow)",
-            background: "var(--accent-dim)", color: "var(--accent)", cursor: "pointer",
-            fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
-          }}>
-            <Printer size={14} /> Reprint Receipt
+          <button
+            onClick={() => doc && printInvoiceDocument(doc)}
+            disabled={!doc}
+            title={doc ? undefined : "No invoice was stored for this sale"}
+            style={{
+              flex: 1, padding: "10px 0", borderRadius: 9, border: "1px solid var(--accent-glow)",
+              background: "var(--accent-dim)", color: "var(--accent)",
+              cursor: doc ? "pointer" : "not-allowed", opacity: doc ? 1 : 0.45,
+              fontSize: 13, fontWeight: 600, fontFamily: ff,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+            }}
+          >
+            <Printer size={14} /> Reprint Invoice
           </button>
         </div>
       </div>
@@ -388,6 +406,7 @@ export default function SalesHistory() {
     revenue: filtered.filter(t => t.status === "Paid").reduce((a, b) => a + b.total, 0),
     voided:  filtered.filter(t => t.status === "Voided").length,
     returned: filtered.filter(t => t.status === "Returned").length,
+    refunded: filtered.reduce((a, b) => a + (b.returnedAmount ?? 0), 0),
   }), [filtered]);
 
   const handleVoidConfirm = () => {
@@ -427,7 +446,20 @@ export default function SalesHistory() {
   };
 
   const PDF_HEADERS  = ["Invoice No", "Date", "Customer", "Category", "Items", "Total (Rs.)", "Status"];
-  const excelRows    = () => filtered.map(tx => [tx.invoiceNo, tx.date, tx.customer, tx.category, tx.items, tx.total, tx.status]);
+  // Ordered after filtering, so a sort applies to what is on screen. The
+  // export below reads the sorted list too — a spreadsheet that came out in a
+  // different order from the table it was taken from is its own small betrayal.
+  const { sorted: rows, sort, toggle: toggleSort } = useTableSort(filtered, {
+    invoice:  tx => tx.invoiceNo,
+    date:     tx => tx.date,
+    customer: tx => tx.customer,
+    category: tx => tx.category,
+    items:    tx => tx.items,
+    total:    tx => tx.total,
+    status:   tx => tx.status,
+  });
+
+  const excelRows    = () => rows.map(tx => [tx.invoiceNo, tx.date, tx.customer, tx.category, tx.items, tx.total, tx.status]);
   const filename     = `sales-history-${new Date().toISOString().slice(0, 10)}`;
 
   return (
@@ -442,6 +474,9 @@ export default function SalesHistory() {
               { label: "Revenue (Paid)", value: fmtRs(totals.revenue), color: "#4ade80" },
               { label: "Voided", value: totals.voided, color: "#f87171" },
               { label: "Returned", value: totals.returned, color: "#fbbf24" },
+              // Gross takings above are what was billed; this is what came
+              // back off them. Without it a period reads as better than it was.
+              { label: "Refunded", value: fmtRs(totals.refunded), color: "#60a5fa" },
             ].map(chip => (
               <div key={chip.label} style={{
                 background: "var(--bg-card)", border: "1px solid var(--border)",
@@ -521,23 +556,41 @@ export default function SalesHistory() {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
-              {["Invoice #", "Date", "Customer", "Category", "Items", "Total", "Status", "Actions"].map(h => (
-                <th key={h} style={{
-                  padding: "11px 14px", textAlign: "left", fontWeight: 600,
-                  fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase",
-                  letterSpacing: "0.06em", whiteSpace: "nowrap",
-                }}>{h}</th>
+              {([
+                ["invoice",  "Invoice #"],
+                ["date",     "Date"],
+                ["customer", "Customer"],
+                ["category", "Category"],
+                ["items",    "Items"],
+                ["total",    "Total"],
+                ["status",   "Status"],
+                // Actions holds buttons, so there is nothing to order by.
+                ["",         "Actions"],
+              ] as const).map(([key, h]) => (
+                <SortHeader
+                  key={h}
+                  label={h}
+                  sortKey={key}
+                  sort={sort}
+                  onSort={toggleSort}
+                  sortable={key !== ""}
+                  style={{
+                    padding: "11px 14px", fontWeight: 600,
+                    fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase",
+                    letterSpacing: "0.06em", whiteSpace: "nowrap",
+                  }}
+                />
               ))}
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {rows.length === 0 ? (
               <tr>
                 <td colSpan={8} style={{ padding: "40px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
                   No transactions match your filters.
                 </td>
               </tr>
-            ) : filtered.map((tx, i) => {
+            ) : rows.map((tx, i) => {
               const cfg = STATUS_CFG[tx.status];
               const catColor = CAT_COLORS[tx.category];
               return (
@@ -568,7 +621,7 @@ export default function SalesHistory() {
                   </td>
                   <td style={{ padding: "11px 14px" }}>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={() => setViewTarget(tx)} title="View Receipt" style={{
+                      <button onClick={() => setViewTarget(tx)} title="View or reprint the invoice" style={{
                         width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)",
                         background: "var(--bg-card)", color: "var(--text-secondary)",
                         cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",

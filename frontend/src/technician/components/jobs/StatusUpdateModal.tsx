@@ -476,6 +476,12 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
         if (deviceDraft.model.trim())       completedPatch.model       = deviceDraft.model.trim();
       }
       if (deviceNeed.imei && deviceDraft.imei.trim()) completedPatch.imei = deviceDraft.imei.trim();
+      // "Cannot be read" recorded as a fact, so the empty model number stops
+      // looking like a gap somebody still has to go and fill. Cleared when the
+      // technician unticks it, since the question is open again.
+      if (deviceIncomplete) {
+        completedPatch.deviceUnidentifiedReason = deviceDraft.unavailableReason.trim() || null;
+      }
       // Left at "checking", the counter has to settle the cover at handover —
       // so say so on the job. Without it the sales screen falls back to
       // "NO WARRANTY", which is a different answer from "not decided yet" and

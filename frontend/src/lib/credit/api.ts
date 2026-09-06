@@ -390,7 +390,11 @@ export interface CreditEntryGroup {
   key: string;
   kind: EntryKind;
   invoiceNo: string | null;
-  /** Summed across the group. A single entry is a group of one. */
+  /**
+   * Netted across the group: charges less refunds. A single entry is a group
+   * of one, and an ungrouped refund keeps its own positive amount, since the
+   * `kind` and its minus sign already say which way it goes.
+   */
   amount: number;
   occurredOn: string;
   dueOn: string | null;
@@ -405,19 +409,35 @@ export function groupCreditEntries(entries: CreditEntry[]): CreditEntryGroup[] {
   const byInvoice = new Map<string, CreditEntryGroup>();
 
   for (const e of entries) {
-    // Only charges group, and only when an invoice says they belong together.
-    // A payment is its own event even if two land on the same invoice — part
-    // payments are exactly the case somebody opens this history to check.
-    const groupable = e.kind === "Charge" && !!e.invoiceNo;
+    // Charges and Cash Return refunds group, and only when an invoice says
+    // they belong together. A refund standing on its own reads as an
+    // unexplained deduction — the reader has to already know which invoice
+    // RM-045 was on to see why the balance moved. Inside its invoice it is
+    // simply one of the lines that produced the total.
+    //
+    // Payments and write-offs stay separate on purpose. Those are their own
+    // events, and a part payment against an invoice is exactly the thing
+    // somebody opens this history to look at on its own.
+    const groupable = (e.kind === "Charge" || e.kind === "Refund") && !!e.invoiceNo;
     const existing = groupable ? byInvoice.get(e.invoiceNo!) : undefined;
 
     if (existing) {
-      existing.amount += e.amount;
+      // A refund subtracts. The group's amount is what the invoice came to —
+      // charges less anything returned against it — so the figure on screen is
+      // the one that moved the balance, not a gross that never existed.
+      existing.amount += e.kind === "Refund" ? -e.amount : e.amount;
       existing.entries.push(e);
       if (e.jobId) existing.jobIds.push(e.jobId);
       // The earliest date is when the invoice was raised; a later charge
       // stamped with the same number is part of that same bill.
       if (e.occurredOn < existing.occurredOn) existing.occurredOn = e.occurredOn;
+      // A group led by a refund becomes a Charge group the moment a charge
+      // joins it, so the invoice reads as a bill with a deduction on it rather
+      // than as a refund that happens to contain charges.
+      if (e.kind === "Charge") {
+        existing.kind = "Charge";
+        existing.dueOn = existing.dueOn ?? e.dueOn;
+      }
       continue;
     }
 
@@ -425,7 +445,7 @@ export function groupCreditEntries(entries: CreditEntry[]): CreditEntryGroup[] {
       key: groupable ? `inv:${e.invoiceNo}` : `entry:${e.id}`,
       kind: e.kind,
       invoiceNo: e.invoiceNo,
-      amount: e.amount,
+      amount: e.kind === "Refund" && groupable ? -e.amount : e.amount,
       occurredOn: e.occurredOn,
       dueOn: e.dueOn,
       method: e.method,

@@ -2,7 +2,7 @@
 
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import type { PartRequest, SparePart } from "@/cashier/contexts/PartsContext";
-import type { InsightColumn, InsightRow, InsightSummary } from "./InsightModal";
+import type { InsightColumn, InsightRow, InsightSummary, InsightGroup } from "./InsightModal";
 import { labourForJob, describeRate } from "@/lib/repair/labour";
 import type { EffectiveRules } from "@/lib/settings/staffRules";
 
@@ -24,6 +24,11 @@ export interface InsightSpec {
   columns: InsightColumn[];
   rows: InsightRow[];
   summary?: InsightSummary[];
+  /** The same rows, gathered. Offered as an alternative view, never a
+   *  replacement — see InsightModal's toggle. */
+  groups?: InsightGroup[];
+  /** The toggle's label. Only meaningful alongside `groups`. */
+  groupLabel?: string;
   note?: string;
   emptyText?: string;
   actionLabel?: string;
@@ -52,6 +57,22 @@ const JOB_COLUMNS: InsightColumn[] = [
   { key: "paid", label: "Paid", numeric: true },
 ];
 
+/**
+ * What this job did to the shop's income, signed.
+ *
+ * A Cash Return is money going the other way, so it counts negatively — the
+ * whole reason a period with one in it must not be read as if the repair had
+ * simply been free.
+ */
+function signedAmount(j: RepairJob): number {
+  return j.completionType === "Cash Return"
+    ? -(j.cashReturnAmount ?? 0)
+    : j.estimatedCost;
+}
+
+/** Brackets for money out, the same convention the jobs list and invoice use. */
+const signedRs = (n: number) => (n < 0 ? `(${rs(-n)})` : rs(n));
+
 function jobRows(jobs: RepairJob[]): InsightRow[] {
   return jobs.map(j => ({
     id: j.id,
@@ -61,26 +82,91 @@ function jobRows(jobs: RepairJob[]): InsightRow[] {
       device: device(j),
       tech: j.technician || "Unassigned",
       issued: dateOf(j.handover?.handedOverAt ?? j.completedAt),
-      amount: rs(j.estimatedCost),
+      amount: j.completionType === "Cash Return"
+        ? `Cash Return ${signedRs(signedAmount(j))}`
+        : rs(j.estimatedCost),
       paid: rs(j.advancePaid),
     },
   }));
 }
 
+/**
+ * The same jobs, gathered under the invoice each was billed on.
+ *
+ * Two jobs on one invoice — a repair charged and a Cash Return against it —
+ * are one piece of paper the customer signed and one net figure the shop
+ * banked. Listed separately they read as unrelated records and the arithmetic
+ * that produced the invoice total is invisible.
+ *
+ * Jobs with no invoice number are collected at the end rather than dropped:
+ * they are handed-over work that has not been billed yet, which is a real
+ * state and worth seeing.
+ */
+function invoiceGroups(jobs: RepairJob[]): InsightGroup[] {
+  const byInvoice = new Map<string, RepairJob[]>();
+  const unbilled: RepairJob[] = [];
+
+  for (const j of jobs) {
+    const no = j.invoiceNo?.trim();
+    if (!no) { unbilled.push(j); continue; }
+    const list = byInvoice.get(no);
+    if (list) list.push(j); else byInvoice.set(no, [j]);
+  }
+
+  const group = (id: string, title: string, list: RepairJob[]): InsightGroup => {
+    const net = list.reduce((sum, j) => sum + signedAmount(j), 0);
+    return {
+      id,
+      title,
+      subtitle: `${list.length} job${list.length === 1 ? "" : "s"}`,
+      value: signedRs(net),
+      negative: net < 0,
+      rows: jobRows(list),
+    };
+  };
+
+  const groups = [...byInvoice.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([no, list]) => group(no, no, list));
+
+  if (unbilled.length > 0) {
+    groups.push(group("__unbilled__", "Not yet invoiced", unbilled));
+  }
+  return groups;
+}
+
 export function repairIncomeInsight(jobs: RepairJob[], period: string): InsightSpec {
-  const charged = jobs.reduce((s, j) => s + j.estimatedCost, 0);
+  // Billed and returned are shown apart before they are netted, because "we
+  // took 8,000" and "we gave 5,000 back" are two things a shop wants to see,
+  // and a single 3,000 hides both.
+  const billed = jobs.reduce((s, j) => s + (j.completionType === "Cash Return" ? 0 : j.estimatedCost), 0);
+  const returned = jobs.reduce((s, j) => s + (j.completionType === "Cash Return" ? (j.cashReturnAmount ?? 0) : 0), 0);
+  const net = billed - returned;
   const paid = jobs.reduce((s, j) => s + j.advancePaid, 0);
+
+  const summary: InsightSummary[] = [
+    { label: "Net income", value: signedRs(net), strong: true, hint: `${jobs.length} job${jobs.length === 1 ? "" : "s"}` },
+  ];
+  // Only worth the width when there is actually something to return. On an
+  // ordinary day these two would just be the net figure repeated.
+  if (returned > 0) {
+    summary.push({ label: "Repairs billed", value: rs(billed) });
+    summary.push({ label: "Cash returns", value: `(${rs(returned)})`, hint: "paid back" });
+  }
+  summary.push({ label: "Paid", value: rs(paid) });
+  summary.push({ label: "Outstanding", value: rs(net - paid), hint: net - paid > 0 ? "still to collect" : "settled" });
+
   return {
     title: "Repair Income",
     subtitle: `Jobs handed to customers · ${period}`,
     columns: JOB_COLUMNS,
     rows: jobRows(jobs),
-    summary: [
-      { label: "Charged", value: rs(charged), strong: true, hint: `${jobs.length} job${jobs.length === 1 ? "" : "s"}` },
-      { label: "Paid", value: rs(paid) },
-      { label: "Outstanding", value: rs(charged - paid), hint: charged - paid > 0 ? "still to collect" : "settled" },
-    ],
-    note: "Income is counted when the device is collected, not when the repair is finished.",
+    // Presentation only. The same jobs and the same arithmetic either way —
+    // grouping changes how the total is explained, never what it is.
+    groups: invoiceGroups(jobs),
+    groupLabel: "Show invoice wise",
+    summary,
+    note: "Income is counted when the device is collected, not when the repair is finished. Cash Returns count against it.",
     emptyText: "No repairs were issued to customers in this period. Income appears here once a job is handed over.",
     actionLabel: "Open Repair Management",
   };

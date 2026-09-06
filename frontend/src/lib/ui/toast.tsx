@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { CheckCircle2, AlertCircle, Info, X } from "lucide-react";
+import { useHydrated } from "@/lib/ui/useHydrated";
 
 /**
  * Action feedback, in two weights.
@@ -172,7 +173,12 @@ function ActionDialog({ msg, onClose }: { msg: DialogMsg; onClose: () => void })
 /* ─── Corner toasts ──────────────────────────────────────────────────────── */
 
 function ToastViewport({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: number) => void }) {
-  if (typeof document === "undefined") return null;
+  // Every other portal in this app is inside a modal that only exists after a
+  // click, so it never renders during hydration and the old check was harmless
+  // there. This one is mounted by the root layout on every page — the one place
+  // the difference is real.
+  const hydrated = useHydrated();
+  if (!hydrated) return null;
   return createPortal(
     <div style={{
       position: "fixed", right: 18, bottom: 18, zIndex: 3000,

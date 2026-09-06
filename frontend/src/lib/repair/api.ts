@@ -59,6 +59,8 @@ interface JobRow {
   advance_refunded_on: string | null;
   cash_return_amount: number | string | null;
   rejob_of: string | null;
+  invoice_no: string | null;
+  device_unidentified_reason: string | null;
   written_off: number | string | null;
   original_estimate: number | string | null;
   revised_estimate: number | string | null;
@@ -130,6 +132,8 @@ export function rowToJob(row: JobRow): RepairJob {
     advanceRefundedOn: row.advance_refunded_on ?? null,
     cashReturnAmount: optNum(row.cash_return_amount),
     rejobOf: row.rejob_of ?? null,
+    invoiceNo: row.invoice_no ?? null,
+    deviceUnidentifiedReason: row.device_unidentified_reason ?? null,
     // Part of the bill forgiven at handover — see migration 20260901000017.
     writtenOff: num(row.written_off),
     originalEstimate: optNum(row.original_estimate),
@@ -186,6 +190,7 @@ export function jobToRow(job: Partial<RepairJob>): Record<string, unknown> {
   set("estimated_cost", job.estimatedCost);
   set("advance_paid", job.advancePaid);
   set("cash_return_amount", job.cashReturnAmount);
+  set("device_unidentified_reason", job.deviceUnidentifiedReason);
   set("rejob_of", job.rejobOf);
   set("written_off", job.writtenOff);
   set("original_estimate", job.originalEstimate);

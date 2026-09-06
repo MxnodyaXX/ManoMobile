@@ -362,6 +362,7 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
   // whatever this shop's own past jobs have already recorded for that
   // number.
   const [lookupResult, setLookupResult] = useState<string | null>(null);
+  const imeiRef = useRef<HTMLInputElement>(null);
   const handleModelNumber = (raw: string) => {
     onChange({ deviceModelNumber: raw });
     // Reference table first, then this shop's own past jobs, then the small
@@ -377,6 +378,11 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
       // make sure the resolved model is in the combobox list
       if (!models.includes(hit.model)) onAddModel(hit.model);
       setLookupResult(`${hit.brand} ${hit.model}`);
+      // The number was recognised, so brand and model are settled and the IMEI
+      // is the only thing left to read off the handset. Sending the cursor
+      // there saves tabbing past two fields that just answered themselves.
+      // After paint: the same update that resolved the number also fills them.
+      requestAnimationFrame(() => imeiRef.current?.focus());
     } else {
       setLookupResult(raw.trim() ? "no-match" : null);
     }
@@ -754,6 +760,7 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
                   ...inputStyle,
                   borderColor: imeiHistory.length > 0 ? "#fbbf24" : inputStyle.borderColor as string,
                 }}
+                ref={imeiRef}
                 maxLength={15}
                 inputMode="numeric"
                 value={data.deviceIMEI}

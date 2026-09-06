@@ -33,6 +33,7 @@ import { useMyPermissions } from "@/lib/settings/staffRules";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import { useToast } from "@/lib/ui/toast";
 import { recordDealerCashReturn } from "@/lib/accounts/cashReturns";
+import { useTableSort, SortHeader } from "@/lib/ui/useTableSort";
 
 /**
  * Credit accounts — who owes the shop money.
@@ -51,7 +52,44 @@ const statusConfig: Record<CreditStatus, { color: string; bg: string; border: st
   Settled: { ...STATUS_COLOURS.Settled, icon: CheckCircle },
 };
 
+/**
+ * The styling for a status, whatever the database sent.
+ *
+ * `status` is computed in v_credit_accounts, so its possible values live in
+ * SQL and this list is a copy of them. A migration that changes the wording on
+ * one side and not the other is an easy mistake — and it happened: the view
+ * briefly returned "Current" and "Over limit", and an unguarded lookup took
+ * the whole customer screen down on `.icon` of undefined.
+ *
+ * An unrecognised status is worth showing as itself in neutral colours. The
+ * account and its balance are still correct; only the label is unfamiliar, and
+ * that is not worth losing the page over.
+ */
+const statusStyle = (status: string) =>
+  statusConfig[status as CreditStatus] ?? {
+    color: "var(--text-muted)", bg: "var(--bg-secondary)", border: "var(--border)", icon: CreditCard,
+  };
+
 const ff = "'Plus Jakarta Sans', sans-serif";
+
+/**
+ * How each job on an invoice ended, said on its own line.
+ *
+ * Every job is labelled, including Normal. An outcome shown only when it is
+ * unusual makes the reader infer the common case from silence — and on a
+ * statement somebody is checking against their own records, an unlabelled line
+ * is a line they have to go and look up. Normal is deliberately the quietest
+ * of the four so the ones that moved money differently still stand out.
+ */
+const OUTCOME_TAG: Record<string, { label: string; color: string; tint: string; edge: string }> = {
+  // The app's pill idiom throughout: the colour, a 0.10 wash of it, a 0.30
+  // edge. Written as literal rgba because a CSS custom property cannot take an
+  // alpha suffix — `var(--danger)10` is not a colour, and fails silently.
+  Normal:        { label: "NORMAL",      color: "var(--success)", tint: "rgba(52,211,153,0.10)",  edge: "rgba(52,211,153,0.30)"  },
+  Return:        { label: "RETURN",      color: "var(--danger)",  tint: "rgba(248,113,113,0.10)", edge: "rgba(248,113,113,0.30)" },
+  FOC:           { label: "FOC",         color: "#a78bfa",        tint: "rgba(167,139,250,0.10)", edge: "rgba(167,139,250,0.30)" },
+  "Cash Return": { label: "CASH RETURN", color: "#60a5fa",        tint: "rgba(96,165,250,0.12)",  edge: "rgba(96,165,250,0.40)"  },
+};
 
 /**
  * The app's pill: a colour, its wash at 0.08, its edge at 0.2.
@@ -531,6 +569,9 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
           const multi = g.entries.length > 1;
           const open = expanded === g.key;
           const source = sourceOf(g.invoiceNo, g.jobIds);
+          // Money leaving the shop: a refund on its own, or an invoice whose
+          // Cash Returns exceeded its charges.
+          const back = g.kind === "Refund" || g.amount < 0;
 
           return (
             <div key={g.key} style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden" }}>
@@ -550,6 +591,13 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
                         {" "}· {g.entries.length} jobs
                       </span>
                     )}
+                    {/* Named on the collapsed row, so the deduction does not
+                        have to be discovered by expanding the invoice. */}
+                    {g.entries.some(e => e.kind === "Refund") && (
+                      <span style={{ color: "var(--accent)", fontWeight: 700 }}>
+                        {" "}· Cash Return adjustment
+                      </span>
+                    )}
                   </p>
                   <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1, fontFamily: ff, overflow: "hidden", textOverflow: "ellipsis" }}>
                     {/* With an invoice number the number IS the description, so
@@ -562,7 +610,20 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
                 </div>
 
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
-                  <p style={{ fontSize: 13, fontWeight: 700, color: t.color, fontFamily: ff }}>{t.sign} {rs(g.amount)}</p>
+                  {/* Brackets for money the shop owes back, the same convention
+                      the jobs list and the dealer invoice already use, and the
+                      reason no extra column is needed to say which way a line
+                      goes. An invoice netted below zero by its Cash Returns
+                      prints in brackets too — it is the same fact. */}
+                  {/* One convention for money out, whether it is netted
+                      inside an invoice or standing on its own: a refund that
+                      never reached an invoice reads the same way as one that
+                      did. Mixing "− Rs. 5,000" with "(Rs. 5,000)" in the same
+                      column would make the brackets look like they meant
+                      something else. */}
+                  <p style={{ fontSize: 13, fontWeight: 700, color: back ? "var(--accent)" : t.color, fontFamily: ff }}>
+                    {back ? `(${rs(Math.abs(g.amount))})` : `${t.sign} ${rs(g.amount)}`}
+                  </p>
                   <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff }}>{g.occurredOn}</p>
                 </div>
 
@@ -596,14 +657,47 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
                     // job itself, same as any other screen that shows this
                     // job's details.
                     const job = e.jobId ? jobs.find(j => j.id === e.jobId) : undefined;
+                    const back = e.kind === "Refund";
+                    const outcome = OUTCOME_TAG[job?.completionType ?? (back ? "Cash Return" : "Normal")];
                     return (
-                      <div key={e.id} style={{ padding: "7px 0", borderBottom: i < g.entries.length - 1 ? "1px solid var(--border)" : "none" }}>
+                      // The row itself is tinted for money going out, so a Cash
+                      // Return is findable while scrolling a long invoice rather
+                      // than only once the badge is read.
+                      <div key={e.id} style={{
+                        padding: back ? "7px 9px" : "7px 0",
+                        margin: back ? "2px -9px" : undefined,
+                        borderRadius: back ? 7 : undefined,
+                        background: back ? "rgba(96,165,250,0.07)" : undefined,
+                        borderBottom: i < g.entries.length - 1 ? "1px solid var(--border)" : "none",
+                      }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                           <span style={{ fontSize: 11.5, color: "var(--text-secondary)", fontFamily: ff }}>
                             {e.jobId ?? "—"}
                             {job?.dealerJobNo && <span style={{ color: "var(--text-muted)" }}> · #{job.dealerJobNo}</span>}
+                            {/* The whole point of grouping it here: this is the
+                                line that took the money off, said in place
+                                rather than as a separate entry somebody has to
+                                match up by job number. */}
+                            {/* From the job, not from the entry: the entry only
+                                knows whether money moved in or out, while the
+                                job knows why. Falls back to the entry's own
+                                reading when the job is not in the register —
+                                an old job, or one since deleted. */}
+                            {outcome && (
+                              <span style={{
+                                display: "inline-block", marginLeft: 7,
+                                fontSize: 9.5, fontWeight: 800, letterSpacing: "0.06em",
+                                padding: "2px 7px", borderRadius: 5, verticalAlign: "middle",
+                                color: outcome.color, background: outcome.tint,
+                                border: `1px solid ${outcome.edge}`,
+                              }}>
+                                {outcome.label}
+                              </span>
+                            )}
                           </span>
-                          <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff }}>{rs(e.amount)}</span>
+                          <span style={{ fontSize: 11.5, fontWeight: 600, color: back ? "var(--accent)" : "var(--text-primary)", fontFamily: ff }}>
+                            {back ? `(${rs(e.amount)})` : rs(e.amount)}
+                          </span>
                         </div>
                         {job && (
                           <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginTop: 3, lineHeight: 1.5 }}>
@@ -787,6 +881,20 @@ export default function CreditCustomers() {
       && (kindFilter === "All" || a.holderKind === kindFilter);
   });
 
+  // Balance descending is the sort a shop actually wants here, but it is not
+  // made the default: the list arrives ordered by the view, and quietly
+  // reordering somebody's screen on load is a different thing from offering
+  // them the option.
+  const { sorted: rows, sort, toggle: toggleSort } = useTableSort(filtered, {
+    holder:  a => a.name,
+    contact: a => a.phone,
+    charged: a => a.totalCharged,
+    paid:    a => a.totalPaid,
+    balance: a => a.balance,
+    limit:   a => a.creditLimit,
+    status:  a => a.status,
+  });
+
   const outstanding = accounts.reduce((s, a) => s + Math.max(0, a.balance), 0);
   const overdueValue = accounts.filter(a => a.status === "Overdue").reduce((s, a) => s + a.balance, 0);
   const overLimit = accounts.filter(isOverLimit).length;
@@ -859,7 +967,7 @@ export default function CreditCustomers() {
             // and the rows it filters to are visibly the same thing.
             const cfg = s === "All"
               ? { color: "var(--accent)", bg: "var(--accent-dim)", border: "var(--accent-glow)" }
-              : statusConfig[s as CreditStatus];
+              : statusStyle(s);
             return (
               <button key={s} onClick={() => setStatusFilter(s)}
                 style={{ padding: "6px 13px", borderRadius: 7, fontSize: 12.5, fontWeight: active ? 700 : 500, border: `1px solid ${active ? cfg.border : "transparent"}`, background: active ? cfg.bg : "transparent", color: active ? cfg.color : "var(--text-muted)", cursor: "pointer", fontFamily: ff }}>
@@ -889,8 +997,25 @@ export default function CreditCustomers() {
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)" }}>
-              {["Holder", "Contact", "Charged", "Paid", "Balance", "Limit", "Status", ""].map(h => (
-                <th key={h} style={{ position: "sticky", top: 0, zIndex: 1, padding: "12px 16px", textAlign: "left", fontSize: 11, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase", whiteSpace: "nowrap", fontFamily: ff, background: "var(--bg-secondary)" }}>{h}</th>
+              {([
+                ["holder",  "Holder"],
+                ["contact", "Contact"],
+                ["charged", "Charged"],
+                ["paid",    "Paid"],
+                ["balance", "Balance"],
+                ["limit",   "Limit"],
+                ["status",  "Status"],
+                ["",        ""],
+              ] as const).map(([key, h]) => (
+                <SortHeader
+                  key={h || "actions"}
+                  label={h}
+                  sortKey={key}
+                  sort={sort}
+                  onSort={toggleSort}
+                  sortable={key !== ""}
+                  style={{ position: "sticky", top: 0, zIndex: 1, padding: "12px 16px", fontSize: 11, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase", whiteSpace: "nowrap", fontFamily: ff, background: "var(--bg-secondary)" }}
+                />
               ))}
             </tr>
           </thead>
@@ -905,8 +1030,8 @@ export default function CreditCustomers() {
                   ? "No credit accounts yet. One opens by itself the first time a job is handed over unpaid."
                   : "No accounts match those filters."}
               </td></tr>
-            ) : filtered.map((a, i) => {
-              const sc = statusConfig[a.status];
+            ) : rows.map((a, i) => {
+              const sc = statusStyle(a.status);
               const StatusIcon = sc.icon;
               const pct = a.totalCharged > 0 ? Math.round((a.totalPaid / a.totalCharged) * 100) : 0;
               const over = isOverLimit(a) && a.balance > 0;
@@ -915,7 +1040,7 @@ export default function CreditCustomers() {
                 <Fragment key={a.id}>
                 <tr
                   style={{
-                    borderBottom: open || i < filtered.length - 1 ? "1px solid var(--border)" : "none",
+                    borderBottom: open || i < rows.length - 1 ? "1px solid var(--border)" : "none",
                     transition: "background 0.15s",
                     background: open ? "var(--bg-card-hover)" : "transparent",
                   }}
@@ -1020,7 +1145,7 @@ export default function CreditCustomers() {
                 </tr>
 
                 {open && (
-                  <tr style={{ borderBottom: i < filtered.length - 1 ? "1px solid var(--border)" : "none" }}>
+                  <tr style={{ borderBottom: i < rows.length - 1 ? "1px solid var(--border)" : "none" }}>
                     <td colSpan={8} style={{ padding: 0, background: "var(--bg-secondary)" }}>
                       <CreditHistoryList account={a} />
                     </td>
