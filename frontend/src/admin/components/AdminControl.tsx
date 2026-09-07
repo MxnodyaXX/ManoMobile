@@ -4,10 +4,11 @@ import { Fragment, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import AgentsManager from "@/admin/components/repair/AgentsManager";
 import { useToast } from "@/lib/ui/toast";
+import { inputStyle, labelStyle, thStyle, tdStyle, btnAccent, DeleteConfirm } from "@/admin/components/shared/adminUi";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import Barcode from "react-barcode";
 import {
-  Tag, Tags, Layers, Truck, Barcode as BarcodeIcon, Settings,
+  Tag, Tags, Layers, Truck, Barcode as BarcodeIcon, Settings, Boxes, Wrench, SlidersHorizontal,
   Plus, Edit2, Trash2, X, Search, Phone, Mail, Eye, KeyRound, Check, ChevronDown,
   Store, MapPin, CalendarDays, Building2, Package, ClipboardCheck,
   CheckCircle2, XCircle, Clock, AlertTriangle, AlertCircle, Star, Copy,
@@ -17,7 +18,7 @@ import {
   type Brand, type Category, type Subcategory, type Supplier, type BarcodeSettings,
 } from "@/cashier/contexts/InventoryContext";
 import { useRepair, type RepairDealer } from "@/cashier/contexts/RepairContext";
-import { useParts, PART_CATEGORIES, type SparePart, type PartCategory, type PartRequestStatus } from "@/cashier/contexts/PartsContext";
+import { useParts, type PartRequestStatus } from "@/cashier/contexts/PartsContext";
 import {
   useBarcodeTemplates, createTemplate, updateTemplate, deleteTemplate, setDefaultTemplate,
   LAYOUT_LABELS, type BarcodeTemplate, type BarcodeLayout,
@@ -32,39 +33,6 @@ import type { LabelElement } from "@/lib/inventory/labelElements";
 /** A template being edited. Identity and default-ness are not editable here —
  *  they are set by saving and by the Set as Default action. */
 type TemplateDraft = Omit<BarcodeTemplate, "id" | "isDefault">;
-import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
-
-// ─── Shared styles ────────────────────────────────────────────────────────────
-
-const inputStyle: React.CSSProperties = {
-  background: "var(--bg-surface)", border: "1px solid var(--border)",
-  borderRadius: 8, padding: "9px 12px", color: "var(--text-primary)",
-  fontSize: 13, width: "100%", outline: "none",
-  fontFamily: "'Plus Jakarta Sans', sans-serif", boxSizing: "border-box",
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
-  textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 5, display: "block",
-};
-
-const thStyle: React.CSSProperties = {
-  padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 700,
-  color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em",
-  background: "var(--bg-surface)", borderBottom: "1px solid var(--border)",
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: "12px 16px", fontSize: 13, color: "var(--text-primary)",
-  borderBottom: "1px solid var(--border)", fontFamily: "'Plus Jakarta Sans', sans-serif",
-};
-
-const btnAccent: React.CSSProperties = {
-  display: "flex", alignItems: "center", gap: 6, padding: "8px 14px",
-  borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff",
-  cursor: "pointer", fontSize: 12, fontWeight: 600,
-  fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap",
-};
 
 // ─── Chip toggle helper ───────────────────────────────────────────────────────
 
@@ -88,34 +56,6 @@ function ChipGroup({ items, selected, onToggle, hint }: {
       </div>
       {hint && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{hint}</div>}
     </div>
-  );
-}
-
-// ─── Delete Confirm ───────────────────────────────────────────────────────────
-
-function DeleteConfirm({ name, message, onConfirm, onClose }: { name: string; message?: string; onConfirm: () => void; onClose: () => void }) {
-  return createPortal(
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: 28, width: 360, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 9, background: "#fee2e2", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Trash2 size={16} color="#dc2626" />
-          </div>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>Remove Entry</div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Cannot be undone</div>
-          </div>
-        </div>
-        <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 20, lineHeight: 1.5 }}>
-          Remove <strong style={{ color: "var(--text-primary)" }}>{name}</strong>? {message ?? "This won't affect existing inventory items."}
-        </p>
-        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-          <button onClick={onClose} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
-          <button onClick={onConfirm} style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: "#dc2626", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Remove</button>
-        </div>
-      </div>
-    </div>,
-    document.body
   );
 }
 
@@ -1028,224 +968,6 @@ function DealersManager() {
   );
 }
 
-// ─── Repair Part Modal ────────────────────────────────────────────────────────
-
-function PartModal({ part, onSave, onClose }: { part: SparePart | null; onSave: (p: SparePart) => void; onClose: () => void }) {
-  const blank: SparePart = { id: "", sku: "", name: "", category: "Screen", compatibleWith: [], stock: 0, reorderLevel: 5, costPrice: 0, location: "" };
-  const [form, setForm] = useState<SparePart>(part ?? blank);
-  const [compatText, setCompatText] = useState((part?.compatibleWith ?? []).join(", "));
-  const [errors, setErrors] = useState<Partial<Record<"name" | "sku", string>>>({});
-
-  const set = <K extends keyof SparePart>(k: K, v: SparePart[K]) => setForm(f => ({ ...f, [k]: v }));
-
-  function validate() {
-    const e: typeof errors = {};
-    if (!form.name.trim()) e.name = "Name is required";
-    if (!form.sku.trim()) e.sku = "SKU is required";
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  }
-
-  function handleSave() {
-    if (!validate()) return;
-    const compatibleWith = compatText.split(",").map(s => s.trim()).filter(Boolean);
-    onSave({ ...form, compatibleWith });
-  }
-
-  return createPortal(
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-        <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 1 }}>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{part ? "Edit Part" : "Add Repair Part"}</div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>Spare-part stock consumed on repairs — separate from retail accessories</div>
-          </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><X size={18} /></button>
-        </div>
-        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
-          <div>
-            <label style={labelStyle}>Part Name</label>
-            <input type="text" value={form.name} onChange={e => { set("name", e.target.value); setErrors(p => ({ ...p, name: undefined })); }} placeholder="e.g. iPhone 13 OLED Screen" style={{ ...inputStyle, borderColor: errors.name ? "#dc2626" : "var(--border)" }} />
-            {errors.name && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{errors.name}</div>}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <div>
-              <label style={labelStyle}>SKU</label>
-              <input type="text" value={form.sku} onChange={e => { set("sku", e.target.value); setErrors(p => ({ ...p, sku: undefined })); }} placeholder="e.g. SCR-IP13-001" style={{ ...inputStyle, borderColor: errors.sku ? "#dc2626" : "var(--border)" }} />
-              {errors.sku && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{errors.sku}</div>}
-            </div>
-            <div>
-              <label style={labelStyle}>Category</label>
-              <select value={form.category} onChange={e => set("category", e.target.value as PartCategory)} style={{ ...inputStyle, cursor: "pointer" }}>
-                {PART_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label style={labelStyle}>Compatible Devices</label>
-            <input type="text" value={compatText} onChange={e => setCompatText(e.target.value)} placeholder="e.g. iPhone 13, iPhone 13 Pro" style={inputStyle} />
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Comma-separated — shown to technicians when they search for a part</div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-            <div>
-              <label style={labelStyle}>Stock</label>
-              <input type="number" min={0} value={form.stock} onChange={e => set("stock", Math.max(0, Number(e.target.value) || 0))} style={inputStyle} />
-            </div>
-            <div>
-              <label style={labelStyle}>Reorder Level</label>
-              <input type="number" min={0} value={form.reorderLevel} onChange={e => set("reorderLevel", Math.max(0, Number(e.target.value) || 0))} style={inputStyle} />
-            </div>
-            <div>
-              <label style={labelStyle}>Cost Price (Rs.)</label>
-              <input type="number" min={0} value={form.costPrice} onChange={e => set("costPrice", Math.max(0, Number(e.target.value) || 0))} style={inputStyle} />
-            </div>
-          </div>
-          <div>
-            <label style={labelStyle}>Storage Location</label>
-            <input type="text" value={form.location} onChange={e => set("location", e.target.value)} placeholder="e.g. Shelf A-3" style={inputStyle} />
-          </div>
-        </div>
-        <div style={{ padding: "16px 24px 20px", borderTop: "1px solid var(--border)", display: "flex", gap: 10, justifyContent: "flex-end", position: "sticky", bottom: 0, background: "var(--bg-card)" }}>
-          <button onClick={onClose} style={{ padding: "9px 20px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
-          <button onClick={handleSave} style={{ ...btnAccent, padding: "9px 20px" }}>{part ? "Save Changes" : "Add Part"}</button>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-}
-
-// ─── Repair Parts Manager ─────────────────────────────────────────────────────
-
-function PartsManager() {
-  const { parts, savePart, deletePart, loading, error, configured } = useParts();
-  const toast = useToast();
-  const [search, setSearch] = useState("");
-  const [catFilter, setCatFilter] = useState<PartCategory | "All">("All");
-  const [modal, setModal] = useState<SparePart | null | "new">(null);
-  const [deleteTarget, setDeleteTarget] = useState<SparePart | null>(null);
-  const [labelPart, setLabelPart] = useState<SparePart | null>(null);
-
-  const filtered = parts.filter(p => {
-    if (catFilter !== "All" && p.category !== catFilter) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      if (!p.name.toLowerCase().includes(q) && !p.sku.toLowerCase().includes(q)) return false;
-    }
-    return true;
-  });
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flex: 1, minWidth: 220, maxWidth: 380 }}>
-          <Search size={13} style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or SKU…" style={{ ...inputStyle, paddingLeft: 34, fontSize: 12 }} />
-        </div>
-        <select value={catFilter} onChange={e => setCatFilter(e.target.value as PartCategory | "All")} style={{ ...inputStyle, width: "auto", cursor: "pointer", fontSize: 12 }}>
-          <option value="All">All Categories</option>
-          {PART_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <button onClick={() => setModal("new")} style={btnAccent}><Plus size={13} /> Add Part</button>
-      </div>
-      {(!configured || error) && (
-        <div style={{ display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-          <AlertCircle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
-          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
-            {!configured
-              ? "Connect Supabase to store the parts catalog — nothing added here will be saved."
-              : `${error} — run migration 20260819000010_repair_parts_catalog.sql.`}
-          </p>
-        </div>
-      )}
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-          <thead><tr>
-            <th style={thStyle}>Part</th><th style={thStyle}>SKU</th><th style={thStyle}>Category</th>
-            <th style={thStyle}>Compatible With</th><th style={thStyle}>Stock</th><th style={thStyle}>Cost</th>
-            <th style={thStyle}>Location</th><th style={{ ...thStyle, width: 104 }}></th>
-          </tr></thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={8} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>Loading parts…</td></tr>
-            ) : filtered.length === 0 ? (
-              <tr><td colSpan={8} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>{search || catFilter !== "All" ? "No parts match" : "No repair parts added yet — click “Add Part” to start the catalog"}</td></tr>
-            ) : filtered.map(p => {
-              const low = p.stock > 0 && p.stock <= p.reorderLevel;
-              return (
-                <tr key={p.id}>
-                  <td style={tdStyle}><span style={{ fontWeight: 600 }}>{p.name}</span></td>
-                  <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: 12 }}>{p.sku}</td>
-                  <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-secondary)" }}>{p.category}</td>
-                  <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-secondary)", maxWidth: 220 }}>{p.compatibleWith.length ? p.compatibleWith.join(", ") : "—"}</td>
-                  <td style={tdStyle}>
-                    <span style={{ fontWeight: 700, color: p.stock === 0 ? "#dc2626" : low ? "#b45309" : "#16a34a" }}>{p.stock}</span>
-                    {low && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#fef3c7", color: "#b45309" }}>LOW</span>}
-                    {p.stock === 0 && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#fee2e2", color: "#dc2626" }}>OUT</span>}
-                  </td>
-                  <td style={tdStyle}>Rs. {p.costPrice.toLocaleString()}</td>
-                  <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: 12, color: "var(--text-secondary)" }}>{p.location || "—"}</td>
-                  <td style={tdStyle}>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      <button onClick={() => setLabelPart(p)} title="Print part label" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><Tag size={14} /></button>
-                      <button onClick={() => setModal(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><Edit2 size={14} /></button>
-                      <button onClick={() => setDeleteTarget(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}><Trash2 size={14} /></button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        </div>
-        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{filtered.length} of {parts.length} parts</div>
-      </div>
-      {modal !== null && (
-        <PartModal
-          part={modal === "new" ? null : modal}
-          onSave={async p => {
-            try {
-              await savePart(p);
-              toast.dialog("success", modal === "new" ? "Part added" : "Part updated", `${p.name} (${p.sku})`);
-              setModal(null);
-            } catch (e) {
-              // Modal stays open with the values still in it — a save that
-              // failed must not look like one that worked.
-              toast.dialog("error", "Could not save part", e instanceof Error ? e.message : String(e));
-            }
-          }}
-          onClose={() => setModal(null)}
-        />
-      )}
-      {deleteTarget && (
-        <DeleteConfirm
-          name={deleteTarget.name}
-          onConfirm={async () => {
-            try {
-              await deletePart(deleteTarget.id);
-              toast.dialog("success", "Part removed", `${deleteTarget.name} has been removed from the catalog.`);
-            } catch (e) {
-              toast.dialog("error", "Could not remove part", e instanceof Error ? e.message : String(e));
-            }
-            setDeleteTarget(null);
-          }}
-          onClose={() => setDeleteTarget(null)}
-        />
-      )}
-      {labelPart && (
-        <BarcodeLabelModal
-          variant="part"
-          code={labelPart.sku}
-          title={labelPart.name}
-          subtitle={labelPart.category}
-          onClose={() => setLabelPart(null)}
-        />
-      )}
-    </div>
-  );
-}
-
 // ─── Part Requests Manager ────────────────────────────────────────────────────
 
 const REQ_STATUS_CFG: Record<PartRequestStatus, { color: string; bg: string; border: string }> = {
@@ -1894,26 +1616,89 @@ function CredentialsManager() {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-type AdminTab = "Categories" | "Brands" | "Suppliers" | "Dealers" | "Agents" | "Parts" | "PartRequests" | "Faults" | "Barcode" | "Settings";
+type AdminTab = "Categories" | "Brands" | "Suppliers" | "Dealers" | "Agents" | "PartRequests" | "Faults" | "Barcode" | "Settings";
 
-const tabs: { id: AdminTab; icon: React.ComponentType<{ size?: number; strokeWidth?: number }>; label: string }[] = [
-  { id: "Categories",   icon: Tag,            label: "Categories"      },
-  { id: "Brands",       icon: Layers,         label: "Brands"          },
-  { id: "Suppliers",    icon: Truck,          label: "Suppliers"       },
-  { id: "Dealers",      icon: Store,          label: "Repair Dealers"  },
-  { id: "Agents",       icon: Building2,      label: "Repair Agents"   },
-  { id: "Parts",        icon: Package,        label: "Repair Parts"    },
-  { id: "PartRequests", icon: ClipboardCheck, label: "Part Requests"   },
-  { id: "Faults",       icon: AlertTriangle,  label: "Device Faults"   },
-  { id: "Barcode",      icon: BarcodeIcon,    label: "Barcode"         },
-  { id: "Settings",     icon: KeyRound,       label: "Settings"        },
+type TabSpec = { id: AdminTab; icon: React.ComponentType<{ size?: number; strokeWidth?: number }>; label: string };
+
+/**
+ * Admin Control in three parts rather than ten tabs in a row.
+ *
+ * Ten equally-weighted tabs is a list to read, not a menu to navigate: nothing
+ * says which of them belong together, so finding "Repair Agents" means scanning
+ * all ten every time. They do group, and along a line the shop already thinks
+ * in — what stock is described by, how repairs are run, and how the system
+ * itself behaves.
+ *
+ * Two rows rather than dropdowns. Everything stays visible and one click deep;
+ * a dropdown would hide nine of the ten behind a menu to save a strip of
+ * vertical space that this page has plenty of.
+ */
+const GROUPS: {
+  id: string;
+  label: string;
+  icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
+  blurb: string;
+  tabs: TabSpec[];
+}[] = [
+  {
+    id: "inventory",
+    label: "Inventory",
+    icon: Boxes,
+    blurb: "What stock is described by",
+    tabs: [
+      { id: "Categories",   icon: Tag,            label: "Categories"      },
+      { id: "Brands",       icon: Layers,         label: "Brands"          },
+      { id: "Suppliers",    icon: Truck,          label: "Suppliers"       },
+    ],
+  },
+  {
+    id: "repairs",
+    label: "Repairs",
+    icon: Wrench,
+    blurb: "Who does the work and what it needs",
+    tabs: [
+      { id: "Dealers",      icon: Store,          label: "Repair Dealers"  },
+      { id: "Agents",       icon: Building2,      label: "Repair Agents"   },
+      { id: "PartRequests", icon: ClipboardCheck, label: "Part Requests"   },
+      { id: "Faults",       icon: AlertTriangle,  label: "Device Faults"   },
+    ],
+  },
+  {
+    id: "system",
+    label: "System",
+    icon: SlidersHorizontal,
+    blurb: "How the system itself behaves",
+    tabs: [
+      { id: "Barcode",      icon: BarcodeIcon,    label: "Barcode"         },
+      { id: "Settings",     icon: KeyRound,       label: "Settings"        },
+    ],
+  },
 ];
+
+/** Which group a tab lives in. Derived, so the tab stays the single source of
+ *  truth for where you are and the group never drifts out of step with it. */
+const groupOf = (tab: AdminTab) => GROUPS.find(g => g.tabs.some(t => t.id === tab)) ?? GROUPS[0];
 
 export default function AdminControl() {
   const [tab, setTab] = useState<AdminTab>("Categories");
+  // Where you were in each group, so coming back to Repairs returns you to
+  // Part Requests rather than dumping you on Repair Dealers every time.
+  const [lastInGroup, setLastInGroup] = useState<Record<string, AdminTab>>({});
   const isMobile = useIsMobile();
   const { partRequests } = useParts();
   const pendingRequestCount = partRequests.filter(r => r.status === "Pending").length;
+
+  const group = groupOf(tab);
+
+  const openTab = (next: AdminTab) => {
+    setTab(next);
+    setLastInGroup(m => ({ ...m, [groupOf(next).id]: next }));
+  };
+
+  /** Anything in this group that needs attention, for the group pill's badge —
+   *  otherwise a pending part request is invisible from any other group. */
+  const groupBadge = (id: string) =>
+    id === "repairs" && pendingRequestCount > 0 ? pendingRequestCount : undefined;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24, flex: 1, minHeight: 0 }}>
@@ -1927,33 +1712,67 @@ export default function AdminControl() {
           <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 5 }}>Manage reference data used across the inventory system.</p>
         </div>
         <div className={isMobile ? "tabs-scroll" : undefined}>
-        <div style={{ display: "flex", gap: 6, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 6, width: "fit-content" }}>
-          {tabs.map(({ id, icon: Icon, label }) => {
-            const isActive = tab === id;
-            const badge = id === "PartRequests" && pendingRequestCount > 0 ? pendingRequestCount : undefined;
-            return (
-              <button key={id} onClick={() => setTab(id)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 16px", borderRadius: 8, fontSize: 13, border: isActive ? "1px solid var(--accent-glow)" : "1px solid transparent", background: isActive ? "var(--accent-dim)" : "transparent", color: isActive ? "var(--accent)" : "var(--text-secondary)", fontWeight: isActive ? 600 : 400, cursor: "pointer", transition: "all 0.18s", fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}
-                onMouseEnter={e => { if (!isActive) { (e.currentTarget as HTMLButtonElement).style.background = "var(--border)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-primary)"; } }}
-                onMouseLeave={e => { if (!isActive) { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-secondary)"; } }}
-              >
-                <Icon size={14} strokeWidth={isActive ? 2.5 : 1.8} />{label}
-                {badge !== undefined && (
-                  <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 20, background: isActive ? "var(--accent)" : "#fbbf24", color: isActive ? "var(--accent-fg)" : "#000" }}>{badge}</span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+          <div style={{ display: "flex", gap: 6, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 6, width: "fit-content" }}>
+            {GROUPS.map(({ id, label, icon: Icon, blurb }) => {
+              const isActive = group.id === id;
+              const badge = groupBadge(id);
+              return (
+                <button
+                  key={id}
+                  onClick={() => openTab(lastInGroup[id] ?? GROUPS.find(g => g.id === id)!.tabs[0].id)}
+                  title={blurb}
+                  style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 18px", borderRadius: 8, fontSize: 13, border: isActive ? "1px solid var(--accent-glow)" : "1px solid transparent", background: isActive ? "var(--accent-dim)" : "transparent", color: isActive ? "var(--accent)" : "var(--text-secondary)", fontWeight: isActive ? 700 : 500, cursor: "pointer", transition: "all 0.18s", fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}
+                  onMouseEnter={e => { if (!isActive) { (e.currentTarget as HTMLButtonElement).style.background = "var(--border)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-primary)"; } }}
+                  onMouseLeave={e => { if (!isActive) { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-secondary)"; } }}
+                >
+                  <Icon size={14} strokeWidth={isActive ? 2.5 : 1.8} />{label}
+                  {/* Carried up from the tab inside, so something waiting in a
+                      group you are not looking at still says so. */}
+                  {badge !== undefined && (
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 20, background: isActive ? "var(--accent)" : "#fbbf24", color: isActive ? "var(--accent-fg)" : "#000" }}>{badge}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
-      <div className="fade-up fade-up-2" style={{ borderTop: "1px solid var(--border)", marginTop: -8 }} />
+      {/* The group's own sections. Full width rather than tucked beside the
+          title, because this is the row that gets used — the group above it is
+          picked once and then left alone. */}
+      <div className="fade-up fade-up-2" style={{ marginTop: -8, borderTop: "1px solid var(--border)", paddingTop: 14 }}>
+        <div className={isMobile ? "tabs-scroll" : undefined}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: isMobile ? "nowrap" : "wrap" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.07em", textTransform: "uppercase", fontFamily: "'Plus Jakarta Sans', sans-serif", marginRight: 10, whiteSpace: "nowrap" }}>
+              {group.label}
+            </span>
+            {group.tabs.map(({ id, icon: Icon, label }) => {
+              const isActive = tab === id;
+              const badge = id === "PartRequests" && pendingRequestCount > 0 ? pendingRequestCount : undefined;
+              return (
+                <button
+                  key={id}
+                  onClick={() => openTab(id)}
+                  style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 13px", borderRadius: 8, fontSize: 12.5, border: "1px solid transparent", background: isActive ? "var(--bg-card)" : "transparent", color: isActive ? "var(--text-primary)" : "var(--text-muted)", fontWeight: isActive ? 700 : 400, cursor: "pointer", transition: "all 0.18s", fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap", boxShadow: isActive ? "inset 0 -2px 0 var(--accent)" : undefined }}
+                  onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.color = "var(--text-primary)"; }}
+                  onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.color = "var(--text-muted)"; }}
+                >
+                  <Icon size={13} strokeWidth={isActive ? 2.4 : 1.8} />{label}
+                  {badge !== undefined && (
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 20, background: "#fbbf24", color: "#000" }}>{badge}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
       <div className="fade-up fade-up-3" style={{ flex: 1, overflowY: "auto", paddingBottom: 32 }}>
         {tab === "Categories"   && <CategoriesManager />}
         {tab === "Brands"       && <BrandsManager />}
         {tab === "Suppliers"    && <SuppliersManager />}
         {tab === "Dealers"      && <DealersManager />}
         {tab === "Agents"       && <AgentsManager />}
-        {tab === "Parts"        && <PartsManager />}
         {tab === "PartRequests" && <PartRequestsManager />}
         {tab === "Faults"       && <DeviceFaultsManager />}
         {tab === "Barcode"      && <BarcodeManager />}

@@ -22,6 +22,7 @@ import InternalNotesModal from "@/technician/components/jobs/InternalNotesModal"
 import EscalationModal from "@/technician/components/jobs/EscalationModal";
 import CustomerMessageModal from "@/technician/components/jobs/CustomerMessageModal";
 import TransferAgentModal from "@/technician/components/jobs/TransferAgentModal";
+import JobInfoModal from "@/technician/components/jobs/JobInfoModal";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
@@ -61,7 +62,7 @@ const COLUMNS: {
 ];
 
 export default function MyBench() {
-  const { jobs, updateJob } = useRepair();
+  const { jobs, updateJob, refresh } = useRepair();
   const { technicianName, jobMeta, setJobMeta, partRequests, addActivity } = useTech();
   const { parts } = useParts();
 
@@ -87,6 +88,30 @@ export default function MyBench() {
   const [view, setView] = useState<BenchView>("cards");
 
   const mine = jobs.filter(j => j.technician === technicianName);
+
+  /**
+   * Whose work the sections show.
+   *
+   * The bench was only ever this technician's own queue, which is right for
+   * getting through a day and wrong for every question that starts "where is
+   * the…". A technician covering the counter, picking up after someone on
+   * leave, or answering for a phone a customer is asking about needs to see
+   * the shop's work, not just theirs.
+   *
+   * It changes what is listed and nothing else. Personal Insights above stays
+   * on this technician's own jobs in both modes — those are their figures, and
+   * a toggle that quietly rewrote them into shop totals would be the fastest
+   * way to make the number meaningless.
+   */
+  const [scope, setScope] = useState<"mine" | "shop">("mine");
+  const shopWide = scope === "shop";
+
+  // Cancelled work is nobody's queue. It is excluded here rather than in each
+  // bucket, since the buckets filter on status and Cancelled matches none of
+  // them anyway — this only keeps the count honest.
+  const scoped = shopWide
+    ? jobs.filter(j => j.status !== "Cancelled")
+    : mine;
 
   // Permissive until the rules load and if they cannot be read at all — the
   // bench must not quietly hide available work because of a slow fetch.
@@ -132,10 +157,10 @@ export default function MyBench() {
         .sort(byOldest)
     : [];
 
-  const inProgress = mine.filter(j => j.status === "Issued"     && !isFinished(j)).sort(byOldest);
-  const toDo       = mine.filter(j => j.status === "Non-Issued" && !isFinished(j)).sort(byOldest);
-  const waiting    = mine.filter(j => j.status === "Pending"    && !isFinished(j)).sort(byOldest);
-  const ready      = mine.filter(j => j.status !== "Delivered"  &&  isFinished(j)).sort(byOldest);
+  const inProgress = scoped.filter(j => j.status === "Issued"     && !isFinished(j)).sort(byOldest);
+  const toDo       = scoped.filter(j => j.status === "Non-Issued" && !isFinished(j)).sort(byOldest);
+  const waiting    = scoped.filter(j => j.status === "Pending"    && !isFinished(j)).sort(byOldest);
+  const ready      = scoped.filter(j => j.status !== "Delivered"  &&  isFinished(j)).sort(byOldest);
 
   // One interval for the whole screen rather than one per card: a bench with
   // six jobs open should not run six timers. And none at all where the shop
@@ -146,7 +171,7 @@ export default function MyBench() {
     return () => clearInterval(id);
   }, [inProgress.length, showTimer]);
 
-  const openJob = modal ? mine.find(j => j.id === modal.jobId) ?? null : null;
+  const openJob = modal ? jobs.find(j => j.id === modal.jobId) ?? null : null;
 
   /**
    * Starting and resuming are the only actions with no form behind them, so
@@ -169,6 +194,12 @@ export default function MyBench() {
         // part of the write or two technicians looking at the same pool can
         // both win. See migration 20260902000019.
         await claimRepairJob(job.id);
+        // The claim is a database function, so nothing in this app's state
+        // knows it happened. Without this the job stayed in "Available to
+        // claim", and tapping it again told the technician it had been taken —
+        // by themselves. Realtime would catch up a moment later; waiting for
+        // that would still leave the row wrong for as long as it took.
+        await refresh();
       } catch (e) {
         setBusyId(null);
         setNotice(e instanceof Error ? e.message : "That job could not be claimed.");
@@ -233,24 +264,65 @@ export default function MyBench() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 26, fontFamily: ff }}>
+      {/* Follows the switch below. Their own figures on My bench, the shop's
+          on Whole shop — the same five questions either way, so the row does
+          not change shape when the scope does.
+
+          Keyed on the scope so the drill-down modal cannot survive a switch
+          still holding the previous list. */}
       <PersonalInsights
-        jobs={mine}
+        key={scope}
+        jobs={shopWide ? scoped : mine}
         partRequests={partRequests}
         catalog={parts}
         technicianName={technicianName}
+        scope={scope}
       />
 
-      <div>
-        <h1 style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", marginBottom: 3 }}>
-          {technicianName}&apos;s bench
-        </h1>
-        <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
-          {inProgress.length > 0
-            ? `${inProgress.length} in progress · ${toDo.length} to start`
-            : toDo.length > 0
-              ? `${toDo.length} waiting to be started`
-              : "Nothing in progress"}
-        </p>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", marginBottom: 3 }}>
+            {shopWide ? "The whole shop" : `${technicianName}'s bench`}
+          </h1>
+          <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            {inProgress.length > 0
+              ? `${inProgress.length} in progress · ${toDo.length} to start`
+              : toDo.length > 0
+                ? `${toDo.length} waiting to be started`
+                : "Nothing in progress"}
+            {/* Their own count stays visible while looking at everyone's, so
+                switching over does not lose track of what is theirs. */}
+            {shopWide && mine.length > 0 && (
+              <span> · {mine.filter(j => !isFinished(j) && j.status !== "Cancelled").length} of them yours</span>
+            )}
+          </p>
+        </div>
+
+        <div style={{ display: "flex", gap: 3, padding: 3, borderRadius: 10, background: "var(--bg-card)", border: "1px solid var(--border)" }}>
+          {([
+            ["mine", "My bench", `${mine.length}`],
+            ["shop", "Whole shop", `${jobs.filter(j => j.status !== "Cancelled").length}`],
+          ] as const).map(([id, text, count]) => {
+            const on = scope === id;
+            return (
+              <button
+                key={id}
+                onClick={() => setScope(id)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8,
+                  fontSize: 12.5, fontWeight: on ? 700 : 500, cursor: "pointer", fontFamily: ff,
+                  border: on ? "1px solid var(--accent-glow)" : "1px solid transparent",
+                  background: on ? "var(--accent-dim)" : "transparent",
+                  color: on ? "var(--accent)" : "var(--text-muted)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {text}
+                <span style={{ fontSize: 11, opacity: 0.75 }}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {notice && (
@@ -382,6 +454,13 @@ export default function MyBench() {
                             job={j}
                             variant={view === "list" ? "row" : view === "compact" ? "compact" : "card"}
                             showTimer={showTimer}
+                            // Only where it tells you something. On your own
+                            // bench every card would say your name.
+                            showTechnician={shopWide}
+                            // Visible to everyone, actionable only by the
+                            // technician holding it. Unclaimed work stays
+                            // claimable — that is the whole point of the pool.
+                            readOnly={shopWide && !isUnassigned(j.technician) && j.technician !== technicianName}
                             startedAt={jobMeta[j.id]?.startedAt ?? (j.startedAt ? new Date(j.startedAt) : undefined)}
                             partsPending={pendingFor(j.id)}
                             onAction={handle}
@@ -429,6 +508,9 @@ export default function MyBench() {
       )}
       {openJob && modal?.kind === "message" && (
         <CustomerMessageModal job={openJob} onClose={() => setModal(null)} />
+      )}
+      {openJob && modal?.kind === "info" && (
+        <JobInfoModal job={openJob} onClose={() => setModal(null)} />
       )}
       {openJob && modal?.kind === "transfer" && (
         <TransferAgentModal

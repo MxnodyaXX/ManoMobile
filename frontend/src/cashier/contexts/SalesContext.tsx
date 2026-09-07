@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode, useCallback } from "react";
+import { useRealtimeTable } from "@/lib/supabase/useRealtime";
 import { fetchSales, insertSale, updateSale as persistSale, voidSale as persistVoidSale, type SaleExtras } from "@/lib/sales/api";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 
@@ -99,21 +100,30 @@ export function SalesProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(configured);
   const [error, setError] = useState<string | null>(null);
 
+  const reload = useCallback(async () => {
+    if (!configured) return;
+    try {
+      const rows = await fetchSales();
+      setSales(rows);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [configured]);
+
   useEffect(() => {
     if (!configured) return;
     let active = true;
     (async () => {
-      try {
-        const rows = await fetchSales();
-        if (active) { setSales(rows); setError(null); }
-      } catch (e) {
-        if (active) setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (active) setLoading(false);
-      }
+      await reload();
+      if (active) setLoading(false);
     })();
     return () => { active = false; };
-  }, [configured]);
+  }, [configured, reload]);
+
+  // An invoice raised on the other till belongs in this one's history and its
+  // daily total, without anybody reloading the page to find out.
+  useRealtimeTable("sales", reload, { enabled: configured });
 
   const addSale = (partial: Omit<SaleTx, "id">, extras?: SaleExtras) => {
     // A temporary id so the row can be rendered now and swapped for the stored

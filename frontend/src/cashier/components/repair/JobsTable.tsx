@@ -15,11 +15,12 @@ import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import { useParts } from "@/cashier/contexts/PartsContext";
 import { useMyPermissions } from "@/lib/settings/staffRules";
 import { useAuth } from "@/lib/auth/AuthContext";
+import { useIssueJob, type IssueFormData } from "@/lib/repair/issueJob";
+import CreditCustomerPicker from "@/cashier/components/sales/CreditCustomerPicker";
+import type { CreditAccount } from "@/lib/credit/api";
 import { postJobToCredit } from "@/lib/credit/api";
-import { useSales } from "@/cashier/contexts/SalesContext";
 import { usePersistInvoiceDocument } from "@/lib/sales/invoiceDoc";
 import { useTechnicians } from "@/lib/repair/technicians";
-import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 import {
   Search, Filter, ChevronDown, MoreHorizontal,
   CheckCircle, Clock, AlertCircle, XCircle, Wrench,
@@ -83,6 +84,47 @@ const daysWaiting = (j: RepairJob): number => {
   return isNaN(completed) ? 0 : Math.max(0, Math.floor((Date.now() - completed) / 86_400_000));
 };
 
+/**
+ * Days late against the date the shop promised, or 0.
+ *
+ * Only for work still open. A finished job that ran late is history, and a
+ * red date on it would be telling somebody off for something already done —
+ * what matters is the five phones still here that were due days ago.
+ *
+ * `estimatedCompletion` is a plain date, so it is compared as one: a job due
+ * today is not late until tomorrow, whatever the clock says.
+ */
+const daysOverdue = (j: RepairJob): number => {
+  if (!j.estimatedCompletion) return 0;
+  if (!["Non-Issued", "Issued", "Pending"].includes(j.status)) return 0;
+  const due = new Date(`${j.estimatedCompletion}T23:59:59`).getTime();
+  if (isNaN(due)) return 0;
+  return Math.max(0, Math.floor((Date.now() - due) / 86_400_000));
+};
+
+const isOverdue = (j: RepairJob) => daysOverdue(j) > 0;
+
+/**
+ * A due date that says whether it has passed.
+ *
+ * The date was rendered in the same grey whether it was next week or last
+ * week, which is the whole of the problem: the data has always been there and
+ * nothing read it back. Five jobs were past their promised date with nothing
+ * on screen saying so.
+ */
+function DueDate({ job }: { job: RepairJob }) {
+  const late = daysOverdue(job);
+  if (late <= 0) return <span style={muted}>{fmtDate(job.estimatedCompletion)}</span>;
+  return (
+    <span title={`Promised ${fmtDate(job.estimatedCompletion)} — ${late} day${late === 1 ? "" : "s"} ago`} style={{ display: "inline-flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 11.5, color: "#f87171", fontWeight: 600 }}>{fmtDate(job.estimatedCompletion)}</span>
+      <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.05em", padding: "1px 5px", borderRadius: 5, color: "#f87171", background: "rgba(248,113,113,0.10)", border: "1px solid rgba(248,113,113,0.30)" }}>
+        {late}D LATE
+      </span>
+    </span>
+  );
+}
+
 /** Today / this (calendar) week / this (calendar) month, all against the
  *  job's own createdAt — i.e. when it was booked in, not when its status
  *  last changed. Week starts Monday. */
@@ -144,6 +186,21 @@ const NOT_CHARGED: Record<string, { label: string; color: string; tint: string; 
 /** What the shop owes back on this job, or 0. */
 const cashReturnOf = (j: RepairJob) =>
   j.completionType === "Cash Return" ? (j.cashReturnAmount ?? 0) : 0;
+
+/**
+ * What was actually taken at intake, as opposed to everything paid since.
+ *
+ * `advancePaid` is written up to the full amount at handover so the balance
+ * lands on zero — deliberate, and it makes an "Advance Paid" column read as
+ * though every customer paid the whole bill up front. On an instant job, where
+ * nothing was taken in advance and the customer paid once at the counter, the
+ * column claimed a Rs. 15,800 advance on a repair that had none.
+ *
+ * The settlement is recorded on the handover, so the advance is what is left
+ * after taking it back off. No stored figure changes; only the reading does.
+ */
+const advanceAtIntake = (j: RepairJob) =>
+  Math.max(0, j.advancePaid - (j.handover?.balanceSettled ?? 0));
 
 const isNotCharged = (j: RepairJob) => !!j.completionType && j.completionType in NOT_CHARGED;
 
@@ -277,10 +334,10 @@ const COLUMNS: Record<ColId, ColSpec> = {
     sum: j => (cashReturnOf(j) > 0 ? -cashReturnOf(j) : j.estimatedCost),
   },
   advance: {
-    sortOn: j => (j.advanceRefundedOn ? 0 : j.advancePaid),
+    sortOn: j => (j.advanceRefundedOn ? 0 : advanceAtIntake(j)),
     label: "Advance Paid",
     align: "right",
-    render: j => j.advancePaid <= 0
+    render: j => advanceAtIntake(j) <= 0
       ? <span style={{ fontSize: 12, color: "var(--text-muted)" }}>—</span>
       // Struck through once it has gone back. The figure stays on screen
       // because it is still true that the money was taken — what changed is
@@ -288,12 +345,12 @@ const COLUMNS: Record<ColId, ColSpec> = {
       // number would hide that anything happened at all.
       : j.advanceRefundedOn
         ? <span title={`Advance refunded on ${fmtDate(j.advanceRefundedOn)}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, justifyContent: "flex-end" }}>
-            <span style={{ fontSize: 12, color: "var(--text-muted)", textDecoration: "line-through" }}>{rs(j.advancePaid)}</span>
+            <span style={{ fontSize: 12, color: "var(--text-muted)", textDecoration: "line-through" }}>{rs(advanceAtIntake(j))}</span>
             <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.04em", padding: "1px 5px", borderRadius: 5, color: "#60a5fa", background: "rgba(96,165,250,0.10)", border: "1px solid rgba(96,165,250,0.30)" }}>REFUNDED</span>
           </span>
-        : <span style={{ fontSize: 12, fontWeight: 600, color: "#4ade80" }}>{rs(j.advancePaid)}</span>,
+        : <span style={{ fontSize: 12, fontWeight: 600, color: "#4ade80" }}>{rs(advanceAtIntake(j))}</span>,
     // The refunded ones no longer count towards money the shop is holding.
-    sum: j => (j.advanceRefundedOn ? 0 : j.advancePaid),
+    sum: j => (j.advanceRefundedOn ? 0 : advanceAtIntake(j)),
   },
   balance: {
     sortOn: j => (cashReturnOf(j) > 0 ? -cashReturnOf(j) : isNotCharged(j) ? 0 : j.estimatedCost - j.advancePaid),
@@ -334,7 +391,7 @@ const COLUMNS: Record<ColId, ColSpec> = {
     // reducing the outstanding figure for the whole shop.
     sum: j => (cashReturnOf(j) > 0 ? -cashReturnOf(j) : isNotCharged(j) ? 0 : j.estimatedCost - j.advancePaid),
   },
-  estCompletion: { sortOn: j => j.estimatedCompletion, label: "Est. Completion", render: j => <span style={muted}>{fmtDate(j.estimatedCompletion)}</span> },
+  estCompletion: { sortOn: j => j.estimatedCompletion, label: "Est. Completion", render: j => <DueDate job={j} /> },
   /** Quote with the date it is promised for — one column, two lines. */
   costDue: {
     sortOn: j => j.estimatedCost,
@@ -343,7 +400,7 @@ const COLUMNS: Record<ColId, ColSpec> = {
     render: j => (
       <>
         <p style={plain}>{rs(j.estimatedCost)}</p>
-        <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{fmtDate(j.estimatedCompletion)}</p>
+        <p style={{ marginTop: 2 }}><DueDate job={j} /></p>
       </>
     ),
     sum: j => j.estimatedCost,
@@ -357,7 +414,7 @@ const COLUMNS: Record<ColId, ColSpec> = {
     render: j => (
       <>
         <p style={plain}>{rs(j.originalEstimate ?? j.estimatedCost)}</p>
-        <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{fmtDate(j.estimatedCompletion)}</p>
+        <p style={{ marginTop: 2 }}><DueDate job={j} /></p>
       </>
     ),
   },
@@ -1728,7 +1785,7 @@ function AdvanceRefundPanel({ job, mayRefund }: { job: RepairJob; mayRefund: boo
 
 // ─── Issue Job Modal ──────────────────────────────────────────────────────────
 
-function IssueJobModal({ job, onClose, onIssued }: {
+export function IssueJobModal({ job, onClose, onIssued }: {
   job: RepairJob;
   onClose: () => void;
   onIssued: (data: Omit<IssueInvoiceData, "job" | "invoiceNo" | "createdAt">) => Promise<void>;
@@ -1740,7 +1797,16 @@ function IssueJobModal({ job, onClose, onIssued }: {
   const [imei,          setImei]          = useState(job.imei || "");
   const [discount,      setDiscount]      = useState("0");
   const [payingNow,     setPayingNow]     = useState("");
-  const [adminApprover, setAdminApprover] = useState("");
+  /**
+   * Whose account the unpaid balance goes on.
+   *
+   * This replaced a free-text "approving admin name". That field asked the
+   * cashier to type a name nobody checked, and then recorded the wrong thing:
+   * who said yes, rather than who owes the money. The account is the fact the
+   * shop needs — it is what the balance lands on, what the statement is run
+   * from, and what somebody chases in a month.
+   */
+  const [creditAccount, setCreditAccount] = useState<CreditAccount | null>(null);
   const [warranty,      setWarranty]      = useState("NO WARRANTY [NORMAL]");
   const [submitting,    setSubmitting]    = useState(false);
 
@@ -1751,7 +1817,7 @@ function IssueJobModal({ job, onClose, onIssued }: {
   const effectivePaying  = parseFloat(payingNowDisplay) || 0;
   const effectiveDue     = Math.max(0, netDue - effectivePaying);
   const effectiveCredit  = effectiveDue > 0;
-  const canIssue         = !!name && !!phone && (!effectiveCredit || !!adminApprover.trim());
+  const canIssue         = !!name && !!phone && (!effectiveCredit || !!creditAccount);
 
   const fields = [
     { label: "Full Name",  value: name,  set: setName,  placeholder: "Customer name" },
@@ -1764,7 +1830,19 @@ function IssueJobModal({ job, onClose, onIssued }: {
   const handleIssue = async () => {
     if (submitting) return;
     setSubmitting(true);
-    await onIssued({ name, phone, nic, email, imei, discount: discountAmt, paidAmount: job.advancePaid + effectivePaying, dueAmount: effectiveDue, isCredit: effectiveCredit, adminApprover: adminApprover.trim(), warranty });
+    await onIssued({
+      name, phone, nic, email, imei,
+      discount: discountAmt,
+      paidAmount: job.advancePaid + effectivePaying,
+      dueAmount: effectiveDue,
+      isCredit: effectiveCredit,
+      // The invoice line that used to name the approving admin now names the
+      // account carrying the balance, which is what a customer holding the
+      // paper actually needs to see.
+      adminApprover: effectiveCredit ? (creditAccount?.name ?? "") : "",
+      creditAccount: effectiveCredit ? creditAccount : null,
+      warranty,
+    });
     // On success the parent closes this modal (setIssueJobTarget(null)), so
     // there's nothing left to reset here — only an unexpected throw would
     // leave it mounted, and even then the cashier can just try again.
@@ -1856,21 +1934,16 @@ function IssueJobModal({ job, onClose, onIssued }: {
               )}
             </div>
 
+            {/* Who owes the Rs. 5,000, not who approved it. The same picker the
+                sales screens use, so the account list, the headroom warning and
+                the "open a new account" path are identical wherever a balance
+                is put on credit. */}
             {effectiveCredit && (
-              <div style={{ background: "rgba(251,191,36,0.05)", border: "1px solid rgba(251,191,36,0.3)", borderRadius: 10, padding: "12px 13px", display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <ShieldCheck size={13} color="#fbbf24" strokeWidth={2.2} />
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "#fbbf24", letterSpacing: "0.06em", textTransform: "uppercase", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Admin Approval Required</span>
-                </div>
-                <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                  Credit balance of <strong style={{ color: "#fbbf24" }}>Rs. {effectiveDue.toLocaleString()}</strong>. Admin must approve.
-                </p>
-                <div>
-                  <label style={{ ...labelSt, color: "#fbbf24" }}>Approving Admin Name</label>
-                  <input value={adminApprover} onChange={(e) => setAdminApprover(e.target.value)} placeholder="Enter admin name"
-                    style={{ ...inputSt, border: "1px solid rgba(251,191,36,0.4)", background: "var(--bg-primary)" }} />
-                </div>
-              </div>
+              <CreditCustomerPicker
+                selected={creditAccount}
+                onSelect={setCreditAccount}
+                pendingAmount={effectiveDue}
+              />
             )}
 
             <div>
@@ -1900,7 +1973,7 @@ function IssueJobModal({ job, onClose, onIssued }: {
 
 // ─── Repair Invoice Preview ───────────────────────────────────────────────────
 
-function RepairInvoicePreview({ data, onClose }: { data: IssueInvoiceData; onClose: () => void }) {
+export function RepairInvoicePreview({ data, onClose }: { data: IssueInvoiceData; onClose: () => void }) {
   const invoiceRef = useRef<HTMLDivElement>(null);
 
   const pageCss = "@page { size: A4 portrait; margin: 15mm; }";
@@ -2092,10 +2165,10 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
   const { can, isAdminCashier } = useMyPermissions();
   // Issuing a job draws a real invoice number and prints an invoice, so it is a
   // sale — it just never used to be written down as one.
-  const { addSale } = useSales();
   // Cancelling a finished job is an override worth attributing to a person, so
   // this stops being the literal string "Cashier".
   const { profile } = useAuth();
+  const issueJob = useIssueJob();
   const isMobile = useIsMobile();
   // What this stage of the job is about decides which columns are worth space.
   const cols = VIEW_COLUMNS[view] ?? DEFAULT_COLS;
@@ -2117,6 +2190,10 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
   // Non-Issued for now. Defaults to All so the list isn't narrowed until the
   // cashier actually picks a range.
   const [dateFilter, setDateFilter] = useState<"All" | "Today" | "Week" | "Month">("All");
+  // Narrow to work that has already broken its promise. A toggle rather than
+  // another dropdown, because it is the one filter somebody reaches for in a
+  // hurry and there is nothing to choose between — a job is late or it is not.
+  const [lateOnly, setLateOnly] = useState(false);
   const showDateFilter = view === "Issued" || view === "Non-Issued";
 
   const filteredJobs = useMemo(() => allJobs.filter(j => {
@@ -2127,8 +2204,17 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
     const matchBrand    = brandFilter === "All" || j.brand === brandFilter;
     const matchDealer   = dealerFilter === "All" || dealerKey(dealers, j) === dealerFilter;
     const matchDate      = dateFilter === "All" || isWithinDateFilter(j.createdAt, dateFilter);
-    return matchView && matchSearch && matchPriority && matchBrand && matchDealer && matchDate;
-  }), [allJobs, view, search, priorityFilter, brandFilter, dealerFilter, dealers, dateFilter]);
+    const matchLate      = !lateOnly || isOverdue(j);
+    return matchView && matchSearch && matchPriority && matchBrand && matchDealer && matchDate && matchLate;
+  }), [allJobs, view, search, priorityFilter, brandFilter, dealerFilter, dealers, dateFilter, lateOnly]);
+
+  // Counted over the view's own jobs, not the filtered list — the number has
+  // to stay the same while the filter it controls is switched on and off, or
+  // it would drop to zero the moment somebody used it.
+  const lateCount = useMemo(
+    () => allJobs.filter(j => jobMatchesView(j, view) && isOverdue(j)).length,
+    [allJobs, view],
+  );
 
   // Sorting sits after filtering, so it orders what is actually on screen. The
   // accessors come straight off the column specs, which means a column added
@@ -2236,62 +2322,9 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
   const openPickup    = (job: RepairJob) => { setDetailsJob(null); setPickupJob(job); };
   const openIntakeSlip = (job: RepairJob) => { setDetailsJob(null); setIntakeSlipJob(job); };
 
-  const handleIssueComplete = async (data: Omit<IssueInvoiceData, "job" | "invoiceNo" | "createdAt">) => {
-    const invoiceNo = await fetchNextInvoiceNo();
-    const createdAt = new Date().toLocaleString("en-US", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: true });
-    const target = allJobs.find(j => j.id === issueJobTarget!.id);
-    const issuedISO = new Date().toISOString();
-    // "Delivered", not "Issued": the internal enum uses Issued for work in
-    // progress, so the old value pushed a collected job back onto the bench.
-    //
-    // Awaited: Delivered is what makes the database raise the credit charge,
-    // and the sale recorded below is what stamps this invoice number onto it.
-    // Fire-and-forget here leaves a charge with no invoice on it.
-    await updateJob(issueJobTarget!.id, {
-      status: "Delivered",
-      imei: data.imei,
-      jobWarranty: data.warranty,
-      advancePaid: data.paidAmount,
-      handover: target?.handover ?? {
-        collectedBy: target?.customerName ?? "Customer",
-        relationship: "Owner",
-        idVerified: false,
-        balanceSettled: data.paidAmount,
-        paymentMethod: "Cash",
-        handoverSignature: "",
-        warrantyCardIssued: false,
-        handedOverBy: "Cashier",
-        handedOverAt: issuedISO,
-      },
-    });
-    await chargeAnyBalanceToCredit(issueJobTarget!.id);
-
-    const job = issueJobTarget!;
-    addSale(
-      {
-        invoiceNo,
-        date: new Date().toISOString().slice(0, 10),
-        customer: data.name || job.customerName || "Walk-in",
-        category: "Repair",
-        items: `${job.brand} ${job.model}`.trim() || job.id,
-        // What the invoice was for, after any discount — not what was handed
-        // over at the counter. The two differ whenever a balance is left owing,
-        // and the ledger records the sale, not the cash.
-        total: Math.max(0, (job.estimatedCost ?? 0) - (data.discount ?? 0)),
-        subtotal: job.estimatedCost ?? 0,
-        discountAmount: data.discount ?? 0,
-        paid: data.paidAmount ?? 0,
-        status: "Paid",
-        paymentMethod: data.isCredit ? "Credit" : "Cash",
-        cashier: profile?.fullName?.trim() || undefined,
-      },
-      {
-        customerPhone: data.phone || job.phone || null,
-        jobIds: [job.id],
-      },
-    );
-
-    setInvoiceData({ job, ...data, invoiceNo, createdAt });
+  const handleIssueComplete = async (data: IssueFormData) => {
+    // Same path the Instant Job form bills through — see lib/repair/issueJob.
+    setInvoiceData(await issueJob(issueJobTarget!, data));
     setIssueJobTarget(null);
   };
 
@@ -2387,6 +2420,26 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
           <span style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
             {jobs.length} {jobs.length === 1 ? "job" : "jobs"}
           </span>
+
+          {/* Only when there is something late. A permanent "0 overdue" chip is
+              a thing to stop reading, and then the day it says 5 nobody sees
+              it either. */}
+          {lateCount > 0 && (
+            <button
+              onClick={() => setLateOnly(v => !v)}
+              title={lateOnly ? "Show every job again" : "Show only the jobs past their promised date"}
+              style={{
+                display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "4px 12px",
+                borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap", fontWeight: 700,
+                fontFamily: "'Plus Jakarta Sans', sans-serif",
+                color: "#f87171",
+                background: lateOnly ? "rgba(248,113,113,0.16)" : "rgba(248,113,113,0.08)",
+                border: `1px solid rgba(248,113,113,${lateOnly ? "0.6" : "0.3"})`,
+              }}
+            >
+              <AlertCircle size={12} />{lateCount} overdue{lateOnly ? " · showing" : ""}
+            </button>
+          )}
           <div style={{ marginLeft: "auto" }}>
             <ExportButtons
               onPdf={()   => exportToPdf("Repair Jobs", JOB_HEADERS, jobRows(), jobFilename)}
@@ -2426,7 +2479,7 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
               {dealers.map(d => <option key={d.id} value={dealerKey(dealers, d.name)}>{d.name}</option>)}
             </select>
           </div>
-          <button onClick={() => { setPriorityFilter("All"); setBrandFilter("All"); setDealerFilter("All"); }} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 12, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Clear</button>
+          <button onClick={() => { setPriorityFilter("All"); setBrandFilter("All"); setDealerFilter("All"); setLateOnly(false); }} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 12, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Clear</button>
         </div>
       )}
 

@@ -2,9 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
-import { Plus, Briefcase, AlertCircle, Clock, Hourglass, LayoutGrid, XCircle, PackageCheck, CheckCheck, FileClock, DatabaseZap } from "lucide-react";
+import { Plus, Briefcase, AlertCircle, Clock, Hourglass, LayoutGrid, XCircle, PackageCheck, CheckCheck, FileClock, DatabaseZap, Zap, RotateCcw } from "lucide-react";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import NewRepairForm, { StepIndicator } from "./NewRepairForm";
+import InstantJobForm from "./InstantJobForm";
+import RefundsOwed from "./RefundsOwed";
+import { useOwedRefunds } from "@/lib/accounts/cashReturns";
 import JobsTable from "./JobsTable";
 import DraftsList from "./DraftsList";
 import type { RepairView } from "@/cashier/contexts/RepairContext";
@@ -20,6 +23,7 @@ export type RepairSection =
   | "Non-Issued"
   | "Issued"
   | "Cancelled"
+  | "Refunds Owed"
   | "All Jobs";
 
 const sections: { id: RepairSection; icon: any; label: string; view?: RepairView }[] = [
@@ -32,6 +36,10 @@ const sections: { id: RepairSection; icon: any; label: string; view?: RepairView
   { id: "Non-Issued",   icon: PackageCheck, label: "Non-Issued",   view: "Non-Issued" },
   { id: "Issued",       icon: CheckCheck,   label: "Issued",       view: "Issued" },
   { id: "Cancelled",    icon: XCircle,      label: "Cancelled",    view: "Cancelled" },
+  // Not a job state — a debt. It sits among the states because that is where
+  // somebody looks when working through the day, and money owed back has no
+  // other home.
+  { id: "Refunds Owed", icon: RotateCcw,    label: "Refunds Owed" },
   { id: "All Jobs",     icon: LayoutGrid,   label: "All Jobs",     view: "All" },
 ];
 
@@ -45,11 +53,19 @@ const sectionDescriptions: Record<RepairSection, string> = {
   "Non-Issued":   "Repaired and waiting for the customer to collect",
   "Issued":       "Collected & signed for by the customer",
   "Cancelled":    "Cancelled repair jobs — with reason and date",
+  "Refunds Owed": "Cash Returns and unrefunded advances still to be settled",
   "All Jobs":     "Complete list of all repair jobs",
 };
 
 export default function RepairManagement({ initialSection }: { initialSection?: RepairSection }) {
   const [active, setActive] = useState<RepairSection>(initialSection ?? "New Repair");
+  // Which of the two ways in is on screen. Not a section of its own: an instant
+  // job is still a new repair, so it belongs behind the same tab rather than
+  // adding an eleventh item to the sidebar for a form used a few times a day.
+  const [instant, setInstant] = useState(false);
+  // Counted at this level so the badge is visible from every other tab. A
+  // debt nobody is looking at is exactly the one that goes unpaid.
+  const { owed } = useOwedRefunds();
   // The draft the wizard should open with. Cleared whenever a tab is picked by
   // hand, so "New Repair" is a blank intake unless a draft was explicitly resumed.
   const [resuming, setResuming] = useState<RepairDraft | null>(null);
@@ -124,6 +140,15 @@ export default function RepairManagement({ initialSection }: { initialSection?: 
               >
                 <Icon size={13} strokeWidth={isActive ? 2.5 : 1.8} />
                 {label}
+                {id === "Refunds Owed" && owed.length > 0 && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 800, padding: "1px 6px", borderRadius: 20,
+                    background: isActive ? "var(--accent)" : "#fbbf24",
+                    color: isActive ? "var(--accent-fg)" : "#000",
+                  }}>
+                    {owed.length}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -198,9 +223,37 @@ export default function RepairManagement({ initialSection }: { initialSection?: 
               </p>
             </div>
           </div>
-          {active === "New Repair" && (
+          {active === "New Repair" && !instant && (
             <div style={{ flex: 1, minWidth: 0 }}>
               <StepIndicator current={wizardStep} />
+            </div>
+          )}
+
+          {active === "New Repair" && (
+            <div style={{ display: "flex", gap: 4, padding: 4, borderRadius: 10, background: "var(--bg-secondary)", border: "1px solid var(--border)", flexShrink: 0 }}>
+              {([
+                [false, "Normal Repair", "Booked in now, worked on after"],
+                [true,  "Instant Job",   "Already repaired — write it up"],
+              ] as const).map(([isInstant, text, hint]) => {
+                const on = instant === isInstant;
+                return (
+                  <button
+                    key={text}
+                    onClick={() => setInstant(isInstant)}
+                    title={hint}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 8,
+                      fontSize: 12.5, fontWeight: on ? 700 : 500, cursor: "pointer",
+                      border: on ? "1px solid var(--accent-glow)" : "1px solid transparent",
+                      background: on ? "var(--accent-dim)" : "transparent",
+                      color: on ? "var(--accent)" : "var(--text-muted)",
+                      fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap",
+                    }}
+                  >
+                    {isInstant && <Zap size={13} />}{text}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -209,9 +262,20 @@ export default function RepairManagement({ initialSection }: { initialSection?: 
       {/* Content */}
       <div className="fade-up fade-up-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
         {active === "New Repair" ? (
-          <NewRepairForm initialDraft={resuming} onStepChange={setWizardStep} />
+          instant ? (
+            <InstantJobForm
+              // Straight to Non-Issued: the job is finished, so the next thing
+              // anybody does with it is bill it.
+              onCreated={() => { setInstant(false); setActive("Non-Issued"); }}
+              onCancel={() => setInstant(false)}
+            />
+          ) : (
+            <NewRepairForm initialDraft={resuming} onStepChange={setWizardStep} />
+          )
         ) : active === "Drafts" ? (
           <DraftsList onResume={(d) => { setResuming(d); setActive("New Repair"); }} />
+        ) : active === "Refunds Owed" ? (
+          <RefundsOwed />
         ) : (
           <JobsTable
             title={active}

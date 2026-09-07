@@ -20,9 +20,9 @@ export const SHOP = "Mano Mobile";
 /** Printed at the foot of the default templates. */
 export const SHOP_CONTACT = "0717537383";
 
-export type JobSmsEvent = "created" | "started" | "paused" | "finished" | "reminder";
+export type JobSmsEvent = "created" | "started" | "paused" | "finished" | "reminder" | "instant" | "instant_settled";
 
-export const JOB_SMS_EVENTS: JobSmsEvent[] = ["created", "started", "paused", "finished", "reminder"];
+export const JOB_SMS_EVENTS: JobSmsEvent[] = ["created", "started", "paused", "finished", "reminder", "instant", "instant_settled"];
 
 export const JOB_SMS_LABEL: Record<JobSmsEvent, string> = {
   created: "Job Received",
@@ -30,6 +30,8 @@ export const JOB_SMS_LABEL: Record<JobSmsEvent, string> = {
   paused: "Repair On Hold",
   finished: "Ready For Collection",
   reminder: "Pickup Reminder",
+  instant: "Instant Repair Ready",
+  instant_settled: "Instant Repair Collected",
 };
 
 export const JOB_SMS_PURPOSE: Record<JobSmsEvent, string> = {
@@ -38,6 +40,8 @@ export const JOB_SMS_PURPOSE: Record<JobSmsEvent, string> = {
   paused: "repair-on-hold",
   finished: "ready-for-collection",
   reminder: "pickup-reminder",
+  instant: "instant-repair-ready",
+  instant_settled: "instant-repair-collected",
 };
 
 /** When each message is sent — shown next to the editor so wording matches timing. */
@@ -47,6 +51,8 @@ export const JOB_SMS_TRIGGER: Record<JobSmsEvent, string> = {
   paused: "Sent when a technician puts the job on hold, including the reason.",
   finished: "Sent when the technician marks the repair finished.",
   reminder: "Sent for a Completed job still waiting for pickup — a cashier can send it any time from the Non-Issued list, and it also goes out automatically once a day for jobs that have been waiting 7+ days (repeating weekly until collected).",
+  instant: "Sent when an Instant Job is saved but the payment has not been taken — the device is repaired and waiting, so this reads as ready for collection.",
+  instant_settled: "Sent when an Instant Job is paid for and handed over in one go, which is the usual case. One message covering the whole visit: repaired, paid, collected.",
 };
 
 // ─── Placeholders ────────────────────────────────────────────────────────────
@@ -69,6 +75,8 @@ export const SMS_VARIABLES: { token: string; description: string }[] = [
   { token: "contact", description: "Shop contact number" },
   { token: "track_link", description: "Link for the customer to view their invoice and job history online" },
   { token: "days_waiting", description: "Days since the repair was finished (reminder only)" },
+  { token: "technician_charge", description: "What the technician charged for the work" },
+  { token: "parts_used", description: "Parts fitted during the repair, or \"None\"" },
 ];
 
 /** Which tokens make sense per event — the rest would render as fallback text. */
@@ -78,6 +86,8 @@ export const JOB_SMS_VARIABLES: Record<JobSmsEvent, string[]> = {
   paused: ["customer_name", "device", "job_number", "pause_reason", "technician", "shop", "contact"],
   finished: ["customer_name", "device", "job_number", "fault", "technician", "total", "paid_amount", "due_amount", "track_link", "shop", "contact"],
   reminder: ["customer_name", "device", "job_number", "fault", "days_waiting", "total", "due_amount", "track_link", "shop", "contact"],
+  instant: ["customer_name", "device", "job_number", "fault", "technician", "technician_charge", "parts_used", "total", "paid_amount", "due_amount", "track_link", "shop", "contact"],
+  instant_settled: ["customer_name", "device", "job_number", "fault", "technician", "parts_used", "total", "paid_amount", "due_amount", "track_link", "shop", "contact"],
 };
 
 // ─── Formatting helpers ──────────────────────────────────────────────────────
@@ -169,6 +179,11 @@ export function smsValues(job: RepairJob, baseUrl?: string): Record<string, stri
     contact: SHOP_CONTACT,
     track_link: trackLink(job.id, baseUrl),
     days_waiting: String(daysSinceCompleted(job)),
+    technician_charge: money(job.labourCost ?? 0),
+    // Filled by the caller that knows them — the job row itself has no parts
+    // list, they live in part_requests. Left as a dash rather than a blank so
+    // a message never reads "Parts Used -" with nothing after it.
+    parts_used: "—",
   };
 }
 
@@ -179,8 +194,15 @@ export function smsValues(job: RepairJob, baseUrl?: string): Record<string, stri
  * the editor then shows up in the preview instead of silently sending a message
  * with a hole in it.
  */
-export function renderTemplate(body: string, job: RepairJob, baseUrl?: string): string {
-  const values = smsValues(job, baseUrl);
+export function renderTemplate(
+  body: string,
+  job: RepairJob,
+  baseUrl?: string,
+  /** Values the job row cannot supply on its own — the parts fitted, say,
+   *  which live in part_requests and are known only to the caller. */
+  extra?: Record<string, string>,
+): string {
+  const values = { ...smsValues(job, baseUrl), ...(extra ?? {}) };
   const filled = (body || "").replace(/\{(\w+)\}/g, (whole, token: string) =>
     Object.prototype.hasOwnProperty.call(values, token) ? values[token] : whole,
   );
@@ -246,6 +268,43 @@ Due Amount - {due_amount}
 View your invoice and job history - {track_link}
 
 Please bring this job number when collecting.
+Thank you for choosing {shop}.
+
+For any other information contact {contact}.`,
+
+  instant_settled: `Thank you for your patience, {customer_name}.
+your {device} has been repaired and handed back to you today.
+
+Job Number - {job_number}
+Fault - {fault}
+Repaired By - {technician}
+Parts Used - {parts_used}
+
+Total - {total}
+Paid Amount - {paid_amount}
+Due Amount - {due_amount}
+
+View your invoice and job history - {track_link}
+
+It was a pleasure to help. Thank you for choosing {shop}.
+
+For any other information contact {contact}.`,
+
+  instant: `Hi {customer_name},
+your {device} has been repaired and is ready to collect.
+
+Job Number - {job_number}
+Fault - {fault}
+Repaired By - {technician}
+Parts Used - {parts_used}
+
+Repair Charge - {total}
+Technician Charge - {technician_charge}
+Paid Amount - {paid_amount}
+Due Amount - {due_amount}
+
+View your invoice and job history - {track_link}
+
 Thank you for choosing {shop}.
 
 For any other information contact {contact}.`,

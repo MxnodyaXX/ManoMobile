@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { useRealtimeTable } from "@/lib/supabase/useRealtime";
 import {
   fetchParts, savePart as savePartRow, deletePart as deletePartRow,
   fetchPartRequests, createPartRequest, resolvePartRequest, markRequestInstalled,
@@ -116,6 +117,11 @@ export function PartsProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   }, [configured]);
+
+  // Stock and the approval queue move from three places at once — the bench
+  // asks, an admin approves, the counter books parts out on an instant job.
+  // Any of those on another machine changes what this one should be showing.
+  useRealtimeTable(["repair_parts", "repair_part_requests"], reload, { enabled: configured });
 
   useEffect(() => {
     if (!configured) { setLoading(false); return; }

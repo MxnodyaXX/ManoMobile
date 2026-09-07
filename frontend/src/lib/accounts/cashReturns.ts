@@ -155,6 +155,15 @@ export async function refundRepairAdvance(
  */
 export interface JobRefund {
   jobId: string;
+  /** Who it is for — a customer's name, or the dealer's. */
+  customerName: string;
+  completionType: string | null;
+  /**
+   * True when settling means notes out of the till (walk-in or in-house), false
+   * when it is a deduction on an external dealer's bill. Decided in SQL by
+   * job_settles_in_cash, so no screen has to work it out.
+   */
+  settlesInCash: boolean;
   advancePaid: number;
   /** What the repair was charged at. Zero on a return: nothing was billed. */
   subtotal: number;
@@ -175,6 +184,9 @@ export interface JobRefund {
 
 const toJobRefund = (r: Row): JobRefund => ({
   jobId: r.job_id as string,
+  customerName: (r.customer_name as string) ?? "",
+  completionType: (r.completion_type as string | null) ?? null,
+  settlesInCash: r.settles_in_cash !== false,
   advancePaid: num(r.advance_paid),
   subtotal: num(r.subtotal),
   cashReturnAmount: num(r.cash_return_amount),
@@ -195,6 +207,44 @@ export async function fetchJobRefunds(jobIds: string[]): Promise<Map<string, Job
 
   if (error) throw new Error(`Could not load refund position: ${error.message}`);
   return new Map((data as Row[]).map(r => [r.job_id as string, toJobRefund(r)]));
+}
+
+/**
+ * Every job that still owes money back.
+ *
+ * The view has always known this — `remaining > 0` — and until now nothing
+ * read it. Two jobs sat with Rs. 6,811 owed between them and no screen said
+ * so, because the refund controls only appeared if a cashier happened to open
+ * that job in Sales.
+ */
+export async function fetchOwedRefunds(): Promise<JobRefund[]> {
+  if (!isSupabaseConfigured()) return [];
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("v_job_refunds")
+    .select("*")
+    .gt("remaining", 0)
+    .order("job_id", { ascending: false });
+
+  if (error) throw new Error(`Could not load what is owed back: ${error.message}`);
+  return (data as Row[]).map(toJobRefund);
+}
+
+/** Everything owed back, kept live. */
+export function useOwedRefunds() {
+  const [rows, setRows] = useState<JobRefund[]>([]);
+  const [nonce, setNonce] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    fetchOwedRefunds()
+      .then(r => { if (active) setRows(r); })
+      // An empty list is the safe failure here: it under-reports rather than
+      // inventing a debt, and the jobs themselves are unchanged either way.
+      .catch(() => { if (active) setRows([]); });
+    return () => { active = false; };
+  }, [nonce]);
+
+  return { owed: rows, reload: useCallback(() => setNonce(n => n + 1), []) };
 }
 
 /** The refund position for the jobs on screen, in one request. */

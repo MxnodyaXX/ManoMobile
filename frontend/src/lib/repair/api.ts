@@ -61,6 +61,7 @@ interface JobRow {
   rejob_of: string | null;
   invoice_no: string | null;
   device_unidentified_reason: string | null;
+  creation_type: "Normal" | "Instant" | null;
   written_off: number | string | null;
   original_estimate: number | string | null;
   revised_estimate: number | string | null;
@@ -134,6 +135,7 @@ export function rowToJob(row: JobRow): RepairJob {
     rejobOf: row.rejob_of ?? null,
     invoiceNo: row.invoice_no ?? null,
     deviceUnidentifiedReason: row.device_unidentified_reason ?? null,
+    creationType: row.creation_type ?? "Normal",
     // Part of the bill forgiven at handover — see migration 20260901000017.
     writtenOff: num(row.written_off),
     originalEstimate: optNum(row.original_estimate),
@@ -191,6 +193,7 @@ export function jobToRow(job: Partial<RepairJob>): Record<string, unknown> {
   set("advance_paid", job.advancePaid);
   set("cash_return_amount", job.cashReturnAmount);
   set("device_unidentified_reason", job.deviceUnidentifiedReason);
+  set("creation_type", job.creationType);
   set("rejob_of", job.rejobOf);
   set("written_off", job.writtenOff);
   set("original_estimate", job.originalEstimate);
@@ -334,6 +337,15 @@ export interface TrackedJob {
   id: string; customerName: string; brand: string; model: string; issue: string;
   status: RepairJob["status"]; estimatedCompletion: string;
   estimatedCost: number; advancePaid: number;
+  /**
+   * What was handed over at collection, when it has been collected.
+   *
+   * advancePaid is written up to the full amount at handover so the balance
+   * lands on zero, which leaves no way to tell a genuine advance from money
+   * paid on the day. This is the second half of that sum: advancePaid minus
+   * this is what was actually taken up front.
+   */
+  settledAmount?: number;
   originalEstimate?: number; revisedEstimate?: number; labourCost?: number;
   approval?: EstimateApproval; warrantyId?: string;
   technician?: string;
@@ -358,6 +370,7 @@ interface TrackJobRow {
   id: string; customer_name: string; brand: string; model: string; issue: string;
   status: RepairJob["status"]; estimated_completion: string | null;
   estimated_cost: number | string; advance_paid: number | string;
+  settled_amount: number | string | null;
   original_estimate: number | string | null; revised_estimate: number | string | null;
   labour_cost: number | string | null;
   approval: EstimateApproval | null; warranty_id: string | null;
@@ -422,6 +435,7 @@ export async function trackJob(jobId: string): Promise<TrackedJob | null> {
     cancelReason: opt(row.cancel_reason),
     cancelledAt: dateOnly(row.cancelled_at),
     handedOverAt: dateOnly(row.handed_over_at),
+    settledAmount: optNum(row.settled_amount),
   };
 }
 

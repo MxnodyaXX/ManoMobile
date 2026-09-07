@@ -16,9 +16,12 @@ const ff = "'Plus Jakarta Sans', sans-serif";
  * screen on one job. The same reasoning as the cashier dashboard tiles, and
  * the same InsightModal behind them.
  *
- * Scoped to this technician throughout — these are personal figures, not the
- * shop's. Revenue here is what the shop charged for THEIR jobs, and charges
- * are what THEY billed for the work.
+ * The same row serves both scopes on the bench. Passed this technician's jobs
+ * it reads as personal figures — revenue is what the shop charged for THEIR
+ * jobs, charges are what THEY billed. Passed the whole shop's, the tiles mean
+ * the shop's version of the same five questions, and the wording follows
+ * (`scope`), because "finished by you" over a shop total would be a lie told
+ * in small grey text.
  */
 
 const rs = (n: number) => `Rs. ${Math.round(n || 0).toLocaleString("en-LK")}`;
@@ -38,13 +41,16 @@ interface Spec {
   emptyText: string;
 }
 
-export default function PersonalInsights({ jobs, partRequests, catalog, technicianName }: {
-  /** This technician's jobs only. */
+export default function PersonalInsights({ jobs, partRequests, catalog, technicianName, scope = "mine" }: {
+  /** The jobs these figures cover — this technician's, or the shop's. */
   jobs: RepairJob[];
   partRequests: PartRequest[];
   catalog: SparePart[];
   technicianName: string;
+  /** Which set `jobs` is. Changes only the wording, never the arithmetic. */
+  scope?: "mine" | "shop";
 }) {
+  const shop = scope === "shop";
   const [open, setOpen] = useState<string | null>(null);
 
   const done = jobs.filter(isFinished);
@@ -77,7 +83,7 @@ export default function PersonalInsights({ jobs, partRequests, catalog, technici
   const specs: Record<string, Spec> = {
     total: {
       title: "Total Jobs",
-      subtitle: `Every repair assigned to ${technicianName}`,
+      subtitle: shop ? "Every repair in the shop" : `Every repair assigned to ${technicianName}`,
       columns: JOB_COLS,
       rows: jobs.map(j => ({
         id: j.id,
@@ -97,7 +103,7 @@ export default function PersonalInsights({ jobs, partRequests, catalog, technici
 
     completed: {
       title: "Jobs Completed",
-      subtitle: "Repairs you have finished",
+      subtitle: shop ? "Repairs the shop has finished" : "Repairs you have finished",
       columns: [
         { key: "job", label: "Job" }, { key: "device", label: "Device" },
         { key: "type", label: "Outcome" }, { key: "finished", label: "Finished" },
@@ -199,10 +205,10 @@ export default function PersonalInsights({ jobs, partRequests, catalog, technici
 
   const TILES: { key: string; label: string; value: string; hint: string; icon: typeof Box; tint: string }[] = [
     { key: "total",     label: "Total Jobs",      value: String(jobs.length), hint: `${jobs.length - done.length} still open`, icon: ClipboardList, tint: "#a78bfa" },
-    { key: "completed", label: "Jobs Completed",  value: String(done.length), hint: "finished by you",                          icon: CheckCircle2,  tint: "#34d399" },
+    { key: "completed", label: "Jobs Completed",  value: String(done.length), hint: shop ? "finished by the shop" : "finished by you", icon: CheckCircle2, tint: "#34d399" },
     { key: "parts",     label: "Parts Cost Used", value: rs(partsCost),       hint: `${usedParts.length} part${usedParts.length === 1 ? "" : "s"}`, icon: Box, tint: "#60a5fa" },
-    { key: "revenue",   label: "Revenue To Company", value: rs(revenue),      hint: "from your finished jobs",                  icon: TrendingUp,    tint: "#fbbf24" },
-    { key: "charges",   label: "Your Charges",    value: rs(myCharges),       hint: uncosted ? `${uncosted} not recorded` : "billed by you", icon: Wallet, tint: "#f472b6" },
+    { key: "revenue",   label: shop ? "Shop Revenue" : "Revenue To Company", value: rs(revenue), hint: shop ? "from all finished jobs" : "from your finished jobs", icon: TrendingUp, tint: "#fbbf24" },
+    { key: "charges",   label: shop ? "Technician Charges" : "Your Charges", value: rs(myCharges), hint: uncosted ? `${uncosted} not recorded` : shop ? "billed by technicians" : "billed by you", icon: Wallet, tint: "#f472b6" },
   ];
 
   const spec = open ? specs[open] : null;
@@ -210,7 +216,7 @@ export default function PersonalInsights({ jobs, partRequests, catalog, technici
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <h2 style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-muted)", fontFamily: ff }}>
-        Personal Insights
+        {shop ? "Shop Insights" : "Personal Insights"}
       </h2>
 
       <div style={{

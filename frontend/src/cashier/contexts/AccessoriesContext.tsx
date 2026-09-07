@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { useRealtimeTable } from "@/lib/supabase/useRealtime";
 import {
   fetchAccessoryProducts, saveAccessoryProduct as saveProductRow,
   deleteAccessoryProduct as deleteProductRow, sellAccessoryStock,
@@ -84,6 +85,10 @@ export function AccessoriesProvider({ children }: { children: ReactNode }) {
   }, [configured]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  // A sale on the other till takes stock off these rows, so the count here
+  // should not stay at what it was when this screen opened.
+  useRealtimeTable("accessory_products", reload);
 
   const saveProduct = useCallback(async (product: AccessoryProduct) => {
     const saved = await saveProductRow(product);

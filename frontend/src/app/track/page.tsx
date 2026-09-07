@@ -398,6 +398,12 @@ function TrackInner() {
 
   const needsApproval = !!job && (job.revisedEstimate ?? 0) > (job.originalEstimate ?? job.estimatedCost) && !approved;
   const balance = job ? Math.max(0, job.estimatedCost - job.advancePaid) : 0;
+  // What was genuinely taken before the work, as opposed to everything paid
+  // since. advancePaid absorbs the collection payment so the balance can land
+  // on zero, which on a same-day repair left it reading as an advance the
+  // customer never gave. settledAmount is the other half of that sum.
+  const settled = job?.settledAmount ?? 0;
+  const advance = job ? Math.max(0, job.advancePaid - settled) : 0;
   const status = job ? STATUS_META[job.status] ?? STATUS_META["Non-Issued"] : STATUS_META["Non-Issued"];
   // wa.me needs the international form with no leading 0 or +; tel: wants the +.
   const shopDigits = SHOP_DETAILS.phone.replace(/\D/g, "").replace(/^0/, "");
@@ -579,7 +585,16 @@ function TrackInner() {
                 <header><h2>Cost breakdown</h2><span className={`pill ${balance > 0 ? "warn" : "ok"}`}>{balance > 0 ? "Balance due" : "Fully settled"}</span></header>
                 <div className="totals">
                   <div className="trow">Estimated cost <b>Rs. {job.estimatedCost.toLocaleString("en-LK", { minimumFractionDigits: 2 })}</b></div>
-                  <div className="trow credit">Advance paid <b>− Rs. {job.advancePaid.toLocaleString("en-LK", { minimumFractionDigits: 2 })}</b></div>
+                  {/* Each line only when it happened. "Advance paid − Rs. 0.00"
+                      on every same-day repair is noise at best, and on a job
+                      paid in full at the counter it was a claim the customer
+                      knew to be untrue. */}
+                  {advance > 0 && (
+                    <div className="trow credit">Advance paid <b>− Rs. {advance.toLocaleString("en-LK", { minimumFractionDigits: 2 })}</b></div>
+                  )}
+                  {settled > 0 && (
+                    <div className="trow credit">Paid on collection <b>− Rs. {settled.toLocaleString("en-LK", { minimumFractionDigits: 2 })}</b></div>
+                  )}
                 </div>
                 <div className="grand">
                   <div><span>Total</span><div className="amt">Rs. {job.estimatedCost.toLocaleString("en-LK", { minimumFractionDigits: 2 })}</div></div>
@@ -763,7 +778,8 @@ function TrackInner() {
               <h3>Payment</h3>
               <div className="totals">
                 <div className="trow" style={{ paddingTop: 0 }}>Total <b>Rs. {job.estimatedCost.toLocaleString("en-LK")}</b></div>
-                <div className="trow credit">Advance paid <b>− Rs. {job.advancePaid.toLocaleString("en-LK")}</b></div>
+                {advance > 0 && <div className="trow credit">Advance paid <b>− Rs. {advance.toLocaleString("en-LK")}</b></div>}
+                {settled > 0 && <div className="trow credit">Paid on collection <b>− Rs. {settled.toLocaleString("en-LK")}</b></div>}
               </div>
               <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 12, background: balance > 0 ? "var(--warn-tint)" : "var(--ok-tint)" }}>
                 <span style={{ fontSize: 11.5, fontWeight: 700, color: balance > 0 ? "var(--warn)" : "var(--ok)" }}>{balance > 0 ? "Balance due on collection" : "Fully settled"}</span>

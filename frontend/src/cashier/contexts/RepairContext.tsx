@@ -7,6 +7,7 @@ import type { JobSmsEvent } from "@/lib/sms/templates";
 import { notifyJobEmail } from "@/lib/email/notify";
 import { rulesForTechnician } from "@/lib/settings/staffRules";
 import { fetchJobs, fetchDealers, insertJob, patchJob, upsertDealer, deleteDealer, claimJob as claimJobRow, UNASSIGNED_TECHNICIAN } from "@/lib/repair/api";
+import { useRealtimeTable } from "@/lib/supabase/useRealtime";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -117,6 +118,15 @@ export interface RepairJob {
    * empty one, because it looks like data.
    */
   deviceUnidentifiedReason?: string | null;
+  /**
+   * How the job entered the system — not what kind of repair it is.
+   *
+   * "Instant" means the work was finished before anyone typed it in, so the
+   * assignment and progress steps were skipped. Everything downstream treats
+   * it as the ordinary completed job it is; this only records which door it
+   * came through.
+   */
+  creationType?: "Normal" | "Instant";
   createdAt: string;
   estimatedCompletion: string;
   imei?: string;
@@ -432,6 +442,19 @@ export function RepairProvider({ children }: { children: ReactNode }) {
     return () => { active = false; };
   }, [configured, load]);
 
+  /**
+   * Whatever another machine did to a job, this screen sees.
+   *
+   * The bench and the counter look at the same list from different rooms. A
+   * job claimed on one stayed "available to claim" on the other until somebody
+   * refreshed, and the second person to tap it was told it had been taken — by
+   * themselves.
+   *
+   * Dealers ride along because the jobs list renders their names, and a dealer
+   * renamed in Admin Control should not leave stale labels on every row.
+   */
+  useRealtimeTable(["repair_jobs", "repair_dealers"], load, { enabled: configured });
+
   const addJob = useCallback(async (partial: Omit<RepairJob, "id"> & { id?: string }): Promise<RepairJob> => {
     if (!configured) {
       const created: RepairJob = { ...partial, id: partial.id?.trim() || nextJobId(jobs) };
@@ -440,11 +463,18 @@ export function RepairProvider({ children }: { children: ReactNode }) {
     }
     const created = await insertJob(partial);
     setJobs(prev => [created, ...prev]);
-    // "We have your device, here is the job number."
-    notify("created", created);
-    // The same event by email, where the receipt has room to be a receipt.
-    // Only fires when an address was given, and is a no-op otherwise.
-    notifyJobEmail("created", created);
+
+    // An instant job is written up after the repair is done, so "we have
+    // received your device" is a message about something that finished twenty
+    // minutes ago. Its own message goes out from the form that created it,
+    // carrying the charges and the tracking link — see InstantJobForm.
+    if (created.creationType !== "Instant") {
+      // "We have your device, here is the job number."
+      notify("created", created);
+      // The same event by email, where the receipt has room to be a receipt.
+      // Only fires when an address was given, and is a no-op otherwise.
+      notifyJobEmail("created", created);
+    }
     return created;
   }, [configured, jobs, notify]);
 

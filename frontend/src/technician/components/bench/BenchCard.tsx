@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Play, Pause, CheckCircle, Package, MoreHorizontal,
+  Play, Pause, CheckCircle, Package, MoreHorizontal, Eye,
   Stethoscope, StickyNote, AlertTriangle, Send, MessageSquare, History, Hand, Smartphone,
 } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
@@ -29,7 +29,9 @@ const ff = "'Plus Jakarta Sans', sans-serif";
 
 export type BenchAction =
   | "start" | "claim" | "pause" | "resume" | "complete" | "parts"
-  | "device" | "diagnostic" | "notes" | "escalate" | "transfer" | "message" | "activity";
+  | "device" | "diagnostic" | "notes" | "escalate" | "transfer" | "message" | "activity"
+  // Read-only. The only thing offered on another technician's job.
+  | "info";
 
 const PRIORITY: Record<string, { color: string; bg: string }> = {
   Low:    { color: "#94a3b8", bg: "rgba(148,163,184,0.10)" },
@@ -63,7 +65,7 @@ function fmtElapsed(startedAt: Date): string {
   return h > 0 ? `${h}:${mm}:${String(s).padStart(2, "0")}` : `${mm}:${String(s).padStart(2, "0")}`;
 }
 
-export default function BenchCard({ job, startedAt, partsPending, onAction, variant = "card", showTimer = true }: {
+export default function BenchCard({ job, startedAt, partsPending, onAction, variant = "card", showTimer = true, showTechnician = false, readOnly = false }: {
   job: RepairJob;
   /** When the timer started, for a job in progress. */
   startedAt?: Date;
@@ -72,6 +74,19 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
   onAction: (action: BenchAction, job: RepairJob) => void;
   /** Whether the shop times its jobs — see the trackJobTime work rule. */
   showTimer?: boolean;
+  /** Name the technician on the card. Set when the list is the whole shop's
+   *  and the job is somebody else's — on your own bench it would be your name
+   *  on every card. */
+  showTechnician?: boolean;
+  /**
+   * Somebody else's job.
+   *
+   * Seeing across the workshop and being able to change it are two different
+   * permissions. This one drops every action and offers More info instead —
+   * dropped, not disabled: a greyed-out Complete invites a second click and a
+   * question about why it is refused, where nothing at all reads as what it is.
+   */
+  readOnly?: boolean;
   /**
    * "card" is the tile. "row" is the dense one-line form the list view
    * stacks. "compact" is that same line narrowed enough to sit three to five
@@ -297,6 +312,21 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
         </div>
       </div>
 
+      {/* Who has it, phrased by what is happening to it. "Technician: Nimal"
+          on four different statuses says the same four words about four
+          different situations; naming the state is what makes the line worth
+          the space. */}
+      {showTechnician && job.technician && !isUnassigned(job.technician) && (
+        <p style={{
+          fontSize: 11.5, fontFamily: ff, lineHeight: 1.4,
+          color: "var(--text-muted)",
+          ...(row ? { flexShrink: 0, ...clip } : null),
+        }}>
+          {inProgress ? "In progress by" : paused ? "Waiting — technician" : done ? "Finished by" : "Assigned to"}{" "}
+          <strong style={{ color: "var(--accent)" }}>{job.technician}</strong>
+        </p>
+      )}
+
       {/* Why it stopped — the one thing worth reading on a paused card. In a
           row it moves to the row's tooltip; there is no line to spare. */}
       {paused && !row && (
@@ -311,7 +341,12 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
 
       {/* What to do about it */}
       <div style={{ display: "flex", gap: row || compact ? 6 : 8, alignItems: "stretch", flexWrap: row || compact ? "nowrap" : "wrap", flexShrink: 0 }}>
-        {inProgress && (
+        {readOnly && (
+          <button onClick={() => onAction("info", job)} title="View this job" style={btn("quiet")}>
+            <Eye size={16} />{compact ? "" : " More info"}
+          </button>
+        )}
+        {!readOnly && inProgress && (
           <>
             <button onClick={() => onAction("complete", job)} title="Complete" style={btn("primary")}>
               <CheckCircle size={16} />{!compact && " Complete"}
@@ -328,19 +363,19 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
             )}
           </>
         )}
-        {notStarted && unclaimed && (
+        {!readOnly && notStarted && unclaimed && (
           <button onClick={() => onAction("claim", job)} title="Claim" style={btn("primary")}>
             <Hand size={13} strokeWidth={2.4} />
             {!compact && "Claim"}
           </button>
         )}
 
-        {notStarted && !unclaimed && (
+        {!readOnly && notStarted && !unclaimed && (
           <button onClick={() => onAction("start", job)} title="Start" style={btn("primary")}>
             <Play size={16} />{!compact && " Start"}
           </button>
         )}
-        {done && (
+        {!readOnly && done && (
           <span title="Waiting for collection" style={{
             display: "flex", alignItems: "center", gap: 7, flex: row ? "0 0 auto" : "1 1 auto",
             minHeight: row || compact ? 36 : 44, padding: row || compact ? "0 11px" : "0 14px",
@@ -352,7 +387,7 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
             <CheckCircle size={15} color="#60a5fa" />{compact ? "" : row ? " Collect" : " Waiting for collection"}
           </span>
         )}
-        {paused && (
+        {!readOnly && paused && (
           <>
             <button onClick={() => onAction("resume", job)} title="Resume" style={btn("primary")}>
               <Play size={16} />{!compact && " Resume"}
@@ -365,7 +400,9 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
           </>
         )}
 
-        {/* The occasional six, out of the way but one tap deep */}
+        {/* The occasional six, out of the way but one tap deep. Gone entirely
+            on somebody else's job — every entry behind it writes something. */}
+        {!readOnly && (
         <button
           ref={btnRef}
           onClick={toggleMenu}
@@ -375,6 +412,7 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
         >
           <MoreHorizontal size={18} />
         </button>
+        )}
         {menu && typeof document !== "undefined" && createPortal(
           <div
             ref={menuRef}

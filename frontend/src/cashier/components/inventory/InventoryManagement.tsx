@@ -6,7 +6,7 @@ import {
   Smartphone, Package, AlertTriangle, XCircle,
   Plus, Search, Edit2, Trash2, X, Check,
   BarChart3, ArrowUpCircle, ArrowDownCircle, Sliders,
-  ChevronDown, ChevronRight, ShieldAlert, Truck, Tag, CornerDownRight,
+  ChevronDown, ChevronRight, ShieldAlert, Truck, Tag, CornerDownRight, Wrench,
 } from "lucide-react";
 import StockReceiving from "./StockReceiving";
 import { useInventory, type Category, type Subcategory } from "@/cashier/contexts/InventoryContext";
@@ -15,6 +15,7 @@ import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import { useToast } from "@/lib/ui/toast";
 import { useTableSort, SortHeader } from "@/lib/ui/useTableSort";
+import RepairPartsManager from "@/admin/components/inventory/RepairPartsManager";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,7 +44,7 @@ interface ApprovalRequest {
   suggestedBrandType?: "device" | "accessory";
 }
 
-type InventoryTab = "Overview" | "Mobile Devices" | "Accessories" | "Stock Receiving";
+type InventoryTab = "Overview" | "Mobile Devices" | "Accessories" | "Repair Parts" | "Stock Receiving";
 
 // ─── Initial Data ─────────────────────────────────────────────────────────────
 
@@ -1872,6 +1873,10 @@ export default function InventoryManagement() {
     { id: "Overview",        icon: BarChart3,  label: "Overview" },
     { id: "Mobile Devices",  icon: Smartphone, label: "Mobile Devices" },
     { id: "Accessories",     icon: Package,    label: "Accessories" },
+    // A spare part is stock the shop counts, orders and runs out of, so it
+    // belongs with the other things it counts rather than filed away with the
+    // reference data an admin edits once a month.
+    { id: "Repair Parts",    icon: Wrench,     label: "Repair Parts" },
     { id: "Stock Receiving", icon: Truck,      label: "Stock Receiving" },
   ];
 
@@ -1945,6 +1950,7 @@ export default function InventoryManagement() {
         {tab === "Overview"        && <OverviewTab devices={devices} accessories={accessories} />}
         {tab === "Mobile Devices"  && <MobileDevicesTab devices={devices} setDevices={setDevices} />}
         {tab === "Accessories"     && <AccessoriesTab accessories={accessories} loading={accLoading} configured={accConfigured} saveProduct={saveProduct} deleteProduct={deleteProduct} />}
+        {tab === "Repair Parts"    && <RepairPartsManager />}
         {tab === "Stock Receiving" && <StockReceiving />}
       </div>
     </div>

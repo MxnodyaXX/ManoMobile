@@ -15,7 +15,12 @@ import { templateFor } from "@/lib/sms/templatesApi";
  * so an undelivered message can be found afterwards — but the counter is never
  * blocked by one.
  */
-export function notifyJobEvent(event: JobSmsEvent, job: RepairJob): void {
+export function notifyJobEvent(
+  event: JobSmsEvent,
+  job: RepairJob,
+  /** Extra token values for this one message. See renderTemplate. */
+  extra?: Record<string, string>,
+): void {
   // Demo mode has no session, so a send would only 401.
   if (!isSupabaseConfigured()) return;
   if (!job?.phone?.trim()) return;
@@ -26,7 +31,7 @@ export function notifyJobEvent(event: JobSmsEvent, job: RepairJob): void {
       // An Admin switched this message off; staff can still send it by hand.
       if (!template.isActive) return;
 
-      const message = renderTemplate(template.body, job);
+      const message = renderTemplate(template.body, job, undefined, extra);
       if (!message.trim()) return;
 
       const result = await sendSms({

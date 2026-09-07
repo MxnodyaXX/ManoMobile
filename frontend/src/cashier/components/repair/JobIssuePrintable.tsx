@@ -22,7 +22,11 @@ export interface IssueInvoiceData {
   paidAmount: number;
   dueAmount: number;
   isCredit: boolean;
+  /** On a credit invoice, the account the balance was put on. */
   adminApprover: string;
+  /** The credit account itself, when there is one. Carried so the sale can be
+   *  filed against it rather than the ledger having to guess from a phone. */
+  creditAccount?: { id: string; name: string } | null;
   warranty: string;
   invoiceNo: string;
   createdAt: string;
@@ -222,7 +226,9 @@ const JobIssuePrintable = forwardRef<HTMLDivElement, { data: IssueInvoiceData }>
           </div>
           {data.isCredit && data.adminApprover && (
             <div>
-              <span style={{ fontWeight: 700 }}>Credit Approved By: </span>
+              {/* The account the balance sits on, not who approved it — that
+                  is what the customer needs to recognise on the paper. */}
+              <span style={{ fontWeight: 700 }}>Credit Account: </span>
               <span style={{ textTransform: "uppercase", fontWeight: 700 }}>{data.adminApprover}</span>
             </div>
           )}
