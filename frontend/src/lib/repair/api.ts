@@ -61,7 +61,7 @@ interface JobRow {
   rejob_of: string | null;
   invoice_no: string | null;
   device_unidentified_reason: string | null;
-  creation_type: "Normal" | "Instant" | null;
+  creation_type: "Normal" | "Instant" | "Backdated" | null;
   written_off: number | string | null;
   original_estimate: number | string | null;
   revised_estimate: number | string | null;
@@ -194,6 +194,21 @@ export function jobToRow(job: Partial<RepairJob>): Record<string, unknown> {
   set("cash_return_amount", job.cashReturnAmount);
   set("device_unidentified_reason", job.deviceUnidentifiedReason);
   set("creation_type", job.creationType);
+  /**
+   * The received date, but only when it was chosen rather than observed.
+   *
+   * created_at defaults to now() and every ordinary path leaves it alone —
+   * they pass a date-only "2026-09-07", which is the day the job was booked
+   * in, not a claim about the minute. Emitting that would stamp midnight on
+   * every new job and quietly reorder the day's work.
+   *
+   * A past record is the one case where the date is a fact being asserted, so
+   * it arrives as a full ISO timestamp. That is the signal: a value carrying a
+   * time is a deliberate one, and only that is written.
+   */
+  if (typeof job.createdAt === "string" && job.createdAt.includes("T")) {
+    set("created_at", job.createdAt);
+  }
   set("rejob_of", job.rejobOf);
   set("written_off", job.writtenOff);
   set("original_estimate", job.originalEstimate);

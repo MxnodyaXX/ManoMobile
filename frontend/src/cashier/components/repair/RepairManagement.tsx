@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
-import { Plus, Briefcase, AlertCircle, Clock, Hourglass, LayoutGrid, XCircle, PackageCheck, CheckCheck, FileClock, DatabaseZap, Zap, RotateCcw } from "lucide-react";
+import { Plus, Briefcase, AlertCircle, Clock, Hourglass, LayoutGrid, XCircle, PackageCheck, CheckCheck, FileClock, DatabaseZap, Zap, RotateCcw, History } from "lucide-react";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import NewRepairForm, { StepIndicator } from "./NewRepairForm";
 import InstantJobForm from "./InstantJobForm";
+import PastJobForm from "./PastJobForm";
 import RefundsOwed from "./RefundsOwed";
 import { useOwedRefunds } from "@/lib/accounts/cashReturns";
 import JobsTable from "./JobsTable";
@@ -59,10 +60,18 @@ const sectionDescriptions: Record<RepairSection, string> = {
 
 export default function RepairManagement({ initialSection }: { initialSection?: RepairSection }) {
   const [active, setActive] = useState<RepairSection>(initialSection ?? "New Repair");
-  // Which of the two ways in is on screen. Not a section of its own: an instant
-  // job is still a new repair, so it belongs behind the same tab rather than
-  // adding an eleventh item to the sidebar for a form used a few times a day.
-  const [instant, setInstant] = useState(false);
+  /**
+   * Which of the three ways in is on screen.
+   *
+   * Not sections of their own: an instant job and a past record are both still
+   * a repair job being created, so they belong behind the same tab rather than
+   * adding two more items to a sidebar that already has eleven.
+   *
+   *   normal   booked in now, worked on after
+   *   instant  repaired minutes ago, written up at the counter
+   *   past     out of the old job book, with its own dates
+   */
+  const [entry, setEntry] = useState<"normal" | "instant" | "past">("normal");
   // Counted at this level so the badge is visible from every other tab. A
   // debt nobody is looking at is exactly the one that goes unpaid.
   const { owed } = useOwedRefunds();
@@ -223,7 +232,7 @@ export default function RepairManagement({ initialSection }: { initialSection?: 
               </p>
             </div>
           </div>
-          {active === "New Repair" && !instant && (
+          {active === "New Repair" && entry === "normal" && (
             <div style={{ flex: 1, minWidth: 0 }}>
               <StepIndicator current={wizardStep} />
             </div>
@@ -232,14 +241,15 @@ export default function RepairManagement({ initialSection }: { initialSection?: 
           {active === "New Repair" && (
             <div style={{ display: "flex", gap: 4, padding: 4, borderRadius: 10, background: "var(--bg-secondary)", border: "1px solid var(--border)", flexShrink: 0 }}>
               {([
-                [false, "Normal Repair", "Booked in now, worked on after"],
-                [true,  "Instant Job",   "Already repaired — write it up"],
-              ] as const).map(([isInstant, text, hint]) => {
-                const on = instant === isInstant;
+                ["normal",  "Normal Repair", "Booked in now, worked on after", null],
+                ["instant", "Instant Job",   "Already repaired — write it up", Zap],
+                ["past",    "Past Record",   "An old job, entered with its own dates", History],
+              ] as const).map(([id, text, hint, Icon]) => {
+                const on = entry === id;
                 return (
                   <button
-                    key={text}
-                    onClick={() => setInstant(isInstant)}
+                    key={id}
+                    onClick={() => setEntry(id)}
                     title={hint}
                     style={{
                       display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 8,
@@ -250,7 +260,7 @@ export default function RepairManagement({ initialSection }: { initialSection?: 
                       fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap",
                     }}
                   >
-                    {isInstant && <Zap size={13} />}{text}
+                    {Icon && <Icon size={13} />}{text}
                   </button>
                 );
               })}
@@ -262,12 +272,20 @@ export default function RepairManagement({ initialSection }: { initialSection?: 
       {/* Content */}
       <div className="fade-up fade-up-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
         {active === "New Repair" ? (
-          instant ? (
+          entry === "instant" ? (
             <InstantJobForm
               // Straight to Non-Issued: the job is finished, so the next thing
               // anybody does with it is bill it.
-              onCreated={() => { setInstant(false); setActive("Non-Issued"); }}
-              onCancel={() => setInstant(false)}
+              onCreated={() => { setEntry("normal"); setActive("Non-Issued"); }}
+              onCancel={() => setEntry("normal")}
+            />
+          ) : entry === "past" ? (
+            <PastJobForm
+              // Wherever the record says it ended up — a collected job lands in
+              // Issued, an uncollected one in Non-Issued. The form knows which
+              // because the person typing it said so.
+              onCreated={(view) => { setEntry("normal"); setActive(view); }}
+              onCancel={() => setEntry("normal")}
             />
           ) : (
             <NewRepairForm initialDraft={resuming} onStepChange={setWizardStep} />

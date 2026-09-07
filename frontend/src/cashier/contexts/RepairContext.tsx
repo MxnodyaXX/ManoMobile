@@ -122,11 +122,14 @@ export interface RepairJob {
    * How the job entered the system — not what kind of repair it is.
    *
    * "Instant" means the work was finished before anyone typed it in, so the
-   * assignment and progress steps were skipped. Everything downstream treats
-   * it as the ordinary completed job it is; this only records which door it
-   * came through.
+   * assignment and progress steps were skipped. "Backdated" means the work
+   * finished before this system existed for it — a job book entry typed in
+   * later, carrying its own received and completed dates.
+   *
+   * Everything downstream treats both as the ordinary jobs they are; this only
+   * records which door each came through.
    */
-  creationType?: "Normal" | "Instant";
+  creationType?: "Normal" | "Instant" | "Backdated";
   createdAt: string;
   estimatedCompletion: string;
   imei?: string;
@@ -468,7 +471,10 @@ export function RepairProvider({ children }: { children: ReactNode }) {
     // received your device" is a message about something that finished twenty
     // minutes ago. Its own message goes out from the form that created it,
     // carrying the charges and the tracking link — see InstantJobForm.
-    if (created.creationType !== "Instant") {
+    //
+    // A backdated one is worse: the customer collected that phone in March.
+    // Nothing is sent for those at all, from here or anywhere else.
+    if (!created.creationType || created.creationType === "Normal") {
       // "We have your device, here is the job number."
       notify("created", created);
       // The same event by email, where the receipt has room to be a receipt.

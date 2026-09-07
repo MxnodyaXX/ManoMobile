@@ -26,6 +26,7 @@ import {
   CheckCircle, Clock, AlertCircle, XCircle, Wrench,
   X, CheckSquare, Send, Printer, ShieldCheck, CreditCard,
   Truck, Ban, FileText, Package, Tag, Info, Save, Pencil, BellRing, RotateCcw,
+  Briefcase, User, Smartphone, Wallet, ClipboardList,
 } from "lucide-react";
 import { notifyJobEvent } from "@/lib/sms/notify";
 import { useToast } from "@/lib/ui/toast";
@@ -1221,7 +1222,7 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
     }
     return (
       <div key={String(k)} style={grow ? { gridColumn: "1 / -1" } : undefined}>
-        <label style={labelSt}>{label}</label>
+        <label style={lab}>{label}</label>
         {editing ? (
           <select
             value={shown}
@@ -1232,7 +1233,7 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
             {options.map(o => <option key={o.value} value={o.value}>{o.text}</option>)}
           </select>
         ) : (
-          <div style={{ ...fieldBox, color: "var(--text-secondary)" }}>
+          <div style={{ ...readSt, color: shown ? "var(--text-primary)" : "var(--text-muted)" }}>
             {options.find(o => o.value === shown)?.text || shown || "—"}
           </div>
         )}
@@ -1287,7 +1288,7 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
     const shown = val(k);
     return (
       <div key={String(k)} style={grow ? { gridColumn: "1 / -1" } : undefined}>
-        <label style={labelSt}>{label}</label>
+        <label style={lab}>{label}</label>
         {editing ? (
           <input
             type={type}
@@ -1301,7 +1302,7 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
             }}
           />
         ) : (
-          <div style={{ ...fieldBox, ...(mono ? { fontFamily: "monospace" } : null), color: "var(--text-secondary)" }}>
+          <div style={{ ...readSt, ...(mono ? { fontFamily: "monospace" } : null), color: (shown ?? "") === "" ? "var(--text-muted)" : "var(--text-primary)" }}>
             {(shown as string | number | undefined) || "—"}
           </div>
         )}
@@ -1311,7 +1312,9 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
 
   const sc      = statusConfig[job.status];
   const StatusIcon = sc.icon;
-  const balance = job.estimatedCost - job.advancePaid;
+  // Read through the draft so it moves while the two figures above it are
+  // being corrected. Off the saved row it would contradict them.
+  const balance = Number(val("estimatedCost") ?? 0) - Number(val("advancePaid") ?? 0);
 
   const d = new Date(job.createdAt);
   const dayName   = d.toLocaleDateString("en-US", { weekday: "long" });
@@ -1323,8 +1326,72 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
     ["No power",  "Charging",    "Signal drop",     "Hands free mark", "Short"],
   ];
 
-  const fieldBox: React.CSSProperties = { padding: "7px 10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", minHeight: 33, display: "flex", alignItems: "center" };
-  const secHead: React.CSSProperties  = { fontSize: 10, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase" as const, marginBottom: 10, fontFamily: "'Plus Jakarta Sans', sans-serif" };
+  /**
+   * The label over a value. Tighter than the shared one, because this modal
+   * puts thirty of them on screen at once and five pixels of air under each is
+   * a third of a screen spent on nothing.
+   */
+  const lab: React.CSSProperties = { ...labelSt, fontSize: 9.5, letterSpacing: "0.07em", marginBottom: 2 };
+
+  /**
+   * A value being read and a value being edited are not the same thing.
+   *
+   * They shared one style, so a record nobody was editing rendered as thirty
+   * input-shaped boxes: 34 pixels of bordered, filled surface drawn around a
+   * dash. Most of the modal was chrome around nothing, and every box invited a
+   * click that does nothing.
+   *
+   * Read is plain text under its label now. The border and the fill belong to
+   * edit mode, where they carry the only meaning they ever had — this one you
+   * can type into.
+   */
+  const readSt: React.CSSProperties = { fontSize: 13, lineHeight: 1.45, fontFamily: "'Plus Jakarta Sans', sans-serif", minHeight: 19, display: "flex", alignItems: "center", flexWrap: "wrap", wordBreak: "break-word" };
+
+  const fieldBox: React.CSSProperties = { padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 12.5, fontFamily: "'Plus Jakarta Sans', sans-serif", minHeight: 32, display: "flex", alignItems: "center" };
+  const secHead: React.CSSProperties  = { fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)", letterSpacing: "0.09em", textTransform: "uppercase" as const, fontFamily: "'Plus Jakarta Sans', sans-serif" };
+
+  /**
+   * One subject of the record, on its own surface.
+   *
+   * The form was a single unbroken column of labelled boxes — nineteen of them
+   * once Ctrl+E opened everything up — under two faint headings placed
+   * somewhere in the middle of it. Nothing marked where the dealer's details
+   * ended and the customer's began, so finding one field meant reading past
+   * all the others, and the two modes did not even agree on the order.
+   *
+   * A card per subject with a two-column grid inside it, and the same shape
+   * whether it is being read or edited: Ctrl+E now swaps boxes for inputs
+   * where they stand instead of re-flowing the whole form under the cursor.
+   *
+   * `tint` is a hex literal, not a token — the head's wash and edge are built
+   * by appending alpha to it, which a var() cannot carry.
+   */
+  const section = (icon: React.ReactNode, title: string, tint: string, children: React.ReactNode) => (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: "var(--bg-secondary)", borderBottom: "1px solid var(--border)" }}>
+        <span style={{ width: 20, height: 20, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: tint, background: `${tint}1a`, border: `1px solid ${tint}4d` }}>
+          {icon}
+        </span>
+        <span style={secHead}>{title}</span>
+      </div>
+      <div style={{ padding: "11px 13px", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(230px, 1fr))", gap: "11px 16px", alignItems: "start" }}>
+        {children}
+      </div>
+    </div>
+  );
+
+  /** A row of tick-boxes laid on a grid, so three ragged rows read as one
+   *  block instead of three lines of different lengths. */
+  const tickGrid = (labels: string[], checked: (v: string) => boolean, toggle: (v: string) => void, cols: number) => (
+    <div style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: `repeat(${isMobile ? 2 : cols}, minmax(0, 1fr))`, gap: "9px 12px" }}>
+      {labels.map(item => (
+        <label key={item} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: checked(item) ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: checked(item) ? 600 : 400, cursor: editing ? "pointer" : "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          <input type="checkbox" checked={checked(item)} disabled={!editing} onChange={() => toggle(item)} style={{ accentColor: "var(--accent)", flexShrink: 0 }} />
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item}</span>
+        </label>
+      ))}
+    </div>
+  );
 
   /**
    * Whether this job is at a stage that can still be called off.
@@ -1359,6 +1426,11 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
             <span style={{ fontSize: 11, fontWeight: 600, color: priorityColor[job.priority], fontFamily: "'Plus Jakarta Sans', sans-serif" }}>● {job.priority}</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: isMobile ? "wrap" : undefined, justifyContent: isMobile ? "flex-end" : undefined }}>
+            {/* Hidden while editing. These act on the saved record — printing
+                it, issuing it, cancelling it — and none of them would carry
+                the draft with them, so offering them mid-edit is offering a
+                way to lose the changes by accident. */}
+            {!editing && (<>
             <button onClick={onPrintSlip} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
               <FileText size={11} strokeWidth={2} />{job.status === "Delivered" ? "Issue Invoice" : "Intake Slip"}
             </button>
@@ -1382,6 +1454,7 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                 <Ban size={11} />{isOverride ? "Cancel (override)" : "Cancel"}
               </button>
             )}
+            </>)}
             {editing && (
               <>
                 <button
@@ -1432,6 +1505,14 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                 ? "Editing the intake record. Esc or Ctrl+E to discard."
                 : <>Press <strong>Ctrl+E</strong> to correct these details.</>}
             </p>
+            {/* Nothing on screen distinguished a form being read from a form
+                with unsaved work in it. The count is the difference between
+                closing the modal and losing something. */}
+            {editing && dirty && (
+              <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.05em", padding: "2px 8px", borderRadius: 6, color: "var(--accent)", background: "rgba(167,139,250,0.12)", border: "1px solid rgba(167,139,250,0.35)", fontFamily: "'Plus Jakarta Sans', sans-serif", flexShrink: 0 }}>
+                {Object.keys(draft).length} UNSAVED
+              </span>
+            )}
             {saveError && (
               <p style={{ fontSize: 11.5, color: "#f87171", marginLeft: "auto", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{saveError}</p>
             )}
@@ -1442,12 +1523,11 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
 
           {/* Job detail */}
-          <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
 
-            <div>
-              <div style={secHead}>Job details</div>
-              <div style={{ marginBottom: 8 }}>
-                <label style={labelSt}>Dealer</label>
+            {section(<Briefcase size={11} strokeWidth={2.4} />, "Job details", "#a78bfa", <>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={lab}>Dealer</label>
                 {editing ? (
                   <select
                     value={String(val("dealerId") ?? "")}
@@ -1465,23 +1545,23 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                     {(dealers ?? []).map(d => <option key={d.id} value={String(d.id)}>{d.name}</option>)}
                   </select>
                 ) : (
-                  <div style={{ ...fieldBox, color: "var(--text-secondary)" }}>{dealerRecord?.name || job.dealer || IN_HOUSE_DEALER}</div>
+                  <div style={{ ...readSt, color: "var(--text-primary)", fontWeight: 600 }}>{dealerRecord?.name || job.dealer || IN_HOUSE_DEALER}</div>
                 )}
                 {!editing && dealerRecord && (dealerRecord.address || dealerRecord.contact) && (
-                  <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                  <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                     {[dealerRecord.address, dealerRecord.contact].filter(Boolean).join(" · ")}
                   </p>
                 )}
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10, marginBottom: 8 }}>
-                <div>
-                  <label style={labelSt}>Internal number</label>
-                  <div style={{ ...fieldBox, color: "var(--accent)", fontWeight: 600 }}>{job.id}</div>
-                </div>
-                {/* This showed a hard-coded dash — the dealer's own docket
-                    number was stored and never displayed. */}
-                {field("Dealer Job number", "dealerJobNo")}
+
+              <div>
+                <label style={lab}>Internal number</label>
+                <div style={{ ...readSt, color: "var(--accent)", fontWeight: 700 }}>{job.id}</div>
               </div>
+              {/* This showed a hard-coded dash — the dealer's own docket
+                  number was stored and never displayed. */}
+              {field("Dealer job number", "dealerJobNo")}
+
               {choice(
                 "Agent",
                 "technician",
@@ -1492,47 +1572,33 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                   text: t.available ? t.name : `${t.name} (inactive)`,
                 })),
               )}
-            </div>
+              {choice("Priority", "priority", ["Low", "Normal", "High", "Urgent"].map(v => ({ value: v, text: v })))}
 
-            <div>
-              <div style={secHead}>Owner data</div>
-              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
-                {field("Name", "customerName")}
-                {field("Contact no.", "phone")}
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
               <div>
-                <label style={labelSt}>Accepted date</label>
-                <div style={{ ...fieldBox, color: "var(--text-secondary)" }}>{dayName}, {monthName} {d.getDate()}, {d.getFullYear()}</div>
+                <label style={lab}>Accepted date</label>
+                <div style={{ ...readSt, color: "var(--text-primary)" }}>{dayName}, {monthName} {d.getDate()}, {d.getFullYear()}</div>
               </div>
-              {editing ? (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  {field("Brand", "brand")}
-                  {field("Model", "model")}
-                </div>
-              ) : (
-                <div>
-                  <label style={labelSt}>Model</label>
-                  <div style={{ ...fieldBox, fontWeight: 600 }}>{job.brand} {job.model}</div>
-                </div>
-              )}
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
               {/* Not editable, and not because it is protected: nothing is
                   stored behind it. repair_jobs records created_by as a uuid
                   with no display name resolved anywhere. */}
               <div>
-                <label style={labelSt}>Accepted by</label>
-                <div style={{ ...fieldBox, color: "var(--text-muted)", fontStyle: "italic" }}>—</div>
+                <label style={lab}>Accepted by</label>
+                <div style={{ ...readSt, color: "var(--text-muted)", fontStyle: "italic" }}>—</div>
               </div>
-              {field("IMEI no.", "imei", { mono: true })}
-            </div>
+
+              {/* Read as a promise kept or broken, not as a raw date string. */}
+              {editing ? field("Estimated completion", "estimatedCompletion", { type: "date" }) : (
+                <div>
+                  <label style={lab}>Estimated completion</label>
+                  <div style={{ ...readSt, color: "var(--text-primary)" }}>{job.estimatedCompletion ? <DueDate job={job} /> : "—"}</div>
+                </div>
+              )}
+              {field("Repair warranty", "jobWarranty")}
+            </>)}
 
             {job.cancelReason && (
-              <div style={{ padding: "10px 14px", borderRadius: 10, background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.2)" }}>
-                <p style={{ fontSize: 10, fontWeight: 700, color: "#f87171", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>Cancellation Reason</p>
+              <div style={{ padding: "11px 14px", borderRadius: 12, background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.25)" }}>
+                <p style={{ fontSize: 10, fontWeight: 700, color: "#f87171", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancellation reason</p>
                 {editing ? (
                   <input
                     value={String(val("cancelReason") ?? "")}
@@ -1540,84 +1606,62 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                     style={{ ...fieldBox, width: "100%", boxSizing: "border-box", background: "var(--bg-primary)", borderColor: "rgba(248,113,113,0.4)", outline: "none" }}
                   />
                 ) : (
-                  <p style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{job.cancelReason}</p>
+                  <p style={{ fontSize: 12.5, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.45 }}>{job.cancelReason}</p>
                 )}
               </div>
             )}
 
-            {editing ? (
-              <>
-                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
-                  {field("Model number", "modelNumber", { mono: true })}
-                  {field("Customer email", "customerEmail", { type: "email" })}
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
-                  {choice("Priority", "priority", ["Low", "Normal", "High", "Urgent"].map(v => ({ value: v, text: v })))}
-                  {field("Estimated completion", "estimatedCompletion", { type: "date" })}
-                </div>
-                {field("Reported fault", "issue", { grow: true })}
-                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
-                  {field("Estimated cost (Rs.)", "estimatedCost", { type: "number" })}
-                  {field("Advance paid (Rs.)", "advancePaid", { type: "number" })}
-                </div>
-                {field("Repair warranty", "jobWarranty")}
-                {field("Technician remarks", "techRemarks", { grow: true })}
-                {field("Future faults noted", "futureFaults", { grow: true })}
-              </>
-            ) : (
-              <div>
-                <label style={labelSt}>Select repair warranty (Optional)</label>
-                <div style={{ ...fieldBox, color: job.jobWarranty ? "var(--text-primary)" : "var(--text-muted)" }}>{job.jobWarranty || "— SELECT —"}</div>
-              </div>
-            )}
+            {section(<User size={11} strokeWidth={2.4} />, "Owner data", "#60a5fa", <>
+              {field("Name", "customerName")}
+              {field("Contact no.", "phone")}
+              {field("Customer email", "customerEmail", { type: "email", grow: true })}
+            </>)}
 
-            <div>
-              <div style={secHead}>Submission details</div>
-              <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", background: "var(--bg-secondary)" }}>
-                <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: isMobile ? 8 : 18, flexWrap: "wrap", marginBottom: 8, alignItems: isMobile ? "flex-start" : "center" }}>
-                  <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
-                    {["Equipment", "Antenna", "Back cover", "Other issue"].map(item => (
-                      <label key={item} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: items.includes(item) ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: items.includes(item) ? 600 : 400, cursor: editing ? "pointer" : "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                        <input type="checkbox" checked={items.includes(item)} disabled={!editing} onChange={() => toggleItem(item)} style={{ accentColor: "var(--accent)" }} />{item}
-                      </label>
-                    ))}
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: isMobile ? undefined : "auto" }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase" as const, letterSpacing: "0.06em" }}>Warranty</span>
-                    {(["Yes", "No"] as const).map(opt => (
-                      <label key={opt} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-secondary)", cursor: "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                        <input type="radio" disabled readOnly checked={opt === "No"} style={{ accentColor: "var(--accent)" }} />{opt}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 18 }}>
-                  {["Battery", "Charger", "SIM card"].map(item => (
-                    <label key={item} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: items.includes(item) ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: items.includes(item) ? 600 : 400, cursor: editing ? "pointer" : "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                      <input type="checkbox" checked={items.includes(item)} disabled={!editing} onChange={() => toggleItem(item)} style={{ accentColor: "var(--accent)" }} />{item}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
+            {section(<Smartphone size={11} strokeWidth={2.4} />, "Device", "#4ade80", <>
+              {field("Brand", "brand")}
+              {field("Model", "model")}
+              {field("IMEI no.", "imei", { mono: true })}
+              {field("Model number", "modelNumber", { mono: true })}
+              {field("Reported fault", "issue", { grow: true })}
+            </>)}
 
-            <div>
-              <div style={secHead}>Fault type</div>
-              <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", background: "var(--bg-secondary)", display: "flex", flexDirection: "column", gap: 8 }}>
-                {faultRows.map((row, ri) => (
-                  <div key={ri} style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-                    {row.map(fault => {
-                      const checked = hasFault(fault);
-                      return (
-                        <label key={fault} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: checked ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: checked ? 600 : 400, cursor: editing ? "pointer" : "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                          <input type="checkbox" checked={checked} disabled={!editing} onChange={() => toggleFault(fault)} style={{ accentColor: "var(--accent)" }} />{fault}
-                        </label>
-                      );
-                    })}
-                  </div>
+            {section(<Wallet size={11} strokeWidth={2.4} />, "Charges", "#fbbf24", <>
+              {field("Estimated cost (Rs.)", "estimatedCost", { type: "number" })}
+              {field("Advance paid (Rs.)", "advancePaid", { type: "number" })}
+              {/* The figure both fields above are actually about. It was in
+                  neither mode — every cashier worked it out in their head. */}
+              <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 13px", borderRadius: 8, background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                  {balance >= 0 ? "Balance on the estimate" : "Advance over the estimate"}
+                </span>
+                <span style={{ fontSize: 14.5, fontWeight: 800, color: balance > 0 ? "#fbbf24" : balance < 0 ? "#60a5fa" : "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                  {rs(Math.abs(balance))}
+                </span>
+              </div>
+            </>)}
+
+            {/* Written by the bench, so shown when there is something to show
+                — an empty pair of boxes on every job would say nothing. */}
+            {(editing || job.techRemarks || job.futureFaults) && section(<ClipboardList size={11} strokeWidth={2.4} />, "Technician notes", "#94a3b8", <>
+              {field("Technician remarks", "techRemarks", { grow: true })}
+              {field("Future faults noted", "futureFaults", { grow: true })}
+            </>)}
+
+            {section(<Package size={11} strokeWidth={2.4} />, "Submission details", "#38bdf8", <>
+              {tickGrid(["Equipment", "Antenna", "Back cover", "Other issue", "Battery", "Charger", "SIM card"], i => items.includes(i), toggleItem, 4)}
+              <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 10, paddingTop: 11, borderTop: "1px solid var(--border)" }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase" as const, letterSpacing: "0.07em", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Warranty</span>
+                {(["Yes", "No"] as const).map(opt => (
+                  <label key={opt} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text-secondary)", cursor: "default", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                    <input type="radio" disabled readOnly checked={opt === "No"} style={{ accentColor: "var(--accent)" }} />{opt}
+                  </label>
                 ))}
               </div>
-            </div>
+            </>)}
+
+            {section(<AlertCircle size={11} strokeWidth={2.4} />, "Fault type", "#f87171", (
+              tickGrid(faultRows.flat(), hasFault, toggleFault, 4)
+            ))}
           </div>
         </div>
       </div>
