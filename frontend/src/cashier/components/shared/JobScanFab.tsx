@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { DeviceLock } from "@/lib/repair/DeviceLock";
 import { ScanLine, X, Search, CheckCircle2, AlertCircle } from "lucide-react";
 import { useRepair, jobLabel, VIEW_META, type RepairJob, type RepairView } from "@/cashier/contexts/RepairContext";
 import { useBarcodeScanner } from "@/cashier/hooks/useBarcodeScanner";
@@ -190,11 +191,33 @@ export default function JobScanFab() {
                     </div>
                   </div>
 
+                  {/* Which handset, right under which job. The scan already
+                      said which record; this is what confirms the thing in
+                      your hand is the one it describes. */}
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginTop: -6 }}>
+                    <span style={{ fontSize: 14.5, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>
+                      {[result.brand, result.model].filter(Boolean).join(" ") || "—"}
+                    </span>
+                    {result.imei && (
+                      <span style={{ fontSize: 11.5, fontFamily: "monospace", color: "var(--text-muted)" }}>IMEI {result.imei}</span>
+                    )}
+                  </div>
+
+                  {/* The two reasons a technician opens this at all: what is
+                      wrong with it, and how to get into it. Everything below
+                      is context — whose it is, when it is due, what it costs —
+                      and none of it is needed with the phone already in hand.
+                      They lead. */}
+                  <div style={{ background: "var(--bg-surface)", borderRadius: 10, padding: "12px 14px" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4, fontFamily: ff }}>Reported fault</div>
+                    <p style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.45, fontFamily: ff }}>{result.issue || "—"}</p>
+                  </div>
+
+                  <DeviceLock type={result.passcodeType} code={result.devicePasscode} />
+
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, background: "var(--bg-surface)", borderRadius: 10, padding: "14px 16px" }}>
                     <Row label="Customer" value={result.customerName} />
                     <Row label="Phone" value={result.phone} />
-                    <Row label="Device" value={`${result.brand} ${result.model}`} />
-                    <Row label="IMEI" value={result.imei} />
                     <Row label="Technician" value={result.technician} />
                     <Row label="Dealer" value={result.dealer || "Mano Mobile"} />
                     <Row label="Created" value={result.createdAt} />
@@ -211,11 +234,6 @@ export default function JobScanFab() {
                     <div style={{ background: "var(--bg-surface)", borderRadius: 10, padding: "10px 12px" }}>
                       <Row label="Balance" value={<span style={{ color: balance > 0 ? "#f87171" : "#4ade80" }}>Rs. {balance.toLocaleString()}</span>} />
                     </div>
-                  </div>
-
-                  <div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5, fontFamily: ff }}>Issue</div>
-                    <p style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.5, fontFamily: ff }}>{result.issue || "—"}</p>
                   </div>
 
                   {result.techRemarks && (

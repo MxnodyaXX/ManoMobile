@@ -1,6 +1,7 @@
 "use client";
 
 import { createPortal } from "react-dom";
+import { DeviceLock } from "@/lib/repair/DeviceLock";
 import { X, Eye } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
@@ -80,6 +81,10 @@ export default function JobInfoModal({ job, onClose }: { job: RepairJob; onClose
               {row("Device", [job.brand, job.model].filter(Boolean).join(" "))}
               {row("Model number", job.modelNumber)}
               {row("IMEI", job.imei ? <span style={{ fontFamily: "monospace" }}>{job.imei}</span> : "")}
+              {/* The lock belongs with the device, not in a panel of its own —
+                  this modal is a list of facts and it is one of them. */}
+              {(job.passcodeType || job.devicePasscode) &&
+                row("Screen lock", <DeviceLock type={job.passcodeType} code={job.devicePasscode} compact />)}
               {row("Reported fault", job.issue)}
             </>
           ))}

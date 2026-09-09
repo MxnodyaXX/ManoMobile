@@ -360,3 +360,121 @@ select option { background: var(--bg-card); color: var(--text-primary); }
 @media (min-width: 900px) {
   .complete-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Mobile safety net
+
+   The shells are already responsive — four sidebars collapse to a drawer, the
+   grid helpers fold, iOS input zoom is handled. What was left is three
+   patterns repeated across a hundred and thirty places, each of which pushes
+   the whole page sideways on a phone:
+
+     a 900px-wide table in a box that only scrolls vertically
+     a dialog pinned at width: 480 on a 360px screen
+     a four-column grid written inline, with no breakpoint
+
+   Fixing those where they are written would mean editing a hundred and thirty
+   components and missing the hundred and thirty-first. They are all
+   recognisable from the markup instead, so they are corrected here — once,
+   and for anything written tomorrow that repeats the same shape.
+
+   Every rule below is opt-out-able and none applies to print.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Tables scroll, not the page ──────────────────────────────────────────
+   .table-scroll boxes already scroll vertically with a sticky header. They
+   were missing the other axis, which is the one that breaks a phone: the
+   table is 900px wide and the viewport is 360.
+   Adding it to the same element keeps the sticky header working — it stays
+   the scrollport for both directions. */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+@media screen and (max-width: 900px) {
+  /* Everywhere else the table has no scrolling parent at all. Making the
+     table itself a block gives it somewhere to scroll; the rows still lay out
+     as a table inside it.
+
+     min-width is overridden because it is what forces the box wide — the
+     nowrap below is what keeps the columns their real width, so the content
+     still overflows and scrolls rather than squeezing into unreadable
+     columns. Tables inside a .table-scroll are excluded: they are handled
+     above, and a second scrollport nested in the first would break their
+     sticky headers. */
+  :not(.table-scroll) > table:not(.no-resp) {
+    display: block;
+    max-width: 100%;
+    min-width: 0 !important;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  :not(.table-scroll) > table:not(.no-resp) th,
+  :not(.table-scroll) > table:not(.no-resp) td {
+    white-space: nowrap;
+  }
+}
+
+/* ── Dialogs fit the screen they open on ──────────────────────────────────
+   The centred-dialog pattern in this app is `position: fixed` at 50%/50% with
+   a translate and a pixel width — 360, 420, 480, 500, 740. On a phone the
+   sides are off-screen in both directions, and because it is centred there is
+   nothing to scroll to reach them.
+
+   A max-width only, deliberately: a dialog already narrower than the screen
+   is untouched, and so is every small centred thing that is not a dialog. */
+@media screen and (max-width: 640px) {
+  [style*="translate(-50%,-50%)"]:not(.no-resp),
+  [style*="translate(-50%, -50%)"]:not(.no-resp) {
+    max-width: calc(100vw - 24px) !important;
+    /* And tall enough to be reachable. Several of these set a pixel width and
+       no height at all, so on a short screen the bottom of the dialog — where
+       Save lives — is off the end of the page with nothing to scroll. */
+    max-height: calc(100vh - 24px) !important;
+    overflow-y: auto;
+  }
+}
+
+/* ── Inline grids fold ────────────────────────────────────────────────────
+   Roughly ninety-five grids are written straight into the markup as
+   `repeat(4, 1fr)` or `1fr 1fr`, with no breakpoint. Four stat cards across a
+   360px screen is four unreadable slivers.
+
+   Matched on the value in the style attribute, which is exact enough to be
+   safe: `repeat(auto-fit, …)` does not match, and neither does a grid that
+   already asked useIsMobile and rendered `1fr`. Anything that genuinely wants
+   to stay side by side on a phone can say so with .keep-cols. */
+@media screen and (max-width: 700px) {
+  [style*="repeat(3"]:not(.keep-cols),
+  [style*="repeat(4"]:not(.keep-cols),
+  [style*="repeat(5"]:not(.keep-cols),
+  [style*="repeat(6"]:not(.keep-cols),
+  [style*="repeat(7"]:not(.keep-cols),
+  [style*="repeat(8"]:not(.keep-cols) {
+    grid-template-columns: 1fr 1fr !important;
+  }
+}
+
+@media screen and (max-width: 480px) {
+  [style*="repeat(3"]:not(.keep-cols),
+  [style*="repeat(4"]:not(.keep-cols),
+  [style*="repeat(5"]:not(.keep-cols),
+  [style*="repeat(6"]:not(.keep-cols),
+  [style*="repeat(7"]:not(.keep-cols),
+  [style*="repeat(8"]:not(.keep-cols),
+  /* Both spellings: React's server renderer writes the style attribute with
+     no space after the colon, and the browser's CSSOM re-serialises it with
+     one. A selector that knows only the second form works after hydration and
+     not before it, which is the worst of the two. */
+  [style*="columns:1fr 1fr"]:not(.keep-cols),
+  [style*="columns: 1fr 1fr"]:not(.keep-cols) {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── Nothing wider than the screen ────────────────────────────────────────
+   The last resort, for whatever the three rules above did not recognise.
+   `clip` rather than `hidden` on purpose: hidden would make the body a scroll
+   container and break every position: sticky header in the app. */
+@media screen and (max-width: 768px) {
+  html, body { overflow-x: clip; }
+  img, video, canvas, svg { max-width: 100%; height: auto; }
+}

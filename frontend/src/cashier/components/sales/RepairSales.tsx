@@ -26,6 +26,9 @@ interface CompletedRepair {
   id: string;
   dealer: string;
   customerName: string;
+  /** The number recorded on the job. Carried through so the invoice can take
+   *  the customer straight off the repair rather than have it retyped. */
+  phone?: string;
   brand: string;
   model: string;
   imei: string;
@@ -598,8 +601,23 @@ export default function RepairSales() {
    * them, so all of it says the same thing.
    */
   const [billToDealer, setBillToDealer] = useState(false);
-  // What was typed by hand before the tick, so unticking gives it back rather
-  // than throwing away a half-entered customer.
+  /**
+   * Take the customer from the job being billed.
+   *
+   * On by default, because it is right almost every time: the phone belongs to
+   * the person named on the job, and their name and number are already in the
+   * record two steps up this same screen. Retyping them at the till is how a
+   * customer ends up on one invoice as "Dinushi" and on the next as "Dinushy"
+   * with a digit missing from the number — and the invoice is what they are
+   * handed and what the shop keeps.
+   *
+   * Not locked, unlike the dealer tick. A name can be wrong on the job and the
+   * counter is the moment somebody notices; typing over it simply turns this
+   * off, because the fields are then no longer what the job says.
+   */
+  const [useJobCustomer, setUseJobCustomer] = useState(true);
+  // What was typed by hand before either tick, so unticking gives it back
+  // rather than throwing away a half-entered customer.
   const manualCustomer = useRef({ name: "", phone: "", nic: "" });
 
   /**
@@ -688,6 +706,7 @@ export default function RepairSales() {
         id: j.id,
         dealer: findDealer(dealers, j)?.name ?? j.dealer ?? "",
         customerName: j.customerName,
+        phone: j.phone,
         brand: j.brand,
         model: j.model,
         imei: j.imei ?? "",
@@ -731,6 +750,23 @@ export default function RepairSales() {
   );
 
   const selectedRepairs = invoiceable.filter(r => checkedIds.has(r.id));
+
+  /**
+   * The customer named on a set of chosen jobs.
+   *
+   * Takes a set rather than reading `selectedRepairs`, because the callers are
+   * the tick handlers themselves: inside one, the state still holds the
+   * selection as it was a moment ago, and filling the fields from that would
+   * put the previous job's owner on the invoice.
+   *
+   * The first job that names anybody wins. Several jobs on one invoice are
+   * usually one customer's two handsets; where they are not, the tick says so
+   * rather than silently picking.
+   */
+  const customerOf = (ids: Set<string>) => {
+    const first = invoiceable.find(r => ids.has(r.id) && (r.customerName ?? "").trim());
+    return { name: (first?.customerName ?? "").trim(), phone: (first?.phone ?? "").trim() };
+  };
 
   // The refund position of whatever is selected, from v_job_refunds — the one
   // place the refund arithmetic lives, so this screen and the jobs list can
@@ -897,8 +933,39 @@ export default function RepairSales() {
   const dealerRecord   = selectedDealer ? findDealer(dealers, selectedDealer) : undefined;
   const canBillDealer  = !!selectedDealer && !isManoMobile;
 
+  /**
+   * Put the chosen jobs' customer into the fields, if that is what the tick
+   * says. Called from the row checkboxes, so the invoice follows the selection
+   * instead of keeping whoever was there when the first job was ticked.
+   */
+  const fillFromJobs = (ids: Set<string>) => {
+    if (!useJobCustomer || billToDealer) return;
+    const c = customerOf(ids);
+    setCustName(c.name);
+    setCustPhone(c.phone);
+    // No NIC on a repair job — that field stays whatever was typed.
+  };
+
+  const toggleJobCustomer = (on: boolean) => {
+    if (on) {
+      manualCustomer.current = { name: custName, phone: custPhone, nic: custNic };
+      const c = customerOf(checkedIds);
+      setCustName(c.name);
+      setCustPhone(c.phone);
+      // The two ticks answer the same question — whose name goes on the
+      // invoice — so they cannot both be the answer.
+      setBillToDealer(false);
+    } else {
+      setCustName(manualCustomer.current.name);
+      setCustPhone(manualCustomer.current.phone);
+      setCustNic(manualCustomer.current.nic);
+    }
+    setUseJobCustomer(on);
+  };
+
   const toggleBillToDealer = (on: boolean) => {
     if (on) {
+      setUseJobCustomer(false);
       manualCustomer.current = { name: custName, phone: custPhone, nic: custNic };
       setCustName(dealerRecord?.name ?? selectedDealer);
       setCustPhone(dealerRecord?.contact ?? "");
@@ -953,17 +1020,26 @@ export default function RepairSales() {
     (useCreditPicker ? !!selectedCreditCustomer : !!custName.trim()) &&
     true;
 
+  // What the tick would fill in, said out loud next to it — a tick whose
+  // effect you have to press it to discover is a tick nobody presses.
+  const jobCustomer = customerOf(checkedIds);
+  const jobCustomerVaries =
+    new Set(
+      selectedRepairs.map(r => (r.customerName ?? "").trim().toLowerCase()).filter(Boolean),
+    ).size > 1;
+
   // Effective customer for invoice
   const invoiceCustomer = useCreditPicker && selectedCreditCustomer
     ? { name: selectedCreditCustomer.name, phone: selectedCreditCustomer.phone ?? "", nic: selectedCreditCustomer.nic ?? "" }
     : { name: custName, phone: custPhone, nic: custNic };
 
   const toggleCheck = (id: string) => {
-    setCheckedIds(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+    // Built here rather than in the updater so the same value can be handed to
+    // fillFromJobs. An updater has to be pure — it can be called twice.
+    const next = new Set(checkedIds);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setCheckedIds(next);
+    fillFromJobs(next);
     setAmountReceived("");
     setSelectedCreditCustomer(null);
   };
@@ -973,21 +1049,19 @@ export default function RepairSales() {
    *  they're already all checked. */
   const allChecked = dealerRepairs.length > 0 && dealerRepairs.every(r => checkedIds.has(r.id));
   const toggleCheckAll = () => {
-    setCheckedIds(prev => {
-      if (allChecked) {
-        const next = new Set(prev);
-        dealerRepairs.forEach(r => next.delete(r.id));
-        return next;
-      }
-      return new Set([...prev, ...dealerRepairs.map(r => r.id)]);
-    });
+    const next = new Set(checkedIds);
+    if (allChecked) dealerRepairs.forEach(r => next.delete(r.id));
+    else dealerRepairs.forEach(r => next.add(r.id));
+    setCheckedIds(next);
+    fillFromJobs(next);
     setAmountReceived("");
     setSelectedCreditCustomer(null);
   };
 
   const handleReset = () => {
     setSelectedDealer(""); setCheckedIds(new Set()); setSearch("");
-    setBillToDealer(false); manualCustomer.current = { name: "", phone: "", nic: "" };
+    setBillToDealer(false); setUseJobCustomer(true);
+    manualCustomer.current = { name: "", phone: "", nic: "" };
     setCustName(""); setCustPhone(""); setCustNic(""); setAmountReceived("");
     setRowDiscounts({}); setWriteOffBalance(false); setInvDiscount("");
     setPayMethod("Cash"); setCardRef("");
@@ -999,6 +1073,7 @@ export default function RepairSales() {
   const handleDealerChange = (val: string) => {
     setSelectedDealer(val); setCheckedIds(new Set()); setSearch("");
     // The filled-in details belong to the dealer being left behind.
+    setUseJobCustomer(true);
     manualCustomer.current = { name: "", phone: "", nic: "" };
     setAmountReceived("");
     setRowDiscounts({}); setWriteOffBalance(false); setInvDiscount("");
@@ -1818,6 +1893,36 @@ export default function RepairSales() {
               ) : (
                 /* Simple customer entry */
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {/* Offered only when there is a job to take them from. With
+                      nothing selected it would be a tick that does nothing. */}
+                  {selectedRepairs.length > 0 && (
+                    <label
+                      style={{
+                        display: "flex", alignItems: "flex-start", gap: 9, cursor: "pointer",
+                        padding: "9px 11px", borderRadius: 9,
+                        background: useJobCustomer ? "rgba(99,85,255,0.07)" : "var(--bg-primary)",
+                        border: `1px solid ${useJobCustomer ? "var(--accent-glow)" : "var(--border)"}`,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={useJobCustomer}
+                        onChange={e => toggleJobCustomer(e.target.checked)}
+                        style={{ width: 15, height: 15, accentColor: "var(--accent)", cursor: "pointer", flexShrink: 0, marginTop: 1 }}
+                      />
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", display: "block" }}>
+                          Use the customer on the job
+                        </span>
+                        <span style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
+                          {jobCustomer.name
+                            ? <>{jobCustomer.name}{jobCustomer.phone ? ` · ${jobCustomer.phone}` : ""}{jobCustomerVaries ? " — these jobs name more than one customer, so the first is used." : ""}</>
+                            : "No customer name was recorded on the selected job — type one below."}
+                        </span>
+                      </span>
+                    </label>
+                  )}
+
                   {canBillDealer && (
                     <label
                       style={{
@@ -1848,7 +1953,8 @@ export default function RepairSales() {
                     <label style={labelSt}>Full Name *</label>
                     <input
                       value={custName}
-                      onChange={e => { setCustName(e.target.value); setCustMatchOpen(true); }}
+                      // Typed over, so these are no longer what the job says.
+                      onChange={e => { setCustName(e.target.value); setUseJobCustomer(false); setCustMatchOpen(true); }}
                       onFocus={() => setCustMatchOpen(true)}
                       // A blur that fires before the click on a suggestion would
                       // close the list out from under the pointer.
@@ -1900,7 +2006,7 @@ export default function RepairSales() {
                     <label style={labelSt}>Phone</label>
                     <input
                       value={custPhone}
-                      onChange={e => { setCustPhone(e.target.value); setCustMatchOpen(true); }}
+                      onChange={e => { setCustPhone(e.target.value); setUseJobCustomer(false); setCustMatchOpen(true); }}
                       onFocus={() => setCustMatchOpen(true)}
                       onBlur={() => setTimeout(() => setCustMatchOpen(false), 150)}
                       readOnly={billToDealer}
