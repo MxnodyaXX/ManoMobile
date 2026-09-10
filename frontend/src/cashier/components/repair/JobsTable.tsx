@@ -33,6 +33,7 @@ import { useToast } from "@/lib/ui/toast";
 import { useTableSort, SortHeader, type SortValue } from "@/lib/ui/useTableSort";
 import { useJobCashReturns, refundRepairAdvance } from "@/lib/accounts/cashReturns";
 import { useJobSlot } from "@/lib/repair/useJobSlot";
+import { cleanImei, imeiIssue, cleanPhone, phoneIssue, FieldWarning } from "@/lib/ui/identifiers";
 
 interface FinishJobData {
   actionTaken: string;
@@ -1284,9 +1285,14 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
    * Declared inside render, a component is a new type on every pass, so React
    * remounts it and the input loses focus after each keystroke.
    */
-  const field = (label: string, k: keyof RepairJob, opts: { mono?: boolean; type?: string; grow?: boolean } = {}) => {
-    const { mono, type = "text", grow } = opts;
+  const field = (label: string, k: keyof RepairJob, opts: { mono?: boolean; type?: string; grow?: boolean; kind?: "imei" | "phone" } = {}) => {
+    const { mono, type = "text", grow, kind } = opts;
     const shown = val(k);
+    // The two identifiers the shop mistypes most, given their rules here so no
+    // caller has to repeat them.
+    const warn = kind === "imei" ? imeiIssue(String(shown ?? ""))
+      : kind === "phone" ? phoneIssue(String(shown ?? ""))
+      : null;
     return (
       <div key={String(k)} style={grow ? { gridColumn: "1 / -1" } : undefined}>
         <label style={lab}>{label}</label>
@@ -1294,7 +1300,16 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
           <input
             type={type}
             value={(shown as string | number | undefined) ?? ""}
-            onChange={e => set(k, (type === "number" ? Number(e.target.value) : e.target.value) as RepairJob[typeof k])}
+            onChange={e => {
+              const raw = e.target.value;
+              const next = kind === "imei" ? cleanImei(raw)
+                : kind === "phone" ? cleanPhone(raw)
+                : type === "number" ? Number(raw)
+                : raw;
+              set(k, next as RepairJob[typeof k]);
+            }}
+            maxLength={kind === "imei" ? 15 : undefined}
+            inputMode={kind === "imei" ? "numeric" : kind === "phone" ? "tel" : undefined}
             style={{
               ...fieldBox, width: "100%", boxSizing: "border-box",
               background: "var(--bg-primary)", borderColor: "var(--accent-glow)",
@@ -1307,6 +1322,7 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
             {(shown as string | number | undefined) || "—"}
           </div>
         )}
+        {editing && <FieldWarning text={warn} />}
       </div>
     );
   };
@@ -1614,14 +1630,14 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
 
             {section(<User size={11} strokeWidth={2.4} />, "Owner data", "#60a5fa", <>
               {field("Name", "customerName")}
-              {field("Contact no.", "phone")}
+              {field("Contact no.", "phone", { kind: "phone" })}
               {field("Customer email", "customerEmail", { type: "email", grow: true })}
             </>)}
 
             {section(<Smartphone size={11} strokeWidth={2.4} />, "Device", "#4ade80", <>
               {field("Brand", "brand")}
               {field("Model", "model")}
-              {field("IMEI no.", "imei", { mono: true })}
+              {field("IMEI no.", "imei", { mono: true, kind: "imei" })}
               {field("Model number", "modelNumber", { mono: true })}
               {field("Reported fault", "issue", { grow: true })}
             </>)}

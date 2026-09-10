@@ -20,6 +20,7 @@ import { usePersistInvoiceDocument } from "@/lib/sales/invoiceDoc";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { useMyPermissions } from "@/lib/settings/staffRules";
 import { useJobRefunds, refundRepairAdvance } from "@/lib/accounts/cashReturns";
+import { cleanImei, cleanPhone } from "@/lib/ui/identifiers";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1123,7 +1124,10 @@ export default function RepairSales({ initialDealer, initialJobId }: {
   /** Written onto the job itself, not just the invoice: the missing number is
    *  missing everywhere, and fixing it here fixes the record too. */
   const saveImei = async () => {
-    if (!imeiEdit || !imeiEdit.value.trim()) return;
+    // Exactly fifteen. A short IMEI on an invoice is worse than none: it names
+    // a handset that does not exist, and will not match the real one when the
+    // customer comes back with it.
+    if (!imeiEdit || imeiEdit.value.length !== 15) return;
     setImeiSaving(true);
     const res = await updateJob(imeiEdit.id, { imei: imeiEdit.value.trim() });
     setImeiSaving(false);
@@ -1560,14 +1564,14 @@ export default function RepairSales({ initialDealer, initialJobId }: {
                             <input
                               autoFocus
                               value={imeiEdit.value}
-                              onChange={e => setImeiEdit({ id: r.id, value: e.target.value.replace(/\D/g, "") })}
+                              onChange={e => setImeiEdit({ id: r.id, value: cleanImei(e.target.value) })}
                               onKeyDown={e => { if (e.key === "Enter") void saveImei(); if (e.key === "Escape") setImeiEdit(null); }}
                               maxLength={15}
                               inputMode="numeric"
                               placeholder="Dial *#06#"
                               style={{ width: 150, padding: "5px 8px", borderRadius: 7, border: "1px solid var(--accent-glow)", background: "var(--bg-primary)", color: "var(--text-primary)", fontSize: 11.5, fontFamily: "monospace", outline: "none" }}
                             />
-                            <button onClick={() => void saveImei()} disabled={imeiSaving || !imeiEdit.value.trim()} title="Save" style={{ display: "flex", padding: 4, borderRadius: 6, border: "1px solid var(--accent)", background: "transparent", color: "var(--accent)", cursor: imeiEdit.value.trim() ? "pointer" : "not-allowed", opacity: imeiEdit.value.trim() ? 1 : 0.4 }}>
+                            <button onClick={() => void saveImei()} disabled={imeiSaving || imeiEdit.value.length !== 15} title={imeiEdit.value.length === 15 ? "Save" : `15 digits needed — this has ${imeiEdit.value.length}`} style={{ display: "flex", padding: 4, borderRadius: 6, border: "1px solid var(--accent)", background: "transparent", color: "var(--accent)", cursor: imeiEdit.value.length === 15 ? "pointer" : "not-allowed", opacity: imeiEdit.value.length === 15 ? 1 : 0.4 }}>
                               <Check size={12} />
                             </button>
                             <button onClick={() => setImeiEdit(null)} title="Cancel" style={{ display: "flex", padding: 4, borderRadius: 6, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer" }}>
@@ -2209,7 +2213,8 @@ export default function RepairSales({ initialDealer, initialJobId }: {
                     <label style={labelSt}>Phone</label>
                     <input
                       value={custPhone}
-                      onChange={e => { setCustPhone(e.target.value); setUseJobCustomer(false); setCustMatchOpen(true); }}
+                      onChange={e => { setCustPhone(cleanPhone(e.target.value)); setUseJobCustomer(false); setCustMatchOpen(true); }}
+                      inputMode="tel"
                       onFocus={() => setCustMatchOpen(true)}
                       onBlur={() => setTimeout(() => setCustMatchOpen(false), 150)}
                       readOnly={billToDealer}

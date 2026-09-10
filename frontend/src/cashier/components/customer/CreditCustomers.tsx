@@ -34,6 +34,7 @@ import { useRepair } from "@/cashier/contexts/RepairContext";
 import { useToast } from "@/lib/ui/toast";
 import { recordDealerCashReturn } from "@/lib/accounts/cashReturns";
 import { useTableSort, SortHeader } from "@/lib/ui/useTableSort";
+import { cleanPhone, phoneIssue, FieldWarning } from "@/lib/ui/identifiers";
 
 /**
  * Credit accounts — who owes the shop money.
@@ -864,7 +865,7 @@ function OpenAccountModal({ onClose, onDone }: { onClose: () => void; onDone: ()
           <>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div><label style={labelSt}>Full Name *</label><input value={name} onChange={e => setName(e.target.value)} style={inputSt} /></div>
-              <div><label style={labelSt}>Phone *</label><input value={phone} onChange={e => setPhone(e.target.value)} placeholder="07XXXXXXXX" style={inputSt} /></div>
+              <div><label style={labelSt}>Phone *</label><input value={phone} onChange={e => setPhone(cleanPhone(e.target.value))} inputMode="tel" placeholder="07XXXXXXXX" style={inputSt} /><FieldWarning text={phoneIssue(phone)} /></div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div><label style={labelSt}>NIC</label><input value={nic} onChange={e => setNic(e.target.value)} style={inputSt} /></div>

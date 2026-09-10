@@ -7,6 +7,7 @@ import {
   Plus, Trash2, Printer, FileText, X, CheckCircle,
   Clock, ChevronDown, Copy,
 } from "lucide-react";
+import { cleanPhone, phoneIssue, FieldWarning } from "@/lib/ui/identifiers";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -263,7 +264,7 @@ function QuoteForm({ existing, onSave, onCancel }: {
         </div>
         <div>
           <label style={{ fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Phone</label>
-          <input placeholder="+94 7X XXX XXXX" value={phone} onChange={e => setPhone(e.target.value)} style={inputStyle} />
+          <input placeholder="+947XXXXXXXX or 07XXXXXXXX" value={phone} onChange={e => setPhone(cleanPhone(e.target.value))} inputMode="tel" style={inputStyle} /><FieldWarning text={phoneIssue(phone)} />
         </div>
         <div>
           <label style={{ fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Valid Until</label>

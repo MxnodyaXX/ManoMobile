@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Plus, Search, Edit2, X, Smartphone, AlertTriangle, CheckCircle, Wrench } from "lucide-react";
 import { useAdmin, type DeviceRecord, type DeviceStatus } from "@/admin/contexts/AdminContext";
+import { cleanImei, imeiIssue, FieldWarning } from "@/lib/ui/identifiers";
 
 const AA = "#a78bfa";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -58,11 +59,11 @@ function DeviceModal({ initial, onSave, onClose }: {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
               <label style={lbl}>IMEI 1 *</label>
-              <input style={inp} value={form.imei} onChange={e => set("imei", e.target.value)} placeholder="15-digit IMEI" maxLength={17} />
+              <input style={inp} value={form.imei} onChange={e => set("imei", cleanImei(e.target.value))} inputMode="numeric" placeholder="15-digit IMEI" maxLength={15} /><FieldWarning text={imeiIssue(form.imei)} />
             </div>
             <div>
               <label style={lbl}>IMEI 2 (Dual SIM)</label>
-              <input style={inp} value={form.imei2 ?? ""} onChange={e => set("imei2", e.target.value)} placeholder="Optional" maxLength={17} />
+              <input style={inp} value={form.imei2 ?? ""} onChange={e => set("imei2", cleanImei(e.target.value))} inputMode="numeric" placeholder="Optional" maxLength={15} /><FieldWarning text={imeiIssue(form.imei2 ?? "")} />
             </div>
             <div>
               <label style={lbl}>Make / Brand *</label>

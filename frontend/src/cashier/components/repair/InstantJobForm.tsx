@@ -13,6 +13,7 @@ import { IssueJobModal, RepairInvoicePreview } from "@/cashier/components/repair
 import { useIssueJob, type IssueFormData } from "@/lib/repair/issueJob";
 import type { IssueInvoiceData } from "@/cashier/components/repair/JobIssuePrintable";
 import { useJobSlot } from "@/lib/repair/useJobSlot";
+import { cleanImei, imeiIssue, cleanPhone, phoneIssue, FieldWarning } from "@/lib/ui/identifiers";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
@@ -360,7 +361,8 @@ export default function InstantJobForm({ onCreated, onCancel }: {
               </div>
               <div>
                 <label style={label}>Phone</label>
-                <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="07X XXX XXXX" style={input} />
+                <input value={phone} onChange={e => setPhone(cleanPhone(e.target.value))} inputMode="tel" placeholder="07X XXX XXXX" style={input} />
+                <FieldWarning text={phoneIssue(phone)} />
               </div>
             </div>
           </>
@@ -385,7 +387,8 @@ export default function InstantJobForm({ onCreated, onCancel }: {
               {/* Not required, and worth having: it is what makes this repair
                   findable when the same handset comes back under warranty. */}
               <label style={label}>IMEI</label>
-              <input value={imei} onChange={e => setImei(e.target.value.replace(/\D/g, ""))} maxLength={15} inputMode="numeric" placeholder="Dial *#06# on the device" style={{ ...input, fontFamily: "monospace" }} />
+              <input value={imei} onChange={e => setImei(cleanImei(e.target.value))} maxLength={15} inputMode="numeric" placeholder="Dial *#06# on the device" style={{ ...input, fontFamily: "monospace" }} />
+              <FieldWarning text={imeiIssue(imei)} />
             </div>
             <div>
               <label style={label}>Fault *</label>

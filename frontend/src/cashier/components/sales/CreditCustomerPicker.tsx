@@ -8,6 +8,7 @@ import {
 } from "@/lib/credit/api";
 import { useMyPermissions } from "@/lib/settings/staffRules";
 import { useToast } from "@/lib/ui/toast";
+import { cleanPhone, phoneIssue, FieldWarning } from "@/lib/ui/identifiers";
 
 /**
  * Choosing who a credit sale goes on.
@@ -82,7 +83,7 @@ function QuickOpenModal({ onClose, onOpened }: {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <div><label style={labelSt}>Name *</label><input value={name} onChange={e => setName(e.target.value)} style={inputSt} autoFocus /></div>
-        <div><label style={labelSt}>Phone *</label><input value={phone} onChange={e => setPhone(e.target.value)} placeholder="07XXXXXXXX" style={inputSt} /></div>
+        <div><label style={labelSt}>Phone *</label><input value={phone} onChange={e => setPhone(cleanPhone(e.target.value))} inputMode="tel" placeholder="07XXXXXXXX" style={inputSt} /><FieldWarning text={phoneIssue(phone)} /></div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <div><label style={labelSt}>NIC</label><input value={nic} onChange={e => setNic(e.target.value)} style={inputSt} /></div>

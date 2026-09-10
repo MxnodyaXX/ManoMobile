@@ -17,6 +17,7 @@ import { useToast } from "@/lib/ui/toast";
 import Combobox from "@/cashier/components/shared/Combobox";
 import { postJobToCredit } from "@/lib/credit/api";
 import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
+import { cleanImei, imeiIssue, cleanPhone, phoneIssue, FieldWarning } from "@/lib/ui/identifiers";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
@@ -625,7 +626,12 @@ export default function PastJobForm({ onCreated, onCancel }: {
             <>
               {two(
                 field("Customer", <input value={customer} onChange={e => setCustomer(e.target.value)} placeholder="Walk-in" style={input} />),
-                field("Phone", <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="07X XXX XXXX" style={input} />),
+                field("Phone", (
+                  <>
+                    <input value={phone} onChange={e => setPhone(cleanPhone(e.target.value))} inputMode="tel" placeholder="07X XXX XXXX" style={input} />
+                    <FieldWarning text={phoneIssue(phone)} />
+                  </>
+                )),
               )}
               {field("Email", <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Optional" style={input} />)}
             </>
@@ -651,7 +657,12 @@ export default function PastJobForm({ onCreated, onCancel }: {
                 field("Model number", <input value={modelNumber} onChange={e => setModelNumber(e.target.value)} placeholder="SM-A145F" style={{ ...input, fontFamily: "monospace" }} />),
                 // The single most valuable field on an old record: it is what
                 // makes this repair findable when the same handset comes back.
-                field("IMEI", <input value={imei} onChange={e => setImei(e.target.value.replace(/\D/g, ""))} maxLength={15} inputMode="numeric" placeholder="From the job book" style={{ ...input, fontFamily: "monospace" }} />),
+                field("IMEI", (
+                  <>
+                    <input value={imei} onChange={e => setImei(cleanImei(e.target.value))} maxLength={15} inputMode="numeric" placeholder="From the job book" style={{ ...input, fontFamily: "monospace" }} />
+                    <FieldWarning text={imeiIssue(imei)} />
+                  </>
+                )),
               )}
               {two(
                 field("Fault *", (

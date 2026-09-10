@@ -10,6 +10,7 @@ import {
 } from "@/lib/staff/api";
 import { useToast } from "@/lib/ui/toast";
 import { setStaffPassword } from "@/lib/staff/api";
+import { cleanPhone, phoneIssue, FieldWarning } from "@/lib/ui/identifiers";
 
 const AA = "#a78bfa";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -131,7 +132,7 @@ function StaffModal({ initial, onSaved, onClose }: {
             </div>
             <div>
               <label style={lbl}>Phone</label>
-              <input value={phone} onChange={e => setPhone(e.target.value)} style={inp} placeholder="071 234 5678" />
+              <input value={phone} onChange={e => setPhone(cleanPhone(e.target.value))} inputMode="tel" style={inp} placeholder="0712345678" /><FieldWarning text={phoneIssue(phone)} />
             </div>
 
             {/* Only when creating. Changing an existing password is its own

@@ -22,6 +22,7 @@ import { fetchStaffRules } from "@/lib/settings/staffRules";
 import { useDeviceFaults, FALLBACK_FAULTS } from "@/lib/repair/deviceFaults";
 import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2, AlertCircle, FileClock, ChevronDown, History, Users } from "lucide-react";
 import { useJobSlot } from "@/lib/repair/useJobSlot";
+import { cleanImei, imeiIssue, cleanPhone, phoneIssue, FieldWarning } from "@/lib/ui/identifiers";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -344,7 +345,7 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
       : undefined;
     setCustomerMatch(match ? match.customerName : null);
     onChange({
-      customerContact: raw,
+      customerContact: cleanPhone(raw),
       // Never overwrite something the cashier already typed on purpose —
       // this only fills in what's still blank.
       ...(match && !data.customerName.trim() ? { customerName: match.customerName } : {}),
@@ -602,7 +603,9 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
                     style={{ ...inputStyle, ...(bad("customerContact") ? invalidStyle : {}) }}
                     value={data.customerContact}
                     onChange={(e) => handleCustomerContact(e.target.value)}
+                    inputMode="tel"
                   />
+                  <FieldWarning text={phoneIssue(data.customerContact)} />
                   {customerMatch && (
                     <p style={{ fontSize: 11, color: "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
                       <CheckCircle2 size={12} /> Returning customer: <strong>{customerMatch}</strong>
@@ -765,8 +768,9 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
                 maxLength={15}
                 inputMode="numeric"
                 value={data.deviceIMEI}
-                onChange={(e) => onChange({ deviceIMEI: e.target.value.replace(/\D/g, "") })}
+                onChange={(e) => onChange({ deviceIMEI: cleanImei(e.target.value) })}
               />
+              <FieldWarning text={imeiIssue(data.deviceIMEI)} />
 
               {/*
                 The check runs itself once all fifteen digits are in — no button,
