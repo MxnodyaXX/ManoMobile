@@ -329,10 +329,36 @@ export default function CashierPage() {
   const [filter, setFilter] = useState<FilterPeriod>("Daily");
   const [activePage, setActivePage] = useState<ActivePage>("Home");
   const [repairSection, setRepairSection] = useState<RepairSection | undefined>(undefined);
+  /**
+   * A job to land on, from the scan panel.
+   *
+   * Kept with a token rather than just the id, because scanning the same job
+   * twice has to work: the token changes on every request and keys the subtree
+   * below, so Repair Management remounts and re-seeds instead of quietly
+   * ignoring a navigation to where it already is.
+   */
+  const [repairJump, setRepairJump] = useState<{ id: string; token: number } | null>(null);
+  /** A finished repair sent from the scan panel to be billed. Same token
+   *  trick, for the same reason: billing two jobs in a row must work. */
+  const [salesJump, setSalesJump] = useState<{ id: string; dealer: string; token: number } | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [insight, setInsight] = useState<InsightSpec | null>(null);
 
-  const goToRepair = (section?: RepairSection) => { setRepairSection(section); setActivePage("Repair Management"); };
+  const goToRepair = (section?: RepairSection) => { setRepairJump(null); setRepairSection(section); setActivePage("Repair Management"); };
+
+  /** Straight into one job's record, with everything it can do — billing,
+   *  cancelling, the intake slip, and Ctrl+E to correct the details. */
+  /** Straight to the till that bills repairs, with this job already picked. */
+  const issueRepairJob = (job: RepairJob) => {
+    setSalesJump({ id: job.id, dealer: job.dealer ?? "", token: Date.now() });
+    setActivePage("Sales Management");
+  };
+
+  const openRepairJob = (job: RepairJob) => {
+    setRepairSection(jobLabel(job) as RepairSection);
+    setRepairJump({ id: job.id, token: Date.now() });
+    setActivePage("Repair Management");
+  };
   const dateLabel = getDateLabel(filter);
 
   // Live figures, read from the database rather than the zeroed constants.
@@ -354,7 +380,7 @@ export default function CashierPage() {
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
         <Sidebar
           activePage={activePage}
-          onNavigate={(p) => { setRepairSection(undefined); setActivePage(p as ActivePage); }}
+          onNavigate={(p) => { setRepairSection(undefined); setRepairJump(null); setSalesJump(null); setActivePage(p as ActivePage); }}
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
         />
@@ -374,9 +400,22 @@ export default function CashierPage() {
             }}
           >
 
-            {activePage === "Repair Management"    && <RepairManagement initialSection={repairSection} />}
+            {activePage === "Repair Management"    && (
+              <RepairManagement
+                key={repairJump ? `job-${repairJump.token}` : "list"}
+                initialSection={repairSection}
+                initialSearch={repairJump?.id}
+                openJobId={repairJump?.id}
+              />
+            )}
             {activePage === "Warranty Center"      && <WarrantyCenter />}
-            {activePage === "Sales Management"     && <SalesManagement />}
+            {activePage === "Sales Management"     && (
+              <SalesManagement
+                key={salesJump ? `issue-${salesJump.token}` : "tills"}
+                initialSection={salesJump ? "Repair Sales" : undefined}
+                jobToIssue={salesJump ? { id: salesJump.id, dealer: salesJump.dealer } : undefined}
+              />
+            )}
             {activePage === "Inventory Management" && <InventoryManagement />}
             {activePage === "Admin Control"        && <AdminControlPage />}
             {activePage === "Customer Management"  && <CustomerManagement />}
@@ -481,7 +520,7 @@ export default function CashierPage() {
           </main>
         </div>
       </div>
-      <JobScanFab />
+      <JobScanFab onOpenJob={openRepairJob} onIssueJob={issueRepairJob} />
       {/* Breakdown behind whichever Revenue/Sales figure was clicked. Mounted
           here rather than inside the group so it survives the group re-render
           that opening it causes. */}

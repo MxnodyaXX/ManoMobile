@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Play, Pause, CheckCircle, Package, MoreHorizontal, Eye,
-  Stethoscope, StickyNote, AlertTriangle, Send, MessageSquare, History, Hand, Smartphone,
+  Stethoscope, StickyNote, AlertTriangle, Send, MessageSquare, History, Hand, Smartphone, BellRing,
 } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
+import { hasOpenInquiry } from "@/lib/repair/inquiry";
 import { isUnassigned } from "@/lib/repair/api";
 
 const TA = "#34d399";
@@ -28,7 +29,7 @@ const ff = "'Plus Jakarta Sans', sans-serif";
  */
 
 export type BenchAction =
-  | "start" | "claim" | "pause" | "resume" | "complete" | "parts"
+  | "start" | "claim" | "claimStart" | "pause" | "resume" | "complete" | "parts"
   | "device" | "diagnostic" | "notes" | "escalate" | "transfer" | "message" | "activity"
   // Read-only. The only thing offered on another technician's job.
   | "info";
@@ -258,6 +259,26 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
             >
               {row ? "" : job.priority}
             </span>
+            {/* Somebody came in and asked about this one. Loud on purpose and
+                next to the number they quoted at the counter — this is the
+                job's most important fact until the bench has dealt with it,
+                and it outranks priority, which is a guess made at intake. */}
+            {hasOpenInquiry(job) && (
+              <span
+                title={`Customer inquiry${(job.inquiryCount ?? 0) > 1 ? ` — asked ${job.inquiryCount} times` : ""}`}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0,
+                  fontSize: 10, fontWeight: 800, letterSpacing: "0.04em",
+                  padding: "2px 7px", borderRadius: 20, fontFamily: ff,
+                  color: "#f87171", background: "rgba(248,113,113,0.12)",
+                  border: "1px solid rgba(248,113,113,0.4)",
+                }}
+              >
+                <BellRing size={9} strokeWidth={2.6} />
+                {row ? "" : "CUSTOMER ASKED"}
+                {(job.inquiryCount ?? 0) > 1 ? `×${job.inquiryCount}` : ""}
+              </span>
+            )}
           </div>
           <p style={{
             fontSize: row ? 13.5 : compact ? 14.5 : 16, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff, lineHeight: 1.25,
@@ -363,11 +384,23 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
             )}
           </>
         )}
+        {/* Two ways to take a job off the pile, because they are two
+            different intentions and the shop does both. Claiming puts your
+            name on it; claiming and starting also says you have picked the
+            phone up now. Rolling them into one button would either start the
+            clock on work nobody has touched, or make every technician press
+            twice for the common case. */}
         {!readOnly && notStarted && unclaimed && (
-          <button onClick={() => onAction("claim", job)} title="Claim" style={btn("primary")}>
-            <Hand size={13} strokeWidth={2.4} />
-            {!compact && "Claim"}
-          </button>
+          <>
+            <button onClick={() => onAction("claim", job)} title="Claim only — put your name on it without starting the clock" style={btn("quiet")}>
+              <Hand size={13} strokeWidth={2.4} />
+              {!compact && "Claim only"}
+            </button>
+            <button onClick={() => onAction("claimStart", job)} title="Claim and start working on it now" style={btn("primary")}>
+              <Play size={13} strokeWidth={2.4} />
+              {!compact && "Claim & start"}
+            </button>
+          </>
         )}
 
         {!readOnly && notStarted && !unclaimed && (

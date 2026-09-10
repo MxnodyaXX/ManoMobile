@@ -10,9 +10,11 @@ import { useParts } from "@/cashier/contexts/PartsContext";
 import { useSales } from "@/cashier/contexts/SalesContext";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { useTechnicians } from "@/lib/repair/technicians";
+import { useOpenInvoices, appendJobToInvoice, setInvoiceClosed } from "@/lib/sales/openInvoices";
 import { useDeviceFaults, FALLBACK_FAULTS } from "@/lib/repair/deviceFaults";
 import { useDeviceBrands } from "@/lib/repair/brands";
 import { useToast } from "@/lib/ui/toast";
+import Combobox from "@/cashier/components/shared/Combobox";
 import { postJobToCredit } from "@/lib/credit/api";
 import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 
@@ -86,7 +88,7 @@ export default function PastJobForm({ onCreated, onCancel }: {
   const { parts, requestPart } = useParts();
   const { addSale } = useSales();
   const { profile } = useAuth();
-  const { technicians } = useTechnicians();
+  const { technicians, loading: techLoading, error: techError } = useTechnicians();
   const { faults } = useDeviceFaults();
   const brands = useDeviceBrands();
   const toast = useToast();
@@ -151,18 +153,57 @@ export default function PastJobForm({ onCreated, onCancel }: {
   const [amountPaid, setAmountPaid] = useState("");
   const [advance, setAdvance] = useState("0");
   const [payMethod, setPayMethod] = useState<"Cash" | "Card" | "Bank Transfer" | "Online">("Cash");
+  /**
+   * Which invoice this repair goes on.
+   *
+   * A dealer's month comes back as one bill covering nine phones, so for an
+   * outside dealer the useful default is joining an invoice already being
+   * built rather than raising a tenth. "new" starts one; anything else is the
+   * number of an open invoice to add to.
+   */
+  const [invoiceMode, setInvoiceMode] = useState<"new" | string>("new");
   const [invoiceNo, setInvoiceNo] = useState("");
+  const [closing, setClosing] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [postBalance, setPostBalance] = useState(false);
 
+  const [sessionBrands, setSessionBrands] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** What has gone in during this sitting. Old records arrive in batches, so
    *  the form stays put and counts rather than navigating away each time. */
   const [entered, setEntered] = useState<{ id: string; landsIn: LandsIn }[]>([]);
 
+  /**
+   * The brand list, plus anything typed during this sitting.
+   *
+   * A job book from three years ago has makes the registry has never seen, and
+   * a dropdown that cannot take them forces the typist to either mis-file the
+   * record under the nearest brand or stop and go and add it in Admin Control.
+   * Typed once here, it is on offer for the rest of the batch.
+   */
+  const brandOptions = useMemo(
+    () => Array.from(new Set([...brands, ...sessionBrands])).sort(),
+    [brands, sessionBrands],
+  );
+
   const faultOptions = faults.length > 0 ? faults.map(f => f.label) : FALLBACK_FAULTS;
   const dealer: RepairDealer | undefined = dealers.find(d => d.name === dealerName);
+  // Scoped to this dealer: an invoice is a bill to somebody, and offering last
+  // month's Phone House invoice while entering a Thirasara Max repair is
+  // offering a mistake.
+  const { invoices: openInvoices, reload: reloadInvoices } =
+    useOpenInvoices(dealer && !dealer.inHouse ? dealer.id : null);
+  /**
+   * Whose customer this is.
+   *
+   * On an in-house job the shop's customer is the person who owns the phone,
+   * so their name and number are the record. On a dealer job the customer IS
+   * the dealer — the owner never came here, we do not have their number, and
+   * three empty boxes inviting one are three chances to write down whoever
+   * happened to be standing at the counter.
+   */
+  const ownCustomer = !dealerName || !!dealer?.inHouse;
 
   const charge = Math.max(0, parseFloat(repairCharge) || 0);
   const labour = Math.max(0, parseFloat(techCharge) || 0);
@@ -345,7 +386,17 @@ export default function PastJobForm({ onCreated, onCancel }: {
        * income is last year's rather than a spike on the day somebody sat down
        * to type the job book in.
        */
-      if (collected && charge > 0) {
+      /**
+       * Onto the invoice already open, where one was chosen.
+       *
+       * Not addSale: that raises a new invoice, which is the thing being
+       * avoided. The amounts travel with the job, so the bill stays equal to
+       * the lines it is made of.
+       */
+      if (collected && charge > 0 && invoiceMode !== "new") {
+        await appendJobToInvoice(invoiceMode, job.id, charge, paid);
+        await reloadInvoices();
+      } else if (collected && charge > 0) {
         const no = invoiceNo.trim() || await fetchNextInvoiceNo();
         addSale(
           {
@@ -530,12 +581,32 @@ export default function PastJobForm({ onCreated, onCancel }: {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(310px, 1fr))", gap: 14, alignItems: "start" }}>
 
         {stack(<>
-          {section("When it happened", CalendarClock, "#f59e0b", (
+          {section("When and from", CalendarClock, "#f59e0b", (
             <>
               {two(
                 field("Received on *", <input type="date" max={today()} value={received} onChange={e => setReceived(e.target.value)} style={input} />),
                 field(`${endLabel} *`, <input type="date" max={today()} value={completed} onChange={e => setCompleted(e.target.value)} style={input} />),
               )}
+              {field("Repair dealer *", (
+                <select
+                  value={dealerName}
+                  onChange={e => {
+                    const next = e.target.value;
+                    setDealerName(next);
+                    // Switching to an outside dealer takes the customer boxes
+                    // off screen; leaving their contents behind would file a
+                    // walk-in's name against a dealer's job with nothing
+                    // visible to say so.
+                    const d = dealers.find(x => x.name === next);
+                    if (next && !d?.inHouse) { setCustomer(""); setPhone(""); setEmail(""); }
+                  }}
+                  style={{ ...input, cursor: "pointer" }}
+                >
+                  <option value="">Select dealer…</option>
+                  {dealers.map(d => <option key={d.id} value={d.name}>{d.name}{d.inHouse ? " (in-house)" : ""}</option>)}
+                </select>
+              ), ownCustomer ? undefined : "The dealer is the customer on this job.")}
+
               {two(
                 field("Job number", <input value={jobNo} onChange={e => setJobNo(e.target.value)} placeholder="Next number" style={{ ...input, fontFamily: "monospace" }} />,
                   // The book already numbered it, and the customer's receipt
@@ -548,14 +619,10 @@ export default function PastJobForm({ onCreated, onCancel }: {
             ? pill(turnaround === 0 ? "SAME DAY" : `${turnaround} DAY${turnaround === 1 ? "" : "S"}`, "#f59e0b")
             : undefined)}
 
-          {section("Who it was for", Users, "#60a5fa", (
+          {/* Only where there is a customer of our own to name. A dealer job's
+              customer is the dealer, already chosen above. */}
+          {ownCustomer && section("Who it was for", Users, "#60a5fa", (
             <>
-              {field("Repair dealer *", (
-                <select value={dealerName} onChange={e => setDealerName(e.target.value)} style={{ ...input, cursor: "pointer" }}>
-                  <option value="">Select dealer…</option>
-                  {dealers.map(d => <option key={d.id} value={d.name}>{d.name}{d.inHouse ? " (in-house)" : ""}</option>)}
-                </select>
-              ))}
               {two(
                 field("Customer", <input value={customer} onChange={e => setCustomer(e.target.value)} placeholder="Walk-in" style={input} />),
                 field("Phone", <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="07X XXX XXXX" style={input} />),
@@ -570,10 +637,13 @@ export default function PastJobForm({ onCreated, onCancel }: {
             <>
               {two(
                 field("Brand *", (
-                  <select value={brand} onChange={e => setBrand(e.target.value)} style={{ ...input, cursor: "pointer" }}>
-                    <option value="">Select brand…</option>
-                    {brands.map(b => <option key={b} value={b}>{b}</option>)}
-                  </select>
+                  <Combobox
+                    value={brand}
+                    options={brandOptions}
+                    onChange={setBrand}
+                    onAddOption={b => setSessionBrands(prev => prev.includes(b) ? prev : [...prev, b])}
+                    placeholder="Type or select…"
+                  />
                 )),
                 field("Model *", <input value={model} onChange={e => setModel(e.target.value)} placeholder="e.g. Galaxy A14" style={input} />),
               )}
@@ -606,10 +676,17 @@ export default function PastJobForm({ onCreated, onCancel }: {
               {two(
                 field("Worked on by *", (
                   <select value={technician} onChange={e => setTechnician(e.target.value)} style={{ ...input, cursor: "pointer" }}>
-                    <option value="">Select technician…</option>
+                    <option value="">{techLoading ? "Loading…" : "Select technician…"}</option>
                     {technicians.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
                   </select>
-                ), "Counts in the month it finished"),
+                ),
+                  /* An empty dropdown is three different problems wearing one
+                     face — still loading, failed to load, or nobody on the
+                     roster — and the box alone cannot say which. */
+                  techError ? `Could not load the roster: ${techError}`
+                  : techLoading ? "Loading the roster…"
+                  : technicians.length === 0 ? "No technicians on the staff list — add them under Admin Control → Staff."
+                  : "Counts in the month it finished"),
                 field("Outcome", (
                   <select value={outcome} onChange={e => setOutcome(e.target.value as CompletionType)} style={{ ...input, cursor: "pointer" }}>
                     <option value="Normal">Repaired and charged</option>
@@ -694,8 +771,53 @@ export default function PastJobForm({ onCreated, onCancel }: {
                       </select>
                     )),
                   )}
-                  {field("Invoice number", <input value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} placeholder="Next number" style={{ ...input, fontFamily: "monospace" }} />,
+                  {/* An outside dealer's work is billed in batches, so the
+                      invoice is something to join rather than a number to type
+                      afresh on every record. A walk-in gets one invoice each
+                      and never sees this. */}
+                  {!ownCustomer && openInvoices.length > 0 && field("Put it on", (
+                    <select value={invoiceMode} onChange={e => setInvoiceMode(e.target.value)} style={{ ...input, cursor: "pointer" }}>
+                      <option value="new">A new invoice</option>
+                      {openInvoices.map(inv => (
+                        <option key={inv.invoiceNo} value={inv.invoiceNo}>
+                          {inv.invoiceNo} · {inv.soldOn} · {inv.jobIds.length} job{inv.jobIds.length === 1 ? "" : "s"} · Rs. {inv.total.toLocaleString()}
+                        </option>
+                      ))}
+                    </select>
+                  ), invoiceMode === "new"
+                      ? "Starts an invoice for this dealer and leaves it open for the rest of the batch."
+                      : "This repair is added to that invoice, and its total goes up by the charge.")}
+
+                  {invoiceMode === "new" && field("Invoice number", <input value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} placeholder="Next number" style={{ ...input, fontFamily: "monospace" }} />,
                     `Recorded as a sale dated ${completed || "the completion date"}, so it counts in that month.`)}
+
+                  {/* Shutting it is the last act of entering a batch, so it
+                      belongs here rather than on another screen. Reversible,
+                      because "that was the last one" is easy to be wrong
+                      about — see set_sale_closed. */}
+                  {invoiceMode !== "new" && (
+                    <button
+                      type="button"
+                      disabled={closing}
+                      onClick={async () => {
+                        const no = invoiceMode;
+                        setClosing(true);
+                        try {
+                          await setInvoiceClosed(no, true);
+                          await reloadInvoices();
+                          setInvoiceMode("new");
+                          toast.success(`${no} closed — nothing more can be added to it.`);
+                        } catch (e) {
+                          setError(e instanceof Error ? e.message : String(e));
+                        } finally {
+                          setClosing(false);
+                        }
+                      }}
+                      style={{ alignSelf: "flex-start", padding: "7px 14px", borderRadius: 9, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: closing ? "wait" : "pointer", fontSize: 12, fontWeight: 600, fontFamily: ff }}
+                    >
+                      {closing ? "Closing…" : `Close ${invoiceMode} — that is the whole batch`}
+                    </button>
+                  )}
                 </>
               ) : (
                 field("Advance taken (Rs.)", <input type="number" min={0} value={advance} onChange={e => setAdvance(e.target.value)} style={input} />,

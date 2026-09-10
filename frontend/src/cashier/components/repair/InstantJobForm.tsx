@@ -12,6 +12,7 @@ import { notifyJobEvent } from "@/lib/sms/notify";
 import { IssueJobModal, RepairInvoicePreview } from "@/cashier/components/repair/JobsTable";
 import { useIssueJob, type IssueFormData } from "@/lib/repair/issueJob";
 import type { IssueInvoiceData } from "@/cashier/components/repair/JobIssuePrintable";
+import { useJobSlot } from "@/lib/repair/useJobSlot";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
@@ -91,7 +92,7 @@ export default function InstantJobForm({ onCreated, onCancel }: {
    * cashier to Non-Issued to find the job they just typed and press Issue
    * would be two extra screens between them and a printer.
    */
-  const [billing, setBilling] = useState<RepairJob | null>(null);
+  const [billing, setBilling] = useJobSlot();
   const [invoice, setInvoice] = useState<IssueInvoiceData | null>(null);
   const issueJob = useIssueJob();
 
@@ -109,7 +110,7 @@ export default function InstantJobForm({ onCreated, onCancel }: {
    * it puts the job back on screen with the amount still owed, because that is
    * what is true.
    */
-  const [unsettled, setUnsettled] = useState<RepairJob | null>(null);
+  const [unsettled, setUnsettled] = useJobSlot();
   const locked = !!unsettled;
 
   /**

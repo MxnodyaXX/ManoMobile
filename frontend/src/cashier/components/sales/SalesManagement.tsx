@@ -35,8 +35,19 @@ const sectionDescriptions: Record<SalesSection, string> = {
   "Quotation":         "Create price estimates and quotations for customers before a confirmed sale",
 };
 
-export default function SalesManagement() {
-  const [active,      setActive]      = useState<SalesSection>("Accessories Sales");
+export default function SalesManagement({ initialSection, jobToIssue }: {
+  /** Which till to open on, when somebody was sent here rather than clicking. */
+  initialSection?: SalesSection;
+  /**
+   * A finished repair to bill, handed over from the scan panel.
+   *
+   * The dealer travels with the id because Repair Sales picks a dealer first
+   * and then its jobs — resolving one from the other here would mean this
+   * screen knowing how jobs are filed, which is Repair Sales' business.
+   */
+  jobToIssue?: { id: string; dealer: string };
+} = {}) {
+  const [active,      setActive]      = useState<SalesSection>(initialSection ?? "Accessories Sales");
   const [showHeld,    setShowHeld]    = useState(false);
   const { heldSales } = useHeldSales();
   const isMobile = useIsMobile();
@@ -184,7 +195,7 @@ export default function SalesManagement() {
       <div className="fade-up fade-up-2" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
         {active === "Accessories Sales" && <AccessorySales />}
         {active === "Mobile Sales"      && <MobileSales />}
-        {active === "Repair Sales"      && <RepairSales />}
+        {active === "Repair Sales"      && <RepairSales initialDealer={jobToIssue?.dealer} initialJobId={jobToIssue?.id} />}
         {active === "Others"            && <OtherSales />}
         {active === "Sales History"     && <SalesHistory />}
         {active === "Daily Summary"     && <DailySummary />}

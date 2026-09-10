@@ -481,4 +481,12 @@ export const STATUS_COLOURS: Record<CreditStatus, { color: string; bg: string; b
 /** How much more they may run up. A zero limit means none was ever approved,
  *  so there is no headroom — not unlimited headroom. */
 export const headroom = (a: CreditAccount) => Math.max(0, a.creditLimit - a.balance);
-export const isOverLimit = (a: CreditAccount) => a.balance > a.creditLimit;
+/**
+ * Past the ceiling somebody actually set.
+ *
+ * A credit_limit of 0 means no limit was set, not a limit of nothing — and
+ * this read it as the latter, so every account carrying any balance at all was
+ * flagged over limit. The screen said "none" and "over limit" in the same cell,
+ * and the header counted an account nobody had ever set a ceiling for.
+ */
+export const isOverLimit = (a: CreditAccount) => a.creditLimit > 0 && a.balance > a.creditLimit;

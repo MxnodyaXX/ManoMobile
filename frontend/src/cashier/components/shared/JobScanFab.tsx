@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DeviceLock } from "@/lib/repair/DeviceLock";
-import { ScanLine, X, Search, CheckCircle2, AlertCircle } from "lucide-react";
+import { ScanLine, X, Search, CheckCircle2, AlertCircle, ArrowRight, BellRing, Receipt } from "lucide-react";
+import { hasOpenInquiry, inquiryLabel, recordInquiry } from "@/lib/repair/inquiry";
+import { useToast } from "@/lib/ui/toast";
 import { useRepair, jobLabel, VIEW_META, type RepairJob, type RepairView } from "@/cashier/contexts/RepairContext";
 import { useBarcodeScanner } from "@/cashier/hooks/useBarcodeScanner";
 
@@ -44,6 +46,81 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 /**
+ * The one thing worth doing about this job right now.
+ *
+ * Four stages, four different answers, and offering all four at once would
+ * make the useful one the hardest to find:
+ *
+ *   not started    tell the bench somebody is asking
+ *   in progress    tell the bench it is now urgent
+ *   repaired       bill it and hand it over
+ *   collected      nothing to do but read the record
+ *
+ * The reading stays available at every stage as the quiet second button,
+ * because "open the whole job" is never wrong and never the point.
+ */
+function JobActions({ job, flagged, flagging, onFlag, onOpen, onIssue }: {
+  job: RepairJob;
+  flagged: boolean;
+  flagging: boolean;
+  onFlag: () => void;
+  onOpen?: () => void;
+  onIssue?: () => void;
+}) {
+  const waiting  = job.status === "Non-Issued";
+  const working  = job.status === "Issued" || job.status === "Pending";
+  const repaired = job.status === "Completed";
+
+  const primary: React.CSSProperties = {
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+    width: "100%", padding: "11px 16px", borderRadius: 10, cursor: "pointer",
+    fontSize: 13, fontWeight: 700, fontFamily: ff,
+  };
+  const quiet: React.CSSProperties = {
+    ...primary,
+    border: "1px solid var(--border)", background: "transparent",
+    color: "var(--text-secondary)", fontWeight: 600,
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {(waiting || working) && (
+        <button
+          onClick={onFlag}
+          disabled={flagging || flagged}
+          title={flagged ? "The bench has already been told about this one" : undefined}
+          style={{
+            ...primary,
+            border: `1px solid ${working ? "#f87171" : "#fbbf24"}`,
+            background: flagged ? "transparent" : working ? "#f87171" : "#fbbf24",
+            color: flagged ? (working ? "#f87171" : "#fbbf24") : "#1a1a1a",
+            cursor: flagging || flagged ? "default" : "pointer",
+            opacity: flagging ? 0.6 : 1,
+          }}
+        >
+          <BellRing size={14} />
+          {flagged
+            ? "The bench has been told"
+            : flagging ? "Telling the bench…" : inquiryLabel(job)}
+        </button>
+      )}
+
+      {repaired && onIssue && (
+        <button onClick={onIssue} style={{ ...primary, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--accent-fg)" }}>
+          <Receipt size={14} />Proceed to Issue Job
+        </button>
+      )}
+
+      {onOpen && (
+        <button onClick={onOpen} style={waiting || working || repaired ? quiet : { ...primary, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--accent-fg)" }}>
+          Open {job.id}<ArrowRight size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
  * Floating scan button, mounted once per dashboard shell (Cashier and
  * Technician both render it just outside their page-switching `<main>`, so
  * it stays visible no matter which tab is open) — see src/app/cashier/page.tsx
@@ -54,8 +131,33 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
  * open on its own — see useBarcodeScanner for how a hardware scan is told
  * apart from normal typing.
  */
-export default function JobScanFab() {
+export default function JobScanFab({ onOpenJob, onIssueJob }: {
+  /**
+   * What "open this job" means in the shell this is mounted in.
+   *
+   * The panel finds jobs; it does not own what can be done with one, and the
+   * two shells do not agree on the answer — a cashier gets the full record
+   * with its billing, cancelling and Ctrl+E, a technician gets the read-only
+   * view of somebody else's bench. Passing the action in keeps both of those
+   * where they already live instead of a second copy of either ending up here.
+   *
+   * No handler, no button.
+   */
+  onOpenJob?: (job: RepairJob) => void;
+  /**
+   * Billing a finished repair. Only the cashier shell passes it — a technician
+   * scanning a completed job is looking at it, not taking money for it.
+   */
+  onIssueJob?: (job: RepairJob) => void;
+} = {}) {
   const { jobs } = useRepair();
+  const toast = useToast();
+  // Which job the counter has just flagged, so the button can answer for
+  // itself rather than waiting for the row to come back round through
+  // realtime. Keyed by id: scanning a second job must not inherit the first
+  // one's confirmation.
+  const [flagged, setFlagged] = useState<string | null>(null);
+  const [flagging, setFlagging] = useState(false);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   // undefined = no lookup run yet, null = looked up and not found, RepairJob = found
@@ -100,9 +202,20 @@ export default function JobScanFab() {
 
   const close = () => { setOpen(false); setQuery(""); setResult(undefined); };
 
-  const view: RepairView | null = result ? jobLabel(result) : null;
+  /**
+   * The found job as it stands now, not as it stood when it was found.
+   *
+   * The panel stays open while somebody flags an inquiry, or while another
+   * machine moves the job on. Reading the match it was given would keep
+   * showing that row — which is how a screen ends up needing a reload to tell
+   * the truth. `result` remains the raw lookup: null for "looked and found
+   * nothing", undefined for "not looked yet".
+   */
+  const live = result ? jobs.find(j => j.id === result.id) ?? result : result;
+
+  const view: RepairView | null = live ? jobLabel(live) : null;
   const meta = view ? VIEW_META[view as Exclude<RepairView, "All">] : null;
-  const balance = result ? Math.max(0, result.estimatedCost - result.advancePaid) : 0;
+  const balance = live ? Math.max(0, live.estimatedCost - live.advancePaid) : 0;
 
   return (
     <>
@@ -149,7 +262,7 @@ export default function JobScanFab() {
                     // already focused — a scan types straight into it, then
                     // sends Enter. Read the DOM value directly here instead
                     // of waiting on React's controlled-state + native-submit
-                    // timing, so results appear the instant the scan finishes.
+                    // timing, so lives appear the instant the scan finishes.
                     if (e.key === "Enter") {
                       e.preventDefault();
                       runLookup(e.currentTarget.value);
@@ -163,13 +276,13 @@ export default function JobScanFab() {
                 </button>
               </form>
 
-              {result === undefined && (
+              {live === undefined && (
                 <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", padding: "18px 0", fontFamily: ff }}>
                   Point the scanner at a job&apos;s barcode label, or type its Job ID / IMEI above.
                 </p>
               )}
 
-              {result === null && (
+              {live === null && (
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 14px", borderRadius: 10, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)" }}>
                   <AlertCircle size={15} color="#f87171" style={{ flexShrink: 0, marginTop: 1 }} />
                   <span style={{ fontSize: 12.5, color: "var(--text-secondary)", fontFamily: ff }}>
@@ -178,16 +291,16 @@ export default function JobScanFab() {
                 </div>
               )}
 
-              {result && meta && view && (
+              {live && meta && view && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <CheckCircle2 size={16} color={meta.color} />
-                      <span style={{ fontSize: 17, fontWeight: 800, color: "var(--text-primary)", fontFamily: ff }}>{result.id}</span>
+                      <span style={{ fontSize: 17, fontWeight: 800, color: "var(--text-primary)", fontFamily: ff }}>{live.id}</span>
                     </div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, background: meta.bg, color: meta.color, border: `1px solid ${meta.border}`, fontFamily: ff }}>{view}</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: priorityColor[result.priority], fontFamily: ff }}>● {result.priority}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: priorityColor[live.priority], fontFamily: ff }}>● {live.priority}</span>
                     </div>
                   </div>
 
@@ -196,10 +309,10 @@ export default function JobScanFab() {
                       your hand is the one it describes. */}
                   <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginTop: -6 }}>
                     <span style={{ fontSize: 14.5, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>
-                      {[result.brand, result.model].filter(Boolean).join(" ") || "—"}
+                      {[live.brand, live.model].filter(Boolean).join(" ") || "—"}
                     </span>
-                    {result.imei && (
-                      <span style={{ fontSize: 11.5, fontFamily: "monospace", color: "var(--text-muted)" }}>IMEI {result.imei}</span>
+                    {live.imei && (
+                      <span style={{ fontSize: 11.5, fontFamily: "monospace", color: "var(--text-muted)" }}>IMEI {live.imei}</span>
                     )}
                   </div>
 
@@ -210,36 +323,65 @@ export default function JobScanFab() {
                       They lead. */}
                   <div style={{ background: "var(--bg-surface)", borderRadius: 10, padding: "12px 14px" }}>
                     <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4, fontFamily: ff }}>Reported fault</div>
-                    <p style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.45, fontFamily: ff }}>{result.issue || "—"}</p>
+                    <p style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.45, fontFamily: ff }}>{live.issue || "—"}</p>
                   </div>
 
-                  <DeviceLock type={result.passcodeType} code={result.devicePasscode} />
+                  <DeviceLock type={live.passcodeType} code={live.devicePasscode} />
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, background: "var(--bg-surface)", borderRadius: 10, padding: "14px 16px" }}>
-                    <Row label="Customer" value={result.customerName} />
-                    <Row label="Phone" value={result.phone} />
-                    <Row label="Technician" value={result.technician} />
-                    <Row label="Dealer" value={result.dealer || "Mano Mobile"} />
-                    <Row label="Created" value={result.createdAt} />
-                    <Row label="Est. Completion" value={result.estimatedCompletion} />
+                    <Row label="Customer" value={live.customerName} />
+                    <Row label="Phone" value={live.phone} />
+                    <Row label="Technician" value={live.technician} />
+                    <Row label="Dealer" value={live.dealer || "Mano Mobile"} />
+                    <Row label="Created" value={live.createdAt} />
+                    <Row label="Est. Completion" value={live.estimatedCompletion} />
                   </div>
+
+                  {/* What the counter can do about this job, which depends
+                      entirely on where it has got to. A job nobody has started
+                      needs the bench told; one in progress needs the bench told
+                      it is now urgent; a finished one needs billing; a
+                      collected one needs nothing but reading. */}
+                  <JobActions
+                    job={live}
+                    flagged={flagged === live.id || hasOpenInquiry(live)}
+                    flagging={flagging}
+                    onFlag={async () => {
+                      setFlagging(true);
+                      try {
+                        await recordInquiry(live.id);
+                        setFlagged(live.id);
+                        toast.success(
+                          live.status === "Non-Issued"
+                            ? `${live.technician && live.technician !== "Unassigned" ? live.technician : "The bench"} has been told a customer is asking about ${live.id}.`
+                            : `${live.id} is flagged as urgent — the customer came in for an update.`,
+                        );
+                      } catch (e) {
+                        toast.dialog("error", "Could not flag the job", e instanceof Error ? e.message : String(e));
+                      } finally {
+                        setFlagging(false);
+                      }
+                    }}
+                    onOpen={onOpenJob && (() => { const j = live; setOpen(false); onOpenJob(j); })}
+                    onIssue={onIssueJob && (() => { const j = live; setOpen(false); onIssueJob(j); })}
+                  />
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
                     <div style={{ background: "var(--bg-surface)", borderRadius: 10, padding: "10px 12px" }}>
-                      <Row label="Estimated" value={`Rs. ${result.estimatedCost.toLocaleString()}`} />
+                      <Row label="Estimated" value={`Rs. ${live.estimatedCost.toLocaleString()}`} />
                     </div>
                     <div style={{ background: "var(--bg-surface)", borderRadius: 10, padding: "10px 12px" }}>
-                      <Row label="Advance" value={`Rs. ${result.advancePaid.toLocaleString()}`} />
+                      <Row label="Advance" value={`Rs. ${live.advancePaid.toLocaleString()}`} />
                     </div>
                     <div style={{ background: "var(--bg-surface)", borderRadius: 10, padding: "10px 12px" }}>
                       <Row label="Balance" value={<span style={{ color: balance > 0 ? "#f87171" : "#4ade80" }}>Rs. {balance.toLocaleString()}</span>} />
                     </div>
                   </div>
 
-                  {result.techRemarks && (
+                  {live.techRemarks && (
                     <div>
                       <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5, fontFamily: ff }}>Technician Remarks</div>
-                      <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5, fontFamily: ff }}>{result.techRemarks}</p>
+                      <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5, fontFamily: ff }}>{live.techRemarks}</p>
                     </div>
                   )}
                 </div>

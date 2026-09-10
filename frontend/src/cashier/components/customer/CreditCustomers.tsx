@@ -508,6 +508,17 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
   const { jobs } = useRepair();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showInvoice, setShowInvoice] = useState<string | null>(null);
+  /**
+   * An account with fourteen invoices on it is the normal case, not the edge
+   * one, and dumping all fourteen into the table pushes every other account
+   * off the screen — including the one it was opened to compare against.
+   *
+   * So the panel is bounded, and asks what you are looking for first. Both
+   * controls default to everything, newest first, and neither hides anything
+   * permanently.
+   */
+  const [kind, setKind] = useState<"All" | "Charge" | "Payment">("All");
+  const [showAll, setShowAll] = useState(false);
 
   /**
    * One row per thing that happened, not per row in the ledger.
@@ -518,7 +529,20 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
    * the history match the paper in their hand; the individual jobs are still
    * there, one click down.
    */
-  const groups = groupCreditEntries(entries);
+  const allGroups = groupCreditEntries(entries);
+
+  // Refunds sit with charges because they are part of what an invoice came to;
+  // write-offs sit with payments because both are ways a balance stops being
+  // owed. Neither belongs in a bucket of its own on a screen this size.
+  const groups = allGroups.filter(g =>
+    kind === "All" ? true
+    : kind === "Charge" ? g.kind === "Charge" || g.kind === "Refund"
+    : g.kind === "Payment" || g.kind === "Write-off",
+  );
+
+  const PREVIEW = 5;
+  const shown = showAll ? groups : groups.slice(0, PREVIEW);
+  const hidden = groups.length - shown.length;
 
   const categories = useInvoiceCategories(
     groups.map(g => g.invoiceNo).filter((n): n is string => !!n),
@@ -547,23 +571,43 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "14px 16px 16px" }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <p style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: ff }}>
-          Credit history
-        </p>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <p style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: ff }}>
+            Credit history
+          </p>
+          {/* Buttons rather than a dropdown: "what have we charged" and "what
+              has come in" are the two halves people flip between on a screen
+              about money owed, and a flip should be one press. */}
+          <div style={{ display: "flex", gap: 3, padding: 3, borderRadius: 8, background: "var(--bg-card)", border: "1px solid var(--border)" }}>
+            {([["All", `All ${allGroups.length}`], ["Charge", "Charges"], ["Payment", "Payments"]] as const).map(([id, label]) => {
+              const on = kind === id;
+              return (
+                <button key={id} onClick={() => { setKind(id); setShowAll(false); }}
+                  style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11.5, fontWeight: on ? 700 : 500, cursor: "pointer", border: on ? "1px solid var(--accent-glow)" : "1px solid transparent", background: on ? "var(--accent-dim)" : "transparent", color: on ? "var(--accent)" : "var(--text-muted)", fontFamily: ff, whiteSpace: "nowrap" }}>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff }}>
           {account.name} · {account.holderKind} · {rs(account.balance)} outstanding
         </p>
       </div>
+
+      {/* Bounded, and scrolling inside itself. However long the history is, the
+          accounts above and below stay where they were. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 260, overflowY: "auto", paddingRight: 2 }}>
         {loading && <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff }}>Loading…</p>}
         {error && <p style={{ fontSize: 12, color: "var(--danger)", fontFamily: ff, lineHeight: 1.5 }}>{error}</p>}
         {!loading && !error && groups.length === 0 && (
           <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff, padding: "16px 0", textAlign: "center" }}>
-            Nothing on this account yet.
+            {allGroups.length === 0 ? "Nothing on this account yet." : "Nothing of that kind on this account."}
           </p>
         )}
 
-        {groups.map(g => {
+        {shown.map(g => {
           const t = tone[g.kind];
           const Icon = t.icon;
           const multi = g.entries.length > 1;
@@ -717,6 +761,16 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
             </div>
           );
         })}
+      </div>
+
+      {hidden > 0 && (
+        <button
+          onClick={() => setShowAll(true)}
+          style={{ alignSelf: "flex-start", padding: "6px 13px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--accent)", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: ff }}
+        >
+          Show {hidden} older {hidden === 1 ? "entry" : "entries"}
+        </button>
+      )}
 
       {showInvoice && <InvoiceDetail invoiceNo={showInvoice} onClose={() => setShowInvoice(null)} />}
     </div>
@@ -948,6 +1002,10 @@ export default function CreditCustomers() {
           />
         </div>
 
+        {/* Two rows of pills that look identical and filter different things
+            is a riddle, not a toolbar. Each says what it is asking. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", fontFamily: ff }}>Who</span>
         <div style={{ display: "flex", gap: 6, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, padding: 5 }}>
           {(["All", "Customer", "Dealer"] as const).map(k => {
             const active = kindFilter === k;
@@ -959,7 +1017,10 @@ export default function CreditCustomers() {
             );
           })}
         </div>
+        </div>
 
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", fontFamily: ff }}>Standing</span>
         <div style={{ display: "flex", gap: 6, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, padding: 5 }}>
           {(["All", "Active", "Overdue", "Settled"] as const).map(s => {
             const active = statusFilter === s;
@@ -975,6 +1036,7 @@ export default function CreditCustomers() {
               </button>
             );
           })}
+        </div>
         </div>
 
         <span style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-secondary)", fontFamily: ff }}>
@@ -993,7 +1055,15 @@ export default function CreditCustomers() {
       </div>
 
       {/* Table */}
-      <div className="table-scroll" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, flex: 1, minHeight: 0, overflowY: "auto" }}>
+      {/* Bounded in its own right, not only by the flex chain above it.
+          The page it sits on scrolls, so `flex: 1` alone let this grow with its
+          contents and the toolbar and totals disappeared off the top the
+          moment there were a dozen accounts — the two things somebody looks at
+          while working down the list.
+
+          A viewport fraction rather than a row count, so a laptop and a
+          counter monitor each show as many rows as they have room for. */}
+      <div className="table-scroll" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, flex: 1, minHeight: 240, maxHeight: "min(58vh, 640px)", overflowY: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)" }}>
@@ -1098,10 +1168,10 @@ export default function CreditCustomers() {
                     )}
                   </td>
                   <td style={{ padding: "14px 16px" }}>
-                    <span style={{ fontSize: 12.5, color: over ? "var(--danger)" : "var(--text-secondary)", fontWeight: over ? 700 : 400, fontFamily: ff }}>
-                      {a.creditLimit > 0 ? rs(a.creditLimit) : "none"}
+                    <span style={{ fontSize: 12.5, color: over ? "var(--danger)" : "var(--text-muted)", fontWeight: over ? 700 : 400, fontFamily: ff }}>
+                      {a.creditLimit > 0 ? rs(a.creditLimit) : "No limit set"}
                     </span>
-                    {over && <p style={{ fontSize: 10.5, color: "var(--danger)", marginTop: 2, fontFamily: ff }}>over limit</p>}
+                    {over && <p style={{ fontSize: 10.5, color: "var(--danger)", marginTop: 2, fontFamily: ff }}>over by {rs(a.balance - a.creditLimit)}</p>}
                   </td>
                   <td style={{ padding: "14px 16px" }}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, background: sc.bg, border: `1px solid ${sc.border}`, color: sc.color, fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap", fontFamily: ff }}>
@@ -1116,7 +1186,7 @@ export default function CreditCustomers() {
                         aria-expanded={open}
                         style={{ ...pill(open ? TONE.accent : TONE.muted, true), gap: 3, padding: "0 9px" }}
                       >
-                        <History size={12} />
+                        <History size={11} />History
                         <ChevronDown size={11} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.18s" }} />
                       </button>
                       {/* The one action a cashier comes here to take, so it
@@ -1130,14 +1200,19 @@ export default function CreditCustomers() {
                       {/* Dealers only. A walk-in's advance is refunded from
                           the job it was taken on, where the amount is known
                           and can be capped — not from a balance screen. */}
+                      {/* Words, not just icons. A circular arrow and a bent
+                          arrow next to each other are two ways of undoing
+                          something, and which one hands money back is not
+                          guessable — nor is it a guess anybody should be
+                          making on a screen that moves money. */}
                       {a.holderKind === "Dealer" && isAdminCashier && (
-                        <button onClick={() => setRetTarget(a)} title="Record a cash return" style={pill(TONE.accent)}>
-                          <RotateCcw size={12} />
+                        <button onClick={() => setRetTarget(a)} title="Hand money back to this dealer" style={{ ...pill(TONE.accent, true), gap: 5 }}>
+                          <RotateCcw size={11} />Cash return
                         </button>
                       )}
                       {a.balance > 0 && isAdminCashier && (
-                        <button onClick={() => setOffTarget(a)} title="Write off as bad debt" style={pill(TONE.warning)}>
-                          <Undo2 size={12} />
+                        <button onClick={() => setOffTarget(a)} title="Give up on collecting this balance" style={{ ...pill(TONE.warning, true), gap: 5 }}>
+                          <Undo2 size={11} />Write off
                         </button>
                       )}
                     </div>

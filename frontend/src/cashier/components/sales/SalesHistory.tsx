@@ -14,8 +14,11 @@ import ExportButtons from "@/cashier/components/shared/ExportButtons";
 import { exportToPdf, exportToExcel, exportToPng } from "@/cashier/utils/exportUtils";
 import {
   Search, Printer, XCircle, RotateCcw,
-  ChevronDown, FileText, AlertTriangle, X, CheckCircle, AlertCircle,
+  ChevronDown, FileText, AlertTriangle, X, CheckCircle, AlertCircle, Pencil,
 } from "lucide-react";
+import { useMyPermissions } from "@/lib/settings/staffRules";
+import { useRepair } from "@/cashier/contexts/RepairContext";
+import { correctSalePayment } from "@/lib/sales/correctPayment";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
@@ -26,6 +29,44 @@ const STATUS_CFG: Record<TxStatus, { color: string; bg: string; border: string }
   Returned: { color: "#fbbf24", bg: "rgba(251,191,36,0.08)",  border: "rgba(251,191,36,0.2)" },
 };
 
+/**
+ * What the Status column ought to say.
+ *
+ * sale_status has three values — Paid, Voided, Returned — and they are the
+ * transaction's lifecycle, not its payment. "Paid" there means the sale stands:
+ * it was not voided and nothing came back. So a sale taken entirely on account
+ * has always displayed as Paid, which is the one thing it is not, and the
+ * column nobody could argue with quietly said the opposite of the truth.
+ *
+ * The enum is left alone — Voided and Returned mean what they mean, and adding
+ * a fourth value would make every existing filter and report ambiguous. What
+ * changes is what this screen shows: money in, part paid, or nothing yet.
+ */
+function payState(tx: SaleTx): { label: string; color: string; bg: string; border: string; title?: string } {
+  if (tx.status !== "Paid") return { label: tx.status, ...STATUS_CFG[tx.status] };
+
+  const billed = tx.total ?? 0;
+  // Absent means never recorded, which is not the same as zero — an older row
+  // predating the column should not be accused of being unpaid.
+  const taken = tx.paid;
+  if (taken == null) return { label: "Paid", ...STATUS_CFG.Paid };
+
+  const owing = Math.round((billed - taken) * 100) / 100;
+  if (owing <= 0.005) return { label: "Paid", ...STATUS_CFG.Paid };
+
+  return taken > 0
+    ? {
+        label: "Part paid",
+        color: "#fbbf24", bg: "rgba(251,191,36,0.08)", border: "rgba(251,191,36,0.35)",
+        title: `Rs. ${taken.toLocaleString()} of Rs. ${billed.toLocaleString()} received — Rs. ${owing.toLocaleString()} on account`,
+      }
+    : {
+        label: "Credit",
+        color: "#f97316", bg: "rgba(249,115,22,0.09)", border: "rgba(249,115,22,0.4)",
+        title: `Nothing received — the whole Rs. ${billed.toLocaleString()} is on account`,
+      };
+}
+
 const CAT_COLORS: Record<TxCategory, string> = {
   Accessories: "#60a5fa",
   Mobile:      "#a78bfa",
@@ -35,6 +76,129 @@ const CAT_COLORS: Record<TxCategory, string> = {
 
 function fmtRs(n: number) { return `Rs. ${n.toLocaleString()}`; }
 function fmtDate(d: string) { return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }); }
+
+/* ── Correcting a recorded payment ── */
+
+/**
+ * What was actually taken, when the till says otherwise.
+ *
+ * Deliberately only the receipt. The total is not editable here and should not
+ * be: the customer was billed what they were billed, and an invoice whose
+ * amount can be changed after the fact is not evidence of anything. What was
+ * entered wrongly is how much of it came in, and that is the one field this
+ * opens.
+ */
+function CorrectPaymentModal({ tx, onConfirm, onClose }: {
+  tx: SaleTx;
+  onConfirm: (received: number, method: string, note: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const billed = tx.total ?? 0;
+  const [received, setReceived] = useState(String(tx.paid ?? 0));
+  const [method, setMethod] = useState<string>(tx.paymentMethod ?? "Cash");
+
+  /**
+   * Choosing Credit is choosing "they have not paid".
+   *
+   * The two fields were independent, so it was possible to mark an invoice
+   * Credit and leave the full amount showing as received — which records the
+   * exact contradiction this dialog exists to undo. Picking Credit drops the
+   * receipt to nothing; picking a method money actually arrives by fills it to
+   * the bill. Both stay editable afterwards, because a part payment is real:
+   * Rs. 2,000 down and the rest on account is Credit with 2,000 received.
+   */
+  const chooseMethod = (m: string) => {
+    setMethod(m);
+    setReceived(m === "Credit" ? "0" : String(billed));
+  };
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const amount = Math.min(Math.max(parseFloat(received) || 0, 0), billed);
+  const owing = Math.max(0, billed - amount);
+  const ff = "'Plus Jakarta Sans', sans-serif";
+  const box: React.CSSProperties = {
+    width: "100%", boxSizing: "border-box", padding: "9px 11px", borderRadius: 9,
+    border: "1px solid var(--border)", background: "var(--bg-secondary)",
+    color: "var(--text-primary)", fontSize: 13, fontFamily: ff, outline: "none",
+  };
+
+  return createPortal(
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(460px, 100%)", fontFamily: ff, overflow: "hidden" }}>
+        <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
+          <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>Correct the payment on {tx.invoiceNo}</p>
+          <p style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2, lineHeight: 1.5 }}>
+            Billed Rs. {billed.toLocaleString()} · recorded as Rs. {(tx.paid ?? 0).toLocaleString()} received
+          </p>
+        </div>
+
+        <div style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>
+              <label style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 4 }}>Actually received (Rs.)</label>
+              <input type="number" min={0} max={billed} value={received} onChange={e => setReceived(e.target.value)} autoFocus style={box} />
+            </div>
+            <div>
+              <label style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 4 }}>Paid by</label>
+              <select value={method} onChange={e => chooseMethod(e.target.value)} style={{ ...box, cursor: "pointer" }}>
+                {["Cash", "Card", "Bank Transfer", "Credit"].map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 4 }}>Why</label>
+            <input value={note} onChange={e => setNote(e.target.value)} placeholder="Goes on the job's history" style={box} />
+          </div>
+
+          {/* What this will do, before it does it. The credit side is the part
+              nobody expects, and the part that matters. */}
+          <div style={{ padding: "11px 13px", borderRadius: 10, background: owing > 0 ? "rgba(251,191,36,0.08)" : "rgba(74,222,128,0.08)", border: `1px solid ${owing > 0 ? "rgba(251,191,36,0.4)" : "rgba(74,222,128,0.35)"}` }}>
+            <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+              {owing > 0 ? (
+                <>
+                  <strong style={{ color: "var(--text-primary)" }}>
+                    Rs. {owing.toLocaleString()} goes on {tx.customer || "the customer"}&apos;s account.
+                  </strong>{" "}
+                  The invoice keeps its total of Rs. {billed.toLocaleString()}, the recorded receipt drops to
+                  Rs. {amount.toLocaleString()}, and the balance is raised as a charge — on their existing
+                  credit profile if they have one, on a new one if they do not.
+                </>
+              ) : (
+                <>
+                  <strong style={{ color: "var(--text-primary)" }}>Settled in full.</strong>{" "}
+                  Any charge standing against these jobs is cleared.
+                </>
+              )}
+            </p>
+          </div>
+
+          {err && <p style={{ fontSize: 12, color: "#f87171", lineHeight: 1.5 }}>{err}</p>}
+        </div>
+
+        <div style={{ padding: "0 18px 16px", display: "flex", gap: 9, justifyContent: "flex-end" }}>
+          <button onClick={onClose} style={{ padding: "9px 18px", borderRadius: 9, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 12.5, fontFamily: ff }}>Cancel</button>
+          <button
+            onClick={async () => {
+              setBusy(true); setErr(null);
+              try { await onConfirm(amount, method, note.trim()); }
+              catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+              finally { setBusy(false); }
+            }}
+            disabled={busy}
+            style={{ padding: "9px 20px", borderRadius: 9, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--accent-fg)", cursor: busy ? "wait" : "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: ff }}
+          >
+            {busy ? "Correcting…" : "Correct payment"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 /* ── Void Confirmation Modal ── */
 function VoidModal({ tx, onConfirm, onClose }: { tx: SaleTx; onConfirm: () => void; onClose: () => void }) {
@@ -280,7 +444,7 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
             <div style={{ minWidth: 0 }}>
               <p style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)" }}>{tx.invoiceNo}</p>
               <p style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                {fmtDate(tx.date)} · {tx.customer} · <span style={{ color: cfg.color }}>{tx.status}</span>
+                {fmtDate(tx.date)} · {tx.customer} · <span style={{ color: cfg.color }}>{payState(tx).label}</span>
               </p>
             </div>
           </div>
@@ -373,7 +537,9 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
 
 /* ── Main Component ── */
 export default function SalesHistory() {
-  const { sales: txList, returnSale, voidSale } = useSales();
+  const { sales: txList, returnSale, voidSale, reload: reloadSales } = useSales();
+  const { isAdminCashier } = useMyPermissions();
+  const { refresh: refreshJobs } = useRepair();
   const { addEntry } = useCashRegister();
   const { reload: reloadAccessories } = useAccessories();
   const toast = useToast();
@@ -383,23 +549,57 @@ export default function SalesHistory() {
   const [search,   setSearch]   = useState("");
   const [catFilter, setCatFilter] = useState<TxCategory | "All">("All");
   const [statusFilter, setStatusFilter] = useState<TxStatus | "All">("All");
+  /**
+   * Settled, or on the books.
+   *
+   * Two questions get asked of this screen and only one of them was answerable:
+   * "what did we sell" and "who still owes us". The second is not a status in
+   * the database — it is the gap between what an invoice billed and what it
+   * took — so it needed somewhere to be asked from, and a dropdown option is
+   * not where anybody looks for money they are chasing.
+   */
+  const [payFilter, setPayFilter] = useState<"All" | "Cash" | "Credit">("All");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo,   setDateTo]   = useState("");
   const [voidTarget,   setVoidTarget]   = useState<SaleTx | null>(null);
   const [viewTarget,   setViewTarget]   = useState<SaleTx | null>(null);
   const [returnTarget, setReturnTarget] = useState<SaleTx | null>(null);
+  const [correctTarget, setCorrectTarget] = useState<SaleTx | null>(null);
+
+  /**
+   * One call, then re-read everything it touched.
+   *
+   * The correction happens in the database across three tables, so nothing in
+   * this app's state knows it happened — and the row the cashier is looking at
+   * is the one that was wrong.
+   */
+  const handleCorrect = async (received: number, method: string, note: string) => {
+    if (!correctTarget) return;
+    await correctSalePayment(correctTarget.invoiceNo, received, method, note);
+    await Promise.all([reloadSales(), refreshJobs()]);
+    setCorrectTarget(null);
+    toast.success(`${correctTarget.invoiceNo} corrected to Rs. ${received.toLocaleString()} received.`);
+  };
 
   const filtered = useMemo(() => {
     return txList.filter(tx => {
       const q = search.toLowerCase();
       const matchSearch = !q || tx.invoiceNo.toLowerCase().includes(q) || tx.customer.toLowerCase().includes(q) || tx.items.toLowerCase().includes(q);
       const matchCat    = catFilter    === "All" || tx.category === catFilter;
-      const matchStatus = statusFilter === "All" || tx.status   === statusFilter;
+      const matchStatus = statusFilter === "All" || tx.status === statusFilter;
+      // Voided and returned sales are neither settled nor owed — they are
+      // undone, and counting them either way would misstate both totals.
+      const paid = payState(tx).label === "Paid";
+      const matchPay =
+        payFilter === "All" ? true
+        : tx.status !== "Paid" ? false
+        : payFilter === "Cash" ? paid
+        : !paid;
       const matchFrom   = !dateFrom || tx.date >= dateFrom;
       const matchTo     = !dateTo   || tx.date <= dateTo;
-      return matchSearch && matchCat && matchStatus && matchFrom && matchTo;
+      return matchSearch && matchCat && matchStatus && matchPay && matchFrom && matchTo;
     });
-  }, [txList, search, catFilter, statusFilter, dateFrom, dateTo]);
+  }, [txList, search, catFilter, statusFilter, payFilter, dateFrom, dateTo]);
 
   const totals = useMemo(() => ({
     count: filtered.length,
@@ -497,6 +697,46 @@ export default function SalesHistory() {
         </div>
       </div>
 
+      {/* Settled or owed — above the rest of the filters, because it is the
+          question asked most and the one the other controls cannot answer. The
+          counts are of what the other filters have already left visible, so
+          they say what is in front of you rather than what is in the table. */}
+      <div className={isMobile ? "tabs-scroll" : undefined}>
+        <div style={{ display: "flex", gap: 4, padding: 4, borderRadius: 11, background: "var(--bg-card)", border: "1px solid var(--border)", width: "fit-content" }}>
+          {([
+            ["All", "All Sales", "var(--accent)"],
+            ["Cash", "Cash Sales", "#4ade80"],
+            ["Credit", "Credit Sales", "#f97316"],
+          ] as const).map(([id, label, color]) => {
+            const on = payFilter === id;
+            const n = id === "All"
+              ? txList.filter(t => t.status === "Paid").length
+              : txList.filter(t => t.status === "Paid" && (payState(t).label === "Paid") === (id === "Cash")).length;
+            return (
+              <button
+                key={id}
+                onClick={() => setPayFilter(id)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 7, padding: "8px 15px", borderRadius: 8,
+                  fontSize: 12.5, fontWeight: on ? 700 : 500, cursor: "pointer", whiteSpace: "nowrap",
+                  border: on ? `1px solid ${color}55` : "1px solid transparent",
+                  background: on ? `${color}14` : "transparent",
+                  color: on ? color : "var(--text-muted)",
+                  fontFamily: ff, transition: "all 0.15s",
+                }}
+              >
+                {label}
+                <span style={{
+                  fontSize: 10, fontWeight: 800, padding: "1px 7px", borderRadius: 20,
+                  background: on ? `${color}22` : "var(--bg-secondary)",
+                  color: on ? color : "var(--text-muted)",
+                }}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Filters */}
       <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: isMobile ? 8 : 10, alignItems: isMobile ? "stretch" : "center", flexWrap: isMobile ? undefined : "wrap" }}>
         <div style={{ position: "relative", flex: isMobile ? undefined : 1, minWidth: isMobile ? undefined : 180 }}>
@@ -538,8 +778,8 @@ export default function SalesHistory() {
           <input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   style={{ ...inputStyle, flex: 1, width: isMobile ? undefined : 140 }} />
         </div>
 
-        {(search || catFilter !== "All" || statusFilter !== "All" || dateFrom || dateTo) && (
-          <button onClick={() => { setSearch(""); setCatFilter("All"); setStatusFilter("All"); setDateFrom(""); setDateTo(""); }}
+        {(search || catFilter !== "All" || statusFilter !== "All" || payFilter !== "All" || dateFrom || dateTo) && (
+          <button onClick={() => { setSearch(""); setCatFilter("All"); setStatusFilter("All"); setPayFilter("All"); setDateFrom(""); setDateTo(""); }}
             style={{
               background: "none", border: "1px solid var(--border)", borderRadius: 8,
               padding: "8px 12px", fontSize: 12, color: "var(--text-secondary)",
@@ -591,7 +831,7 @@ export default function SalesHistory() {
                 </td>
               </tr>
             ) : rows.map((tx, i) => {
-              const cfg = STATUS_CFG[tx.status];
+              const cfg = payState(tx);
               const catColor = CAT_COLORS[tx.category];
               return (
                 <tr key={tx.id} style={{
@@ -614,10 +854,10 @@ export default function SalesHistory() {
                   <td style={{ padding: "11px 14px", color: "var(--text-secondary)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tx.items}</td>
                   <td style={{ padding: "11px 14px", fontWeight: 700, color: "var(--text-primary)", whiteSpace: "nowrap" }}>{fmtRs(tx.total)}</td>
                   <td style={{ padding: "11px 14px" }}>
-                    <span style={{
+                    <span title={cfg.title} style={{
                       fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 6,
                       color: cfg.color, background: cfg.bg, border: `1px solid ${cfg.border}`,
-                    }}>{tx.status}</span>
+                    }}>{cfg.label}</span>
                   </td>
                   <td style={{ padding: "11px 14px" }}>
                     <div style={{ display: "flex", gap: 6 }}>
@@ -637,6 +877,19 @@ export default function SalesHistory() {
                           }}>
                             <RotateCcw size={13} />
                           </button>
+                          {/* Senior counter staff only. The person who made
+                              the mistake is usually the one who spots it, but
+                              a payment record that anybody can rewrite is not
+                              a payment record. */}
+                          {isAdminCashier && (
+                            <button onClick={() => setCorrectTarget(tx)} title="Correct the recorded payment" style={{
+                              width: 28, height: 28, borderRadius: 7, border: "1px solid rgba(96,165,250,0.3)",
+                              background: "rgba(96,165,250,0.08)", color: "#60a5fa",
+                              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                            }}>
+                              <Pencil size={12} />
+                            </button>
+                          )}
                           <button onClick={() => setVoidTarget(tx)} title="Void Transaction" style={{
                             width: 28, height: 28, borderRadius: 7, border: "1px solid rgba(248,113,113,0.25)",
                             background: "rgba(248,113,113,0.07)", color: "#f87171",
@@ -655,6 +908,7 @@ export default function SalesHistory() {
         </table>
       </div>
 
+      {correctTarget && <CorrectPaymentModal tx={correctTarget} onConfirm={handleCorrect} onClose={() => setCorrectTarget(null)} />}
       {voidTarget   && <VoidModal   tx={voidTarget}   onConfirm={handleVoidConfirm}   onClose={() => setVoidTarget(null)} />}
       {returnTarget && <ReturnModal tx={returnTarget} onConfirm={handleReturnConfirm} onClose={() => setReturnTarget(null)} />}
       {viewTarget   && <ReceiptModal tx={viewTarget}  onClose={() => setViewTarget(null)} />}

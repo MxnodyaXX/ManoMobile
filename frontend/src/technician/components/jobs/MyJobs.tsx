@@ -23,6 +23,7 @@ import { fetchOpenTransfers, markTransferReturned, type AgentTransfer } from "@/
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { rulesForTechnician, type EffectiveRules } from "@/lib/settings/staffRules";
 import { useToast } from "@/lib/ui/toast";
+import { useJobSlot } from "@/lib/repair/useJobSlot";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -239,16 +240,16 @@ export default function MyJobs() {
   const [detailJobId, setDetailJobId]     = useState<string | null>(null);
   const [statusModalId, setStatusModalId] = useState<string | null>(null);
   const [expandedId, setExpandedId]       = useState<string | null>(null);
-  const [partReqJob, setPartReqJob]       = useState<RepairJob | null>(null);
-  const [diagnosticJob, setDiagnosticJob] = useState<RepairJob | null>(null);
-  const [activityJob, setActivityJob]     = useState<RepairJob | null>(null);
-  const [notesJob, setNotesJob]           = useState<RepairJob | null>(null);
-  const [escalationJob, setEscalationJob] = useState<RepairJob | null>(null);
-  const [messageJob, setMessageJob]       = useState<RepairJob | null>(null);
+  const [partReqJob, setPartReqJob]       = useJobSlot();
+  const [diagnosticJob, setDiagnosticJob] = useJobSlot();
+  const [activityJob, setActivityJob]     = useJobSlot();
+  const [notesJob, setNotesJob]           = useJobSlot();
+  const [escalationJob, setEscalationJob] = useJobSlot();
+  const [messageJob, setMessageJob]       = useJobSlot();
   const toast = useToast();
   const [claimingId, setClaimingId]       = useState<string | null>(null);
   const [claimNotice, setClaimNotice]     = useState<{ kind: "ok" | "warn"; text: string } | null>(null);
-  const [transferJob, setTransferJob]     = useState<RepairJob | null>(null);
+  const [transferJob, setTransferJob]     = useJobSlot();
   // Which of my jobs are physically out at an agent right now.
   const [openTransfers, setOpenTransfers] = useState<AgentTransfer[]>([]);
   // What this technician is allowed to do, per their own permissions.

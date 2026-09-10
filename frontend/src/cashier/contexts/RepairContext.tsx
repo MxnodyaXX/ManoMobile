@@ -132,6 +132,20 @@ export interface RepairJob {
   creationType?: "Normal" | "Instant" | "Backdated";
   createdAt: string;
   estimatedCompletion: string;
+
+  /**
+   * A customer chasing this repair.
+   *
+   * Written by the counter when somebody walks in or rings to ask, read by the
+   * bench until it is acknowledged. Two timestamps rather than a flag so a
+   * second question after the first was seen is not silently dropped — see
+   * migration 20260909000042 and lib/repair/inquiry.
+   */
+  inquiryAt?: string | null;
+  inquiryBy?: string | null;
+  inquiryNote?: string | null;
+  inquirySeenAt?: string | null;
+  inquiryCount?: number | null;
   imei?: string;
   modelNumber?: string;          // device model number (e.g. M2006C3LMG) — maps to model
   jobWarranty?: string;          // @deprecated — superseded by WarrantyContext (warrantyId)

@@ -58,7 +58,12 @@ const sectionDescriptions: Record<RepairSection, string> = {
   "All Jobs":     "Complete list of all repair jobs",
 };
 
-export default function RepairManagement({ initialSection }: { initialSection?: RepairSection }) {
+export default function RepairManagement({ initialSection, initialSearch, openJobId }: {
+  initialSection?: RepairSection;
+  /** Deep link from the scan panel — see JobsTableProps. */
+  initialSearch?: string;
+  openJobId?: string;
+}) {
   const [active, setActive] = useState<RepairSection>(initialSection ?? "New Repair");
   /**
    * Which of the three ways in is on screen.
@@ -300,6 +305,8 @@ export default function RepairManagement({ initialSection }: { initialSection?: 
             icon={ActiveIcon}
             description={sectionDescriptions[active]}
             view={activeSection.view ?? "All"}
+            initialSearch={initialSearch}
+            openJobId={openJobId}
           />
         )}
       </div>

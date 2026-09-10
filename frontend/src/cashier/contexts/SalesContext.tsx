@@ -61,6 +61,9 @@ interface SalesContextValue {
    *  tell a cashier the void didn't happen, rather than showing "Voided" for
    *  a sale that's still Paid in the database. */
   voidSale: (id: string) => Promise<void>;
+  /** Re-read the ledger. For corrections made in the database rather than
+   *  through addSale — the row on screen is then a version behind. */
+  reload: () => Promise<void>;
   loading: boolean;
   /** Set when the ledger could not be read or a sale could not be stored. The
    *  sale still shows on screen; this says it is not safe yet. */
@@ -73,6 +76,7 @@ const SalesContext = createContext<SalesContextValue>({
   updateSale: () => {},
   returnSale: () => {},
   voidSale: async () => {},
+  reload: async () => {},
   loading: false,
   error: null,
 });
@@ -175,7 +179,7 @@ export function SalesProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <SalesContext.Provider value={{ sales, addSale, updateSale, returnSale, voidSale, loading, error }}>
+    <SalesContext.Provider value={{ sales, addSale, updateSale, returnSale, voidSale, reload, loading, error }}>
       {children}
     </SalesContext.Provider>
   );

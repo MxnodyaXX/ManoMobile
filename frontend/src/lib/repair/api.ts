@@ -62,6 +62,11 @@ interface JobRow {
   invoice_no: string | null;
   device_unidentified_reason: string | null;
   creation_type: "Normal" | "Instant" | "Backdated" | null;
+  inquiry_at: string | null;
+  inquiry_by: string | null;
+  inquiry_note: string | null;
+  inquiry_seen_at: string | null;
+  inquiry_count: number | null;
   written_off: number | string | null;
   original_estimate: number | string | null;
   revised_estimate: number | string | null;
@@ -136,6 +141,11 @@ export function rowToJob(row: JobRow): RepairJob {
     invoiceNo: row.invoice_no ?? null,
     deviceUnidentifiedReason: row.device_unidentified_reason ?? null,
     creationType: row.creation_type ?? "Normal",
+    inquiryAt: row.inquiry_at,
+    inquiryBy: row.inquiry_by,
+    inquiryNote: row.inquiry_note,
+    inquirySeenAt: row.inquiry_seen_at,
+    inquiryCount: row.inquiry_count ?? 0,
     // Part of the bill forgiven at handover — see migration 20260901000017.
     writtenOff: num(row.written_off),
     originalEstimate: optNum(row.original_estimate),
@@ -194,6 +204,10 @@ export function jobToRow(job: Partial<RepairJob>): Record<string, unknown> {
   set("cash_return_amount", job.cashReturnAmount);
   set("device_unidentified_reason", job.deviceUnidentifiedReason);
   set("creation_type", job.creationType);
+  // The inquiry columns are deliberately not here. They are written by
+  // record_customer_inquiry and acknowledge_customer_inquiry, which also write
+  // the job's history in the same call — a patch that set them directly would
+  // leave a flag on the bench with nothing behind it.
   /**
    * The received date, but only when it was chosen rather than observed.
    *

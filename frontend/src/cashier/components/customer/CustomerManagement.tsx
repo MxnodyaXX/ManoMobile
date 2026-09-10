@@ -1,20 +1,26 @@
 "use client";
 
 import { useState } from "react";
-import { Users, CreditCard } from "lucide-react";
+import { Users, CreditCard, Store} from "lucide-react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import AllCustomers from "./AllCustomers";
 import CreditCustomers from "./CreditCustomers";
 
-type CustomerSection = "All Customers" | "Credit Customers";
+type CustomerSection = "All Customers" | "Dealers" | "Credit Customers";
 
 const sections: { id: CustomerSection; icon: any; label: string }[] = [
-  { id: "All Customers",    icon: Users,      label: "All Customers" },
+  // Two lists rather than one with a filter. A dealer and a walk-in are both
+  // customers in the ledger and nothing alike at the counter: one is a shop
+  // that sends work in by the dozen, the other is a person holding a phone.
+  // Mixing them made both lists harder to read than either on its own.
+  { id: "All Customers",    icon: Users,      label: "Customers" },
+  { id: "Dealers",          icon: Store,      label: "Dealers" },
   { id: "Credit Customers", icon: CreditCard, label: "Credit Accounts" },
 ];
 
 const sectionDescriptions: Record<CustomerSection, string> = {
-  "All Customers":    "View and manage all registered customers",
+  "All Customers":    "People who brought a device in themselves — their work, their spend and their invoices",
+  "Dealers":          "Shops that send work in — what they have brought, paid and been billed",
   "Credit Customers": "What customers and dealers owe — balances, payments and write-offs",
 };
 
@@ -120,7 +126,8 @@ export default function CustomerManagement() {
 
       {/* Content */}
       <div className="fade-up fade-up-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
-        {active === "All Customers" && <AllCustomers />}
+        {active === "All Customers" && <AllCustomers only="Walk-in" />}
+        {active === "Dealers" && <AllCustomers only="Dealer" />}
         {active === "Credit Customers" && <CreditCustomers />}
       </div>
     </div>

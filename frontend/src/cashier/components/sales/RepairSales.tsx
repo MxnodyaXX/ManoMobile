@@ -7,6 +7,7 @@ import {
   Search, ArrowLeft, Printer, ChevronDown,
   Building2, CheckCircle, Clock, Wrench, TrendingUp, AlertCircle,
   CreditCard, X, BookUser, Undo2, RotateCcw,
+  Pencil, Check,
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import CreditCustomerPicker, { type POSCreditCustomer } from "./CreditCustomerPicker";
@@ -29,6 +30,17 @@ interface CompletedRepair {
   /** The number recorded on the job. Carried through so the invoice can take
    *  the customer straight off the repair rather than have it retyped. */
   phone?: string;
+  /** Handed over already, but never billed — see invoiceable. */
+  uninvoiced?: boolean;
+  /**
+   * Why the handset could not be identified, where that was recorded.
+   *
+   * The difference between "nobody has looked yet" and "this was looked at and
+   * cannot be known" — a dead phone has no IMEI to read off it. Carried here
+   * so the invoice gate can insist on an IMEI without insisting on the
+   * impossible. See migration 20260906000028.
+   */
+  unidentifiedReason?: string | null;
   brand: string;
   model: string;
   imei: string;
@@ -188,9 +200,22 @@ const fmtRs = (n: number) => `Rs. ${Math.max(0, n).toLocaleString("en-LK")}`;
 
 // ─── Credit Record Confirm Modal ─────────────────────────────────────────────
 
-function CreditRecordConfirmModal({ dealer, dueAmount, onConfirm, onSkip, onCancel }: {
+/**
+ * Whose account the balance goes on — asked before anything is written.
+ *
+ * This used to open after the handover had already been recorded, which made
+ * its cancel a trap: the jobs were Delivered and the charge raised, so
+ * dismissing it abandoned the paperwork for something that had already
+ * happened. Now nothing is committed until one of these buttons is pressed.
+ *
+ * So cancel means cancel. The two buttons are the two real answers — on the
+ * account, or not — and both of them produce an invoice, because a phone
+ * going back to its owner is a sale either way.
+ */
+function CreditRecordConfirmModal({ dealer, dueAmount, busy, onConfirm, onSkip, onCancel }: {
   dealer: string;
   dueAmount: number;
+  busy?: boolean;
   onConfirm: () => void;
   onSkip: () => void;
   onCancel: () => void;
@@ -238,14 +263,20 @@ function CreditRecordConfirmModal({ dealer, dueAmount, onConfirm, onSkip, onCanc
 
         {/* Footer */}
         <div style={{ padding: "12px 20px", borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* Both of these are the commit. Disabled while it runs, because
+              this is the click that draws the invoice number, hands the phones
+              over and writes the sale — pressing it twice would do all three
+              again under a second number. */}
           <button
             onClick={onConfirm}
-            style={{ width: "100%", padding: "10px", borderRadius: 9, border: "none", background: "#fbbf24", color: "#000", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}
+            disabled={busy}
+            style={{ width: "100%", padding: "10px", borderRadius: 9, border: "none", background: "#fbbf24", color: "#000", fontSize: 13, fontWeight: 700, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.6 : 1, fontFamily: "'Plus Jakarta Sans', sans-serif", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}
           >
-            <BookUser size={14} />Create Credit Record &amp; Generate Invoice
+            <BookUser size={14} />{busy ? "Recording…" : "Create Credit Record & Generate Invoice"}
           </button>
           <button
             onClick={onSkip}
+            disabled={busy}
             style={{ width: "100%", padding: "10px", borderRadius: 9, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
           >
             Generate Without Credit Record
@@ -552,7 +583,11 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
 
 // ─── Repair Sales Main ────────────────────────────────────────────────────────
 
-export default function RepairSales() {
+export default function RepairSales({ initialDealer, initialJobId }: {
+  /** Sent here to bill one finished repair — see SalesManagement's jobToIssue. */
+  initialDealer?: string;
+  initialJobId?: string;
+} = {}) {
   const { addEntry } = useCashRegister();
   const { addSale } = useSales();
   /**
@@ -582,13 +617,39 @@ export default function RepairSales() {
   const { updateJob, jobs, dealers } = useRepair();
   const [view,           setView]           = useState<"search" | "invoice">("search");
   const [showIssuedMsg,  setShowIssuedMsg]  = useState(false);
-  const [selectedDealer, setSelectedDealer] = useState("");
-  const [checkedIds,     setCheckedIds]     = useState<Set<string>>(new Set());
+  /**
+   * Seeded when somebody was sent straight here to bill one repair.
+   *
+   * Lazy initialisers rather than an effect: whoever navigated had the job in
+   * front of them, so it is already in the register by the time this renders —
+   * this is the first render's state, not a reaction to it. Re-navigating
+   * remounts this screen (see the key in the cashier shell), so a second job
+   * seeds a second time instead of being ignored.
+   */
+  const [selectedDealer, setSelectedDealer] = useState(initialDealer ?? "");
+  /**
+   * Filling in an IMEI the counter never took.
+   *
+   * An invoice without one names a price and a customer but not the object —
+   * which is the one thing a warranty claim, a police enquiry or a returning
+   * customer needs it to say. The gap is always found here, at the till, and
+   * the phone is usually still on the counter, so this is where it gets
+   * fixed rather than sent back to intake.
+   */
+  const [imeiEdit,  setImeiEdit]  = useState<{ id: string; value: string } | null>(null);
+  const [imeiSaving, setImeiSaving] = useState(false);
+  const [checkedIds,     setCheckedIds]     = useState<Set<string>>(
+    () => (initialJobId ? new Set([initialJobId]) : new Set()),
+  );
   const [search,         setSearch]         = useState("");
 
   // Step 3 — Customer Info
-  const [custName,  setCustName]  = useState("");
-  const [custPhone, setCustPhone] = useState("");
+  // Filled from the job on arrival, for the same reason the tick below fills
+  // them on a click: the invoice is for whoever the repair was for, and
+  // landing here with the boxes empty would make the default a lie.
+  const seedJob = initialJobId ? jobs.find(j => j.id === initialJobId) : undefined;
+  const [custName,  setCustName]  = useState(seedJob?.customerName ?? "");
+  const [custPhone, setCustPhone] = useState(seedJob?.phone ?? "");
   const [custNic,   setCustNic]   = useState("");
   /**
    * Bill the dealer instead of the end customer.
@@ -699,14 +760,28 @@ export default function RepairSales() {
 
   // Repaired-and-awaiting-collection jobs from the live register, shaped like
   // the invoice rows, plus the demo rows that aren't in the register.
+  /**
+   * What can still be invoiced.
+   *
+   * Completed work, plus something that should never exist and does: a job
+   * handed over with no invoice behind it. The old credit dialog could be
+   * dismissed after the handover had already been written, which left the job
+   * Delivered, the charge raised, and no sale — and because this list only
+   * ever showed Completed jobs, the work then had no way back onto a bill.
+   *
+   * The dialog cannot do that any more. These are the ones it did do it to,
+   * and they belong here until somebody has billed them.
+   */
   const invoiceable: CompletedRepair[] = useMemo(() => {
     const live: CompletedRepair[] = jobs
-      .filter(j => j.status === "Completed")
+      .filter(j => j.status === "Completed" || (j.status === "Delivered" && !j.invoiceNo))
       .map(j => ({
         id: j.id,
         dealer: findDealer(dealers, j)?.name ?? j.dealer ?? "",
         customerName: j.customerName,
         phone: j.phone,
+        unidentifiedReason: j.deviceUnidentifiedReason ?? null,
+        uninvoiced: j.status === "Delivered" && !j.invoiceNo,
         brand: j.brand,
         model: j.model,
         imei: j.imei ?? "",
@@ -1016,9 +1091,21 @@ export default function RepairSales() {
 
   const showStep3 = !!selectedDealer && checkedIds.size > 0;
 
+  /**
+   * Jobs on this invoice with no IMEI and no reason for not having one.
+   *
+   * An invoice is the document a warranty claim is made against, and one that
+   * cannot say which handset it was for is worth very little a year later when
+   * somebody comes back with a screen that failed. The phone is on the counter
+   * right now; this is the last moment it is easy to fix.
+   *
+   * A recorded "cannot be identified" passes — that is an answer, not a gap.
+   */
+  const missingImei = selectedRepairs.filter(r => !r.imei?.trim() && !r.unidentifiedReason);
+
   const canGenerate = showStep3 &&
     (useCreditPicker ? !!selectedCreditCustomer : !!custName.trim()) &&
-    true;
+    missingImei.length === 0;
 
   // What the tick would fill in, said out loud next to it — a tick whose
   // effect you have to press it to discover is a tick nobody presses.
@@ -1032,6 +1119,17 @@ export default function RepairSales() {
   const invoiceCustomer = useCreditPicker && selectedCreditCustomer
     ? { name: selectedCreditCustomer.name, phone: selectedCreditCustomer.phone ?? "", nic: selectedCreditCustomer.nic ?? "" }
     : { name: custName, phone: custPhone, nic: custNic };
+
+  /** Written onto the job itself, not just the invoice: the missing number is
+   *  missing everywhere, and fixing it here fixes the record too. */
+  const saveImei = async () => {
+    if (!imeiEdit || !imeiEdit.value.trim()) return;
+    setImeiSaving(true);
+    const res = await updateJob(imeiEdit.id, { imei: imeiEdit.value.trim() });
+    setImeiSaving(false);
+    if (!res.ok) return;
+    setImeiEdit(null);
+  };
 
   const toggleCheck = (id: string) => {
     // Built here rather than in the updater so the same value can be handed to
@@ -1194,47 +1292,107 @@ export default function RepairSales() {
       remaining.left -= take;
       return take;
     };
+    /**
+     * The money actually received, spread across the jobs it paid for.
+     *
+     * This is what was missing, and it cost the shop a false debt on every
+     * cash sale. The till wrote the receipt into handover.balanceSettled and
+     * left advance_paid alone — but the database decides what is still owed
+     * from `estimated_cost - advance_paid`, so a repair paid in full in cash
+     * still looked entirely unpaid, and the Delivered trigger opened a credit
+     * account and charged the customer for a bill they had just settled.
+     *
+     * So the receipt is allocated properly: each job takes what it owes, in
+     * the same largest-first order the write-off uses, until the money runs
+     * out. The last job on a part-paid invoice is the one left owing, which is
+     * what the credit charge should then be for.
+     *
+     * balanceSettled becomes that job's share too. It was the whole invoice on
+     * every line, so three phones on one bill each claimed to have collected
+     * the lot.
+     */
+    const toAllocate = { left: effectiveReceived };
+    const share = (r: CompletedRepair) => {
+      const owed = Math.max(0, (r.unitPrice - r.discount) - r.advance);
+      const take = Math.min(owed, Math.max(0, toAllocate.left));
+      toAllocate.left -= take;
+      return take;
+    };
+
     await Promise.all([...selectedRepairs]
       .sort((a, b) => (b.unitPrice - b.discount - b.advance) - (a.unitPrice - a.discount - a.advance))
-      .map(r =>
-      updateJob(r.id, {
-        writtenOff: forgiven(r),
-        status: "Delivered",
-        handover: {
-          collectedBy: invoiceCustomer.name || r.customerName,
-          relationship: "Owner",
-          idVerified: true,
-          balanceSettled: effectiveReceived,
-          handoverSignature: "",
-          warrantyCardIssued: false,
-          handedOverBy: "Cashier",
-          handedOverAt: nowISO,
-        },
+      .map(r => {
+        const settled = share(r);
+        return updateJob(r.id, {
+          writtenOff: forgiven(r),
+          status: "Delivered",
+          // Everything this job has received, intake advance included — the
+          // one figure the credit posting reads.
+          advancePaid: r.advance + settled,
+          handover: {
+            collectedBy: invoiceCustomer.name || r.customerName,
+            relationship: "Owner",
+            idVerified: true,
+            balanceSettled: settled,
+            handoverSignature: "",
+            warrantyCardIssued: false,
+            handedOverBy: "Cashier",
+            handedOverAt: nowISO,
+          },
+        });
       }),
-    ));
+    );
   };
 
-  const handleGenerateInvoice = async () => {
-    if (invoicing) return;
-    setInvoicing(true);
+  /**
+   * Everything that makes the sale real, in one place.
+   *
+   * Drawing the invoice number, handing the jobs over and writing the sale
+   * happen together or not at all. Split apart they produced the worst state
+   * this screen can reach: the jobs delivered, the credit charge raised, and
+   * no sale — so the work vanished from this list (it is no longer Completed),
+   * the invoice number was drawn and thrown away, and the customer's account
+   * carried a charge with no bill behind it.
+   */
+  const commitSale = async (opts?: { markCredit?: boolean }) => {
     const no = await fetchNextInvoiceNo();
     setInvoiceNo(no);
-    setInvoicing(false);
-    // Snapshot before markIssued() flips these jobs to "Delivered" — see the
+    // Taken before markIssued() flips these jobs to "Delivered" — see the
     // comment on invoiceSnapshot's declaration.
     const snap = takeSnapshot();
     setInvoiceSnapshot(snap);
     await markIssued();
+    if (snap.effectiveReceived > 0) {
+      addEntry("in", `Cash — Repair Invoice ${no} (${selectedDealer})`, snap.effectiveReceived);
+    }
+    setCreditRecordMade(!!opts?.markCredit);
+    recordRepairSale(no, snap);
+    setView("invoice");
+  };
+
+  const handleGenerateInvoice = async () => {
+    if (invoicing) return;
+
+    /**
+     * A balance going on account is a decision, so it is asked before anything
+     * is written rather than after.
+     *
+     * It used to run the handover first and ask afterwards, which made the
+     * dialog's cancel a trap — the jobs were already delivered by then, so
+     * dismissing it abandoned the paperwork for something that had already
+     * happened. Nothing is committed until a button in the dialog is pressed,
+     * so backing out now genuinely leaves the till where it was.
+     */
     if (!isManoMobile && isCredit && !writeOffBalance) {
-      // The sale is recorded from the confirm modal, which renders after the
-      // flip — so it uses invoiceSnapshot, set just above, not live state.
       setShowCreditConfirm(true);
-    } else {
-      if (effectiveReceived > 0) {
-        addEntry("in", `Cash — Repair Invoice ${no} (${selectedDealer})`, effectiveReceived);
-      }
-      recordRepairSale(no, snap);
-      setView("invoice");
+      return;
+    }
+
+    setInvoicing(true);
+    try {
+      await commitSale();
+    } finally {
+      setInvoicing(false);
     }
   };
 
@@ -1380,13 +1538,58 @@ export default function RepairSales() {
                       <td style={{ padding: "11px 14px", textAlign: "center" }}>
                         <input type="checkbox" checked={checked} onChange={() => toggleCheck(r.id)} onClick={(e) => e.stopPropagation()} style={{ accentColor: "var(--accent)", width: 14, height: 14, cursor: "pointer" }} />
                       </td>
-                      <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.id}</span></td>
+                      <td style={{ padding: "11px 14px" }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.id}</span>
+                        {/* Already with the customer. Worth saying plainly:
+                            the cashier is billing work that has left the shop,
+                            and nothing else on the row would tell them. */}
+                        {r.uninvoiced && (
+                          <p title="Handed over without an invoice — bill it here to put that right" style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.04em", color: "#fbbf24", marginTop: 2, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                            NOT INVOICED
+                          </p>
+                        )}
+                      </td>
                       <td style={{ padding: "11px 14px" }}><JobTypeTag type={r.completionType} /></td>
                       {isManoMobile && (
                         <td style={{ padding: "11px 14px" }}><p style={{ fontSize: 12.5, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.customerName}</p></td>
                       )}
                       <td style={{ padding: "11px 14px" }}><p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.brand} {r.model}</p></td>
-                      <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "monospace" }}>{r.imei}</span></td>
+                      <td style={{ padding: "11px 14px" }} onClick={e => e.stopPropagation()}>
+                        {imeiEdit?.id === r.id ? (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            <input
+                              autoFocus
+                              value={imeiEdit.value}
+                              onChange={e => setImeiEdit({ id: r.id, value: e.target.value.replace(/\D/g, "") })}
+                              onKeyDown={e => { if (e.key === "Enter") void saveImei(); if (e.key === "Escape") setImeiEdit(null); }}
+                              maxLength={15}
+                              inputMode="numeric"
+                              placeholder="Dial *#06#"
+                              style={{ width: 150, padding: "5px 8px", borderRadius: 7, border: "1px solid var(--accent-glow)", background: "var(--bg-primary)", color: "var(--text-primary)", fontSize: 11.5, fontFamily: "monospace", outline: "none" }}
+                            />
+                            <button onClick={() => void saveImei()} disabled={imeiSaving || !imeiEdit.value.trim()} title="Save" style={{ display: "flex", padding: 4, borderRadius: 6, border: "1px solid var(--accent)", background: "transparent", color: "var(--accent)", cursor: imeiEdit.value.trim() ? "pointer" : "not-allowed", opacity: imeiEdit.value.trim() ? 1 : 0.4 }}>
+                              <Check size={12} />
+                            </button>
+                            <button onClick={() => setImeiEdit(null)} title="Cancel" style={{ display: "flex", padding: 4, borderRadius: 6, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer" }}>
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ) : r.imei ? (
+                          <span style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "monospace" }}>{r.imei}</span>
+                        ) : r.unidentifiedReason ? (
+                          // Looked at and cannot be known. Not a gap to chase,
+                          // and not something a pencil can fix.
+                          <span title={r.unidentifiedReason} style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>Not identifiable</span>
+                        ) : (
+                          <button
+                            onClick={() => setImeiEdit({ id: r.id, value: "" })}
+                            title="No IMEI on this job — add it before invoicing"
+                            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 8px", borderRadius: 7, border: "1px solid rgba(251,191,36,0.45)", background: "rgba(251,191,36,0.1)", color: "#d97706", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+                          >
+                            <Pencil size={10} />Add IMEI
+                          </button>
+                        )}
+                      </td>
                       {!isManoMobile && (
                         <>
                           <td style={{ padding: "11px 14px" }}><span style={{ fontSize: 11.5, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }} title={r.issue}>{r.issue || "—"}</span></td>
@@ -2038,6 +2241,19 @@ export default function RepairSales() {
             </div>
           </div>
 
+          {missingImei.length > 0 && (
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "10px 13px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)" }}>
+              <AlertCircle size={14} style={{ color: "#fbbf24", flexShrink: 0, marginTop: 1 }} />
+              <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                <strong style={{ color: "var(--text-primary)" }}>
+                  No IMEI on {missingImei.map(r => r.id).join(", ")}.
+                </strong>{" "}
+                Add it in the table above — the invoice has to say which handset it was for. If the
+                device cannot be read at all, the technician records that on the job instead.
+              </p>
+            </div>
+          )}
+
           {/* Generate Invoice button row */}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, paddingTop: 4 }}>
             <button
@@ -2069,8 +2285,9 @@ export default function RepairSales() {
         <CreditRecordConfirmModal
           dealer={selectedDealer}
           dueAmount={invoiceSnapshot?.finalDue ?? finalDue}
-          onConfirm={() => { if (!invoiceNo || !invoiceSnapshot) return; setCreditRecordMade(true); setShowCreditConfirm(false); recordRepairSale(invoiceNo, invoiceSnapshot); setView("invoice"); }}
-          onSkip={() => { if (!invoiceNo || !invoiceSnapshot) return; setCreditRecordMade(false); setShowCreditConfirm(false); recordRepairSale(invoiceNo, invoiceSnapshot); setView("invoice"); }}
+          busy={invoicing}
+          onConfirm={async () => { setInvoicing(true); try { setShowCreditConfirm(false); await commitSale({ markCredit: true }); } finally { setInvoicing(false); } }}
+          onSkip={async () => { setInvoicing(true); try { setShowCreditConfirm(false); await commitSale(); } finally { setInvoicing(false); } }}
           onCancel={() => setShowCreditConfirm(false)}
         />
       )}

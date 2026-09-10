@@ -32,6 +32,7 @@ import { notifyJobEvent } from "@/lib/sms/notify";
 import { useToast } from "@/lib/ui/toast";
 import { useTableSort, SortHeader, type SortValue } from "@/lib/ui/useTableSort";
 import { useJobCashReturns, refundRepairAdvance } from "@/lib/accounts/cashReturns";
+import { useJobSlot } from "@/lib/repair/useJobSlot";
 
 interface FinishJobData {
   actionTaken: string;
@@ -2182,6 +2183,17 @@ function FinishJobModal({ job, onClose, onFinish }: {
 interface JobsTableProps {
   view?: RepairView;
   title: string;
+  /**
+   * Land on one job rather than the whole list.
+   *
+   * Both are seeded once, at mount, from whoever navigated here — the scan
+   * panel knows which job it just found, and sending somebody to a tab of
+   * ninety rows to find it again is not a shortcut. Re-navigating remounts
+   * this table (see the key in the cashier shell), so a second scan seeds a
+   * second job rather than being ignored as "already mounted".
+   */
+  initialSearch?: string;
+  openJobId?: string;
   /** Shown in the header card next to the search bar — same icon/description
    *  RepairManagement's own section card would otherwise render alone above
    *  this table, wasting a row. */
@@ -2189,7 +2201,7 @@ interface JobsTableProps {
   description?: string;
 }
 
-export default function JobsTable({ view = "All", title, icon: Icon, description }: JobsTableProps) {
+export default function JobsTable({ view = "All", title, icon: Icon, description, initialSearch, openJobId }: JobsTableProps) {
   const { addEntry } = useCashRegister();
   const { jobs: allJobs, updateJob, dealers } = useRepair();
   const toast = useToast();
@@ -2216,20 +2228,25 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
   const isMobile = useIsMobile();
   // What this stage of the job is about decides which columns are worth space.
   const cols = VIEW_COLUMNS[view] ?? DEFAULT_COLS;
-  const [search,         setSearch]         = useState("");
+  const [search,         setSearch]         = useState(initialSearch ?? "");
   const [showFilters,    setShowFilters]    = useState(false);
   const [priorityFilter, setPriorityFilter] = useState("All");
   const [brandFilter,    setBrandFilter]    = useState("All");
   const [dealerFilter,   setDealerFilter]   = useState("All");
   const [searchFocused,  setSearchFocused]  = useState(false);
-  const [detailsJob,     setDetailsJob]     = useState<RepairJob | null>(null);
-  const [finishJob,      setFinishJob]      = useState<RepairJob | null>(null);
-  const [issueJobTarget, setIssueJobTarget] = useState<RepairJob | null>(null);
+  // Opened straight away when one was named, so the handoff ends where the
+  // work is rather than one click short of it. A lazy initialiser rather than
+  // an effect: this is the first render's state, not a reaction to it.
+  const [detailsJob,     setDetailsJob]     = useJobSlot(
+    () => (openJobId ? allJobs.find(j => j.id === openJobId) ?? null : null),
+  );
+  const [finishJob,      setFinishJob]      = useJobSlot();
+  const [issueJobTarget, setIssueJobTarget] = useJobSlot();
   const [invoiceData,    setInvoiceData]    = useState<IssueInvoiceData | null>(null);
-  const [cancelJob,      setCancelJob]      = useState<RepairJob | null>(null);
-  const [pickupJob,      setPickupJob]      = useState<RepairJob | null>(null);
-  const [intakeSlipJob,  setIntakeSlipJob]  = useState<RepairJob | null>(null);
-  const [labelJob,       setLabelJob]       = useState<RepairJob | null>(null);
+  const [cancelJob,      setCancelJob]      = useJobSlot();
+  const [pickupJob,      setPickupJob]      = useJobSlot();
+  const [intakeSlipJob,  setIntakeSlipJob]  = useJobSlot();
+  const [labelJob,       setLabelJob]       = useJobSlot();
   // Daily/Weekly/Monthly, booked-date based — only surfaced on Issued and
   // Non-Issued for now. Defaults to All so the list isn't narrowed until the
   // cashier actually picks a range.

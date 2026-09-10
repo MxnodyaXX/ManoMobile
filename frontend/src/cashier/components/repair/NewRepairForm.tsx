@@ -21,6 +21,7 @@ import { useDeviceModelLookup, rememberDeviceModel } from "@/lib/repair/deviceMo
 import { fetchStaffRules } from "@/lib/settings/staffRules";
 import { useDeviceFaults, FALLBACK_FAULTS } from "@/lib/repair/deviceFaults";
 import { ShieldCheck, Camera, Lock, X as XIcon, Hash, Printer, CheckCircle2, AlertCircle, FileClock, ChevronDown, History, Users } from "lucide-react";
+import { useJobSlot } from "@/lib/repair/useJobSlot";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -945,7 +946,13 @@ function Step2({ data, onChange, isMobile, errors, dealers, technicians, techLoa
    * is exactly the impure read React's rules forbid — and a module-level
    * constant would quietly go stale on a till left open overnight.
    */
-  const [etaPick, setEtaPick] = useState<number | "unsure" | null>(null);
+  // Seeded from the date already in the form, so the chip that matches it
+  // shows as chosen — a highlighted "1 day" beside a filled-in date is what
+  // makes the default readable as a default rather than as something the last
+  // person typed.
+  const [etaPick, setEtaPick] = useState<number | "unsure" | null>(
+    () => ETA_SHORTCUTS.find(s => etaFromToday(s.days) === data.estimatedCompletion)?.days ?? null,
+  );
   const toggleAccordion = (id: string) => setOpenAccordion(o => o === id ? null : id);
   const estimated = parseFloat(data.estimatedCost) || 0;
   const advance = parseFloat(data.advancePaid) || 0;
@@ -1404,7 +1411,13 @@ const INITIAL: FormData = {
   customerName: "", customerNIC: "", customerContact: "", customerEmail: "",
   deviceBrand: "", deviceModel: "", deviceModelNumber: "", modelNumberUnavailable: false, deviceIMEI: "", receivedItems: [], faultCheckboxes: [], faultDescription: "",
   estimatedCost: "", advancePaid: "", paymentMethod: "", jobPriority: "Normal", jobNotes: "",
-  assignedRepairman: "", estimatedCompletion: "",
+  assignedRepairman: "",
+  // Tomorrow, because that is what the shop says at the counter far more often
+  // than anything else, and an empty date is the one answer that helps nobody:
+  // the customer leaves without a day, and the job joins the queue with nothing
+  // to be late against. Every other span is one press of the row below it, and
+  // "not sure yet" is still its own deliberate button.
+  estimatedCompletion: etaFromToday(1),
   condition: { front: "Good", back: "Good", frame: "Good", camera: "Good", ports: "Good", buttons: "Good" },
   intakePhotos: [], passcodeType: "None", passcode: "", signature: "", termsAccepted: true,
 };
@@ -1629,12 +1642,12 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
     return () => { active = false; clearTimeout(t); };
   }, [form.dealerId, form.dealerJobNo]);
 
-  const [createdJob, setCreatedJob] = useState<RepairJob | null>(null);
+  const [createdJob, setCreatedJob] = useJobSlot();
   // Set the instant a job is created, cleared once the silent print fires —
   // see BarcodeLabelModal's `silent` mode. Separate from createdJob so the
   // receipt popup and the tag print are independent: closing one doesn't
   // touch the other.
-  const [autoPrintJob, setAutoPrintJob] = useState<RepairJob | null>(null);
+  const [autoPrintJob, setAutoPrintJob] = useJobSlot();
   const [errors, setErrors] = useState<RequiredField[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);

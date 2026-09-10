@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Wrench, ChevronDown } from "lucide-react";
+import { Wrench, ChevronDown, BellRing } from "lucide-react";
 import { useRepair, type RepairJob, type JobStatus } from "@/cashier/contexts/RepairContext";
+import { hasOpenInquiry, acknowledgeInquiry, INQUIRY_MESSAGE } from "@/lib/repair/inquiry";
 import { useTechnicianRates } from "@/lib/settings/staffRules";
 import { useWorkRules } from "@/lib/settings/workRules";
 import { isUnassigned, claimRepairJob } from "@/lib/repair/api";
@@ -187,7 +188,7 @@ export default function MyBench() {
      * now or after lunch is the Start button's business, and conflating the
      * two would show work as in progress that nobody has touched.
      */
-    if (action === "claim") {
+    if (action === "claim" || action === "claimStart") {
       setBusyId(job.id);
       try {
         // Through the database function, not updateJob: the check has to be
@@ -210,6 +211,23 @@ export default function MyBench() {
         jobId: job.id, type: "status_change",
         description: `Claimed by ${technicianName}`,
       });
+      /**
+       * Claimed and started in one press.
+       *
+       * Falls through to the start branch rather than repeating it: the clock,
+       * the job meta and the activity line are all set there, and a second
+       * copy here is how one of them ends up not being set at all. The job
+       * object is refreshed from the register first, because it now has this
+       * technician's name on it and starting the stale one would write the
+       * unassigned version back.
+       */
+      if (action === "claimStart") {
+        const claimed = jobs.find(j => j.id === job.id) ?? job;
+        await handle("start", claimed);
+        setNotice(`${job.id} is yours and the clock is running.`);
+        return;
+      }
+
       setNotice(`${job.id} is yours — it has moved to "To start".`);
       return;
     }
@@ -243,6 +261,27 @@ export default function MyBench() {
     });
   };
 
+  /**
+   * The bench says it has seen the question.
+   *
+   * Only the seeing — it changes nothing about the repair, and it must not:
+   * the customer asked, somebody read it, and the work still has to happen.
+   * Marking it seen while a newer question is arriving cannot bury that one
+   * either; acknowledge_customer_inquiry only moves the marker forward.
+   */
+  const [ackBusy, setAckBusy] = useState<string | null>(null);
+  const acknowledge = async (jobId: string) => {
+    setAckBusy(jobId);
+    try {
+      await acknowledgeInquiry(jobId);
+      await refresh();
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAckBusy(null);
+    }
+  };
+
   const pendingFor = (jobId: string) =>
     partRequests.filter(r => r.jobId === jobId && r.status === "Pending").length;
 
@@ -256,6 +295,17 @@ export default function MyBench() {
     return { col, all, list: applyBenchFilter(all, filter) };
   });
   const shownTotal = filtered.reduce((n, f) => n + f.list.length, 0);
+  /**
+   * The jobs somebody has come in and asked about.
+   *
+   * Above the board rather than inside it, and never filtered by the toolbar:
+   * a customer waiting is not one more job to sort by dealer or due date, it
+   * is the reason to put the current one down. Newest question first, because
+   * that is the one the counter is still fielding.
+   */
+  const inquiries = everything
+    .filter(hasOpenInquiry)
+    .sort((a, b) => new Date(b.inquiryAt ?? 0).getTime() - new Date(a.inquiryAt ?? 0).getTime());
   const searching = isFiltering(filter);
 
   // "Nothing at all" has to mean nothing to claim either, or the screen tells
@@ -278,6 +328,57 @@ export default function MyBench() {
         technicianName={technicianName}
         scope={scope}
       />
+
+      {inquiries.length > 0 && (
+        <div style={{ borderRadius: 14, border: "1px solid rgba(248,113,113,0.45)", background: "rgba(248,113,113,0.07)", overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "11px 15px", borderBottom: "1px solid rgba(248,113,113,0.3)" }}>
+            <BellRing size={14} style={{ color: "#f87171", flexShrink: 0 }} />
+            <p style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 800, color: "#f87171", letterSpacing: "0.02em" }}>
+              Customer inquiries · {inquiries.length}
+            </p>
+            <p style={{ fontSize: 11.5, color: "var(--text-muted)" }}>{INQUIRY_MESSAGE}</p>
+          </div>
+
+          {inquiries.map(job => (
+            <div key={job.id} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 15px", borderTop: "1px solid rgba(248,113,113,0.18)" }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
+                  {job.dealerJobNo ? `#${job.dealerJobNo}` : job.id}
+                  <span style={{ fontWeight: 500, color: "var(--text-muted)" }}>
+                    {" · "}{[job.brand, job.model].filter(Boolean).join(" ")}
+                    {" · "}{job.status === "Issued" ? "in progress"
+                            : job.status === "Pending" ? "waiting"
+                            : job.status === "Non-Issued" ? "not started"
+                            : job.status.toLowerCase()}
+                  </span>
+                </p>
+                <p style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2, lineHeight: 1.5 }}>
+                  {/* Who took the question and how many times it has been
+                      asked. The third ask is not the first, and a technician
+                      deciding what to pick up next should be able to see the
+                      difference. */}
+                  Asked at the counter{job.inquiryBy ? ` — taken by ${job.inquiryBy}` : ""}
+                  {(job.inquiryCount ?? 0) > 1 ? ` · chased ${job.inquiryCount} times` : ""}
+                  {job.inquiryNote ? ` · "${job.inquiryNote}"` : ""}
+                </p>
+              </div>
+
+              <button
+                onClick={() => acknowledge(job.id)}
+                disabled={ackBusy === job.id}
+                style={{
+                  padding: "8px 16px", borderRadius: 9, flexShrink: 0,
+                  border: "1px solid rgba(248,113,113,0.5)", background: "transparent",
+                  color: "#f87171", cursor: ackBusy === job.id ? "wait" : "pointer",
+                  fontSize: 12.5, fontWeight: 700, fontFamily: ff, whiteSpace: "nowrap",
+                }}
+              >
+                {ackBusy === job.id ? "Marking…" : "Got it"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
         <div>
