@@ -12,6 +12,8 @@ import PartRequestModal from "@/technician/components/parts/PartRequestModal";
 import { useParts } from "@/cashier/contexts/PartsContext";
 import { useWorkRules } from "@/lib/settings/workRules";
 import InsightModal, { type InsightColumn, type InsightRow, type InsightSummary } from "@/cashier/components/dashboard/InsightModal";
+import AgentsOutPanel from "@/lib/repair/AgentsOutPanel";
+import { fetchOpenTransfers, type AgentTransfer } from "@/lib/repair/agents";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -56,6 +58,27 @@ export default function TechDashboard() {
   const { rules: shopRules } = useWorkRules();
 
   const myJobs = jobs.filter(j => j.technician === technicianName);
+
+  /**
+   * The devices of mine that are physically at an outside workshop.
+   *
+   * The dashboard had no idea these existed. A job sent out parks as Pending,
+   * so it was counted under "Paused" and listed in the Paused Jobs panel with
+   * a "Resume" button beside it — an offer to carry on working on a phone that
+   * is not in the building.
+   */
+  const [openTransfers, setOpenTransfers] = useState<AgentTransfer[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    fetchOpenTransfers()
+      .then(rows => { if (live) setOpenTransfers(rows); })
+      .catch(() => { /* a panel that cannot load must not take the dashboard with it */ });
+    return () => { live = false; };
+  }, []);
+
+  const myTransfers = openTransfers.filter(t => myJobs.some(j => j.id === t.jobId));
+  const atAgent = (jobId: string) => myTransfers.some(t => t.jobId === jobId);
   /**
    * Every job this technician has in progress, oldest first.
    *
@@ -114,7 +137,10 @@ export default function TechDashboard() {
   ];
 
   const inProgress = myJobs.filter(j => j.status === "Issued");
-  const pausedJobs = myJobs.filter(j => j.status === "Pending");
+  // Out at an agent is its own thing now, so it stops being counted as paused.
+  // Waiting on a part you can fetch and waiting on another man's workshop are
+  // not the same problem, and only one of them can be picked back up today.
+  const pausedJobs = myJobs.filter(j => j.status === "Pending" && !atAgent(j.id));
   const readyJobs  = myJobs.filter(j => j.status === "Completed");
   const pendingReq = partRequests.filter(r => r.status === "Pending");
 
@@ -399,6 +425,16 @@ export default function TechDashboard() {
           );
         })}
       </div>
+
+      {/* Devices of mine that are not in the building. Above the paused list
+          rather than beside it, because it used to be hidden inside it: a job
+          at an agent parked as Pending and sat in Paused Jobs offering a
+          Resume button for a phone a mile away. */}
+      <AgentsOutPanel
+        transfers={myTransfers}
+        jobs={myJobs}
+        footnote="Mark one back in from My Jobs, under the At an Agent tab."
+      />
 
       {/* Lower row: Paused jobs + Approved parts notifications */}
       <div className="fade-up resp-grid-2" style={{ gap: 16 }}>

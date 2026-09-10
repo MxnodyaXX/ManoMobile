@@ -26,8 +26,10 @@ import {
   CheckCircle, Clock, AlertCircle, XCircle, Wrench,
   X, CheckSquare, Send, Printer, ShieldCheck, CreditCard,
   Truck, Ban, FileText, Package, Tag, Info, Save, Pencil, BellRing, RotateCcw,
-  Briefcase, User, Smartphone, Wallet, ClipboardList,
+  Briefcase, User, Smartphone, Wallet, ClipboardList, Building2,
 } from "lucide-react";
+import { fetchOpenTransfers, type AgentTransfer } from "@/lib/repair/agents";
+import AgentsOutPanel from "@/lib/repair/AgentsOutPanel";
 import { notifyJobEvent } from "@/lib/sms/notify";
 import { useToast } from "@/lib/ui/toast";
 import { useTableSort, SortHeader, type SortValue } from "@/lib/ui/useTableSort";
@@ -225,6 +227,33 @@ function outcomeBadge(j: RepairJob) {
       }}
     >
       {cfg.label}
+    </span>
+  );
+}
+
+/**
+ * "ON AGENT", for a device that is not in the building.
+ *
+ * It rides beside the status rather than replacing it, the way outcomeBadge
+ * does. "Pending" is still true — nobody here is working on it — but on its own
+ * it reads as a phone on a shelf upstairs, and the counter is where the
+ * customer rings to ask where theirs is. Out at another workshop is the one
+ * answer that cannot be guessed from anything else on the row.
+ */
+function agentBadge(t: AgentTransfer | undefined) {
+  if (!t) return null;
+  const d = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  return (
+    <span
+      title={`Sent to ${t.agentName ?? "an external agent"} on ${d(t.sentAt)}${t.expectedReturn ? ` — due back ${d(t.expectedReturn)}` : ""}`}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        fontSize: 10, fontWeight: 800, letterSpacing: "0.06em",
+        padding: "2px 7px", borderRadius: 6,
+        color: "#a78bfa", background: "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.3)",
+      }}
+    >
+      <Building2 size={9} strokeWidth={2.5} />ON AGENT
     </span>
   );
 }
@@ -2246,6 +2275,27 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
   const cols = VIEW_COLUMNS[view] ?? DEFAULT_COLS;
   const [search,         setSearch]         = useState(initialSearch ?? "");
   const [showFilters,    setShowFilters]    = useState(false);
+  /**
+   * Which devices are physically out at an outside workshop right now.
+   *
+   * Read here rather than carried on the job, because a transfer is its own
+   * record with its own dates and can be closed without the job row changing
+   * at all. Failing to load it costs a badge and nothing else, so it never
+   * blocks the list.
+   */
+  const [openTransfers, setOpenTransfers] = useState<AgentTransfer[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    fetchOpenTransfers()
+      .then(rows => { if (live) setOpenTransfers(rows); })
+      .catch(() => { /* the badge is a nicety; a failed lookup must not empty the table */ });
+    return () => { live = false; };
+  }, []);
+
+  /** The open transfer for a job, if the device is out at an agent. */
+  const atAgent = (jobId: string) => openTransfers.find(t => t.jobId === jobId);
+
   const [priorityFilter, setPriorityFilter] = useState("All");
   const [brandFilter,    setBrandFilter]    = useState("All");
   const [dealerFilter,   setDealerFilter]   = useState("All");
@@ -2466,7 +2516,7 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
             <div style={{ position: "relative", flex: 1 }}>
               <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: searchFocused ? "var(--accent)" : "var(--text-muted)", transition: "color 0.18s", pointerEvents: "none" }} />
               <input value={search} onChange={(e) => setSearch(e.target.value)} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
-                placeholder="Search by name, ID, device..."
+                placeholder="Job no., dealer no., name, device…"
                 style={{ width: "100%", background: "var(--bg-card)", border: `1px solid ${searchFocused ? "var(--accent)" : "var(--border)"}`, borderRadius: 10, padding: "10px 14px 10px 36px", fontSize: 13.5, color: "var(--text-primary)", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "border-color 0.18s" }} />
             </div>
             {/* Daily/Weekly/Monthly — booked-date range, Issued & Non-Issued only for now. */}
@@ -2560,6 +2610,28 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
         </div>
       )}
 
+      {/* ── Devices out at an outside workshop ────────────────────────────
+          A panel rather than only a badge on the rows, because "which of our
+          phones are not in the building, with who, and since when" is a
+          question about the set, not about any one job. Answering it off the
+          table meant reading every row looking for a purple badge.
+
+          Fed from allJobs rather than the filtered list: it answers what is
+          out of the building, and a search for one customer's name must not
+          make the other eleven phones look like they came back.
+
+          Only on the tabs where live work lives. On Issued or Cancelled it
+          would be a panel about devices that have nothing to do with the list
+          underneath it. */}
+      {["New", "Not Started", "Started", "Pending", "All"].includes(view) && (
+        <AgentsOutPanel
+          transfers={openTransfers}
+          jobs={allJobs}
+          onOpenJob={setDetailsJob}
+          footnote="A device is marked back in from the technician's job list, where it was sent out."
+        />
+      )}
+
       {/* Table — bounded to the remaining space; the header row stays pinned
           via position: sticky rather than scrolling out of view with the
           rows. On Issued/Non-Issued, the totals table below is a genuinely
@@ -2627,6 +2699,7 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, background: meta.bg, border: `1px solid ${meta.border}`, color: meta.color, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
                               <StatusIcon size={9} strokeWidth={2.5} />{label}
                             </span>
+                            {agentBadge(atAgent(job.id))}
                             {outcomeBadge(job)}
                           </div>
                         ) : COLUMNS[id].render(job)}

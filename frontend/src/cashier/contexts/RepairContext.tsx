@@ -368,6 +368,18 @@ interface RepairContextValue {
   claimJob: (id: string, technician: string) => Promise<ClaimResult>;
   dealers: RepairDealer[];
   setDealers: Dispatch<SetStateAction<RepairDealer[]>>;
+  /**
+   * Save one dealer and say whether it worked.
+   *
+   * setDealers cannot: it has useState's shape, so it returns nothing and the
+   * write it starts finishes long after the caller has moved on. Admin Control
+   * was announcing "Dealer added" the moment the modal closed, and a write
+   * refused by the database — which is what happened to every cashier, because
+   * the registry was Admin-only — reverted the row a second later with nothing
+   * said. Saved, then gone, and no reason given anywhere.
+   */
+  saveDealer: (dealer: RepairDealer) => Promise<{ ok: boolean; error?: string }>;
+  removeDealer: (id: number) => Promise<{ ok: boolean; error?: string }>;
   /** True while the first load is in flight. */
   loading: boolean;
   /** Last backend error, for surfacing in the UI. */
@@ -385,6 +397,8 @@ const RepairContext = createContext<RepairContextValue>({
   claimJob: async () => "error",
   dealers: [],
   setDealers: () => {},
+  saveDealer: async () => ({ ok: true }),
+  removeDealer: async () => ({ ok: true }),
   loading: false,
   error: null,
   refresh: async () => {},
@@ -622,11 +636,57 @@ export function RepairProvider({ children }: { children: ReactNode }) {
     })();
   }, [configured]);
 
+  /**
+   * The awaited half of setDealers.
+   *
+   * Writes first and only then updates what is on screen, so a refusal never
+   * shows as a row that existed for a moment. The list is re-read afterwards
+   * rather than patched locally, because the database assigns the id and the
+   * defaults.
+   */
+  const saveDealer = useCallback(async (dealer: RepairDealer) => {
+    if (!configured) {
+      setDealersState(prev => prev.some(d => d.id === dealer.id)
+        ? prev.map(d => (d.id === dealer.id ? dealer : d))
+        : [...prev, dealer]);
+      return { ok: true };
+    }
+    try {
+      await upsertDealer(dealer);
+      const fresh = await fetchDealers();
+      dealersRef.current = fresh;
+      setDealersState(fresh);
+      return { ok: true };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      return { ok: false, error: message };
+    }
+  }, [configured]);
+
+  const removeDealer = useCallback(async (id: number) => {
+    if (!configured) {
+      setDealersState(prev => prev.filter(d => d.id !== id));
+      return { ok: true };
+    }
+    try {
+      await deleteDealer(id);
+      const fresh = await fetchDealers();
+      dealersRef.current = fresh;
+      setDealersState(fresh);
+      return { ok: true };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      return { ok: false, error: message };
+    }
+  }, [configured]);
+
   const value = useMemo<RepairContextValue>(() => ({
-    jobs, addJob, updateJob, claimJob, dealers, setDealers,
+    jobs, addJob, updateJob, claimJob, dealers, setDealers, saveDealer, removeDealer,
     loading, error, refresh: load,
     backend: configured ? "supabase" : "local",
-  }), [jobs, addJob, updateJob, claimJob, dealers, setDealers, loading, error, load, configured]);
+  }), [jobs, addJob, updateJob, claimJob, dealers, setDealers, saveDealer, removeDealer, loading, error, load, configured]);
 
   return <RepairContext.Provider value={value}>{children}</RepairContext.Provider>;
 }

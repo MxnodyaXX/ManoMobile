@@ -88,7 +88,12 @@ export async function saveAgent(agent: Partial<RepairAgent> & { name: string }):
 }
 
 export async function deleteAgent(id: number): Promise<void> {
-  const { error } = await getSupabaseBrowserClient().from("repair_agents").delete().eq("id", id);
+  // .select(), because a delete the row-level policy refuses is not an error —
+  // it matches nothing and reports success. Asking for the deleted rows back is
+  // the only way to tell "removed" from "not allowed to remove".
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("repair_agents").delete().eq("id", id).select("id");
+
   // An agent with transfers against it is protected by the FK — say why.
   if (error) {
     throw new Error(
@@ -96,6 +101,9 @@ export async function deleteAgent(id: number): Promise<void> {
         ? "This agent has repair transfers recorded against it. Mark them inactive instead of deleting."
         : `Could not delete the agent: ${error.message}`,
     );
+  }
+  if (!data || data.length === 0) {
+    throw new Error("The agent was not removed — your account may not have permission to change the agent registry.");
   }
 }
 

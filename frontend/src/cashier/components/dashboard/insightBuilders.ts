@@ -153,8 +153,15 @@ export function repairIncomeInsight(jobs: RepairJob[], period: string): InsightS
     summary.push({ label: "Repairs billed", value: rs(billed) });
     summary.push({ label: "Cash returns", value: `(${rs(returned)})`, hint: "paid back" });
   }
-  summary.push({ label: "Paid", value: rs(paid) });
-  summary.push({ label: "Outstanding", value: rs(net - paid), hint: net - paid > 0 ? "still to collect" : "settled" });
+  // Money in and money still owed are the two figures anybody opens this for,
+  // so they are the two that get a colour.
+  summary.push({ label: "Paid", value: rs(paid), tone: "good" });
+  summary.push({
+    label: "Outstanding",
+    value: rs(net - paid),
+    hint: net - paid > 0 ? "still to collect" : "settled",
+    tone: net - paid > 0 ? "warn" : "good",
+  });
 
   return {
     title: "Repair Income",

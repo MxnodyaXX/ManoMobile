@@ -71,13 +71,24 @@ const SLA_CFG = {
 
 // "Available" is not one of my jobs — it lists unclaimed work offered to every
 // technician, so it is handled separately from the status filters below.
-type FilterTab = "Available" | "All" | "Active" | "Paused" | "Not Started" | "Completed";
-const FILTER_TABS: FilterTab[] = ["Available", "All", "Active", "Paused", "Not Started", "Completed"];
+//
+// "At an Agent" is not a status either. A device sent out to an outside
+// workshop parks as Pending, because that is what it is from the bench's point
+// of view — nobody here is touching it. But "paused" and "in another man's
+// hands" are two different problems: one is waiting on a part or a decision and
+// can be picked back up this afternoon, the other is physically not in the
+// building. Mixed together, the row that has to be chased by phone looks
+// exactly like the row that needs five minutes.
+type FilterTab = "Available" | "All" | "Active" | "At an Agent" | "Paused" | "Not Started" | "Completed";
+const FILTER_TABS: FilterTab[] = ["Available", "All", "Active", "At an Agent", "Paused", "Not Started", "Completed"];
 
 const STATUS_FOR_FILTER: Record<FilterTab, JobStatus[]> = {
   "Available":   ["Non-Issued"],
   "All":         ["Non-Issued", "Issued", "Pending", "Completed"],
   "Active":      ["Issued"],
+  // A device can be sent out from any of the three live states, so this tab is
+  // decided by the open transfer rather than by the status.
+  "At an Agent": ["Non-Issued", "Issued", "Pending"],
   "Paused":      ["Pending"],
   "Not Started": ["Non-Issued"],
   "Completed":   ["Completed"],
@@ -277,6 +288,9 @@ export default function MyJobs() {
   const myJobs = jobs.filter(j => j.technician === technicianName);
   const activeJob = myJobs.find(j => j.status === "Issued");
 
+  /** The open transfer for a job, if the device is currently out at an agent. */
+  const atAgent = (jobId: string) => openTransfers.find(t => t.jobId === jobId);
+
   // Jobs taken in without a technician: every technician sees these until one
   // of them starts it, at which point it becomes theirs alone.
   const availableJobs = jobs.filter(isClaimable);
@@ -285,8 +299,12 @@ export default function MyJobs() {
     if (priorityFilter !== "All" && j.priority !== priorityFilter) return false;
     if (search) {
       const q = search.toLowerCase();
-      if (!j.id.toLowerCase().includes(q) && !j.model.toLowerCase().includes(q) &&
+      // Both numbers: ours and the dealer's. A dealer job carries two, and the
+      // one anybody quotes down the phone is usually theirs.
+      if (!j.id.toLowerCase().includes(q) && !(j.dealerJobNo ?? "").toLowerCase().includes(q) &&
+          !j.model.toLowerCase().includes(q) &&
           !j.brand.toLowerCase().includes(q) && !j.customerName.toLowerCase().includes(q) &&
+          !(j.imei ?? "").includes(search) &&
           !j.issue.toLowerCase().includes(q)) return false;
     }
     return true;
@@ -294,11 +312,22 @@ export default function MyJobs() {
 
   const filtered = myJobs.filter(j => {
     if (!STATUS_FOR_FILTER[filterTab].includes(j.status)) return false;
+    // One row, one tab. A device at an agent lists under "At an Agent" and
+    // nowhere else among the working states — otherwise it sits in Paused as
+    // well and the tab counts add up to more jobs than the bench has. "All"
+    // still shows everything, because that is what All means.
+    const out = !!atAgent(j.id);
+    if (filterTab === "At an Agent" && !out) return false;
+    if (out && ["Active", "Paused", "Not Started"].includes(filterTab)) return false;
     if (priorityFilter !== "All" && j.priority !== priorityFilter) return false;
     if (search) {
       const q = search.toLowerCase();
-      if (!j.id.toLowerCase().includes(q) && !j.model.toLowerCase().includes(q) &&
+      // Both numbers: ours and the dealer's. A dealer job carries two, and the
+      // one anybody quotes down the phone is usually theirs.
+      if (!j.id.toLowerCase().includes(q) && !(j.dealerJobNo ?? "").toLowerCase().includes(q) &&
+          !j.model.toLowerCase().includes(q) &&
           !j.brand.toLowerCase().includes(q) && !j.customerName.toLowerCase().includes(q) &&
+          !(j.imei ?? "").includes(search) &&
           !j.issue.toLowerCase().includes(q)) return false;
     }
     return true;
@@ -321,9 +350,10 @@ export default function MyJobs() {
   const tabCounts: Record<FilterTab, number> = {
     "Available":   availableJobs.length,
     "All":         myJobs.filter(j => STATUS_FOR_FILTER["All"].includes(j.status)).length,
-    "Active":      myJobs.filter(j => j.status === "Issued").length,
-    "Paused":      myJobs.filter(j => j.status === "Pending").length,
-    "Not Started": myJobs.filter(j => j.status === "Non-Issued").length,
+    "Active":      myJobs.filter(j => j.status === "Issued" && !atAgent(j.id)).length,
+    "At an Agent": myJobs.filter(j => !!atAgent(j.id) && STATUS_FOR_FILTER["At an Agent"].includes(j.status)).length,
+    "Paused":      myJobs.filter(j => j.status === "Pending" && !atAgent(j.id)).length,
+    "Not Started": myJobs.filter(j => j.status === "Non-Issued" && !atAgent(j.id)).length,
     "Completed":   myJobs.filter(j => j.status === "Completed").length,
   };
 
@@ -335,9 +365,6 @@ export default function MyJobs() {
     borderRadius: 8, padding: "8px 12px", fontSize: 12.5,
     color: "var(--text-primary)", fontFamily: ff, outline: "none",
   };
-
-  /** The open transfer for a job, if the device is currently out at an agent. */
-  const atAgent = (jobId: string) => openTransfers.find(t => t.jobId === jobId);
 
   /**
    * Bring a device back from an external agent: close the open transfer and put
@@ -462,7 +489,7 @@ export default function MyJobs() {
         <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
           <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
           <input
-            placeholder="Search jobs, device, customer…"
+            placeholder="Job no., dealer no., device, customer…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={{ ...inputStyle, width: "100%", paddingLeft: 32 }}
@@ -542,12 +569,15 @@ export default function MyJobs() {
                 <td colSpan={8} style={{ padding: "48px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 13, fontFamily: ff }}>
                   {filterTab === "Available"
                     ? "No unassigned jobs waiting — everything has a technician."
+                    : filterTab === "At an Agent"
+                    ? "Nothing is out at an outside workshop — every device is in the shop."
                     : "No jobs match your filters."}
                 </td>
               </tr>
             ) : listed.map((job, i) => {
               const sCfg = STATUS_CFG[job.status];
               const pCfg = PRIORITY_CFG[job.priority];
+              const out  = atAgent(job.id);
               const qa   = getQuickAction(job);
               const isExpanded = expandedId === job.id;
 
@@ -615,9 +645,25 @@ export default function MyJobs() {
 
                     {/* Status + SLA */}
                     <td style={{ padding: "11px 14px" }}>
-                      <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 6, color: sCfg.color, background: sCfg.bg, border: `1px solid ${sCfg.border}`, whiteSpace: "nowrap", fontFamily: ff }}>
-                        {sCfg.label}
-                      </span>
+                      {/* Out at an agent overrides the status word. "Paused" is
+                          true but useless here — it does not say the device is
+                          a mile away, and that is the one fact that changes
+                          what anybody does about it. */}
+                      {out ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 6, color: "#a78bfa", background: "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.28)", whiteSpace: "nowrap", fontFamily: ff }}>
+                          <Building2 size={10} />At {out.agentName ?? "an agent"}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 6, color: sCfg.color, background: sCfg.bg, border: `1px solid ${sCfg.border}`, whiteSpace: "nowrap", fontFamily: ff }}>
+                          {sCfg.label}
+                        </span>
+                      )}
+                      {out && (
+                        <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff, marginTop: 3 }}>
+                          Sent {new Date(out.sentAt).toLocaleDateString()}
+                          {out.expectedReturn ? ` · due back ${new Date(out.expectedReturn).toLocaleDateString()}` : ""}
+                        </p>
+                      )}
                       {(() => {
                         const sla = getSlaStatus(job);
                         if (sla === "ok") return null;
@@ -859,17 +905,25 @@ export default function MyJobs() {
           technicianName={technicianName}
           onClose={() => setTransferJob(null)}
           onTransferred={(agentName, reason) => {
-            // The job stays with this technician but parks as Paused while the
+            // The job stays with this technician but parks as Pending while the
             // device is out of the shop, so the counter can see where it is.
             updateJob(transferJob.id, {
               status: "Pending",
               pauseReason: `At external agent: ${agentName} — ${reason}`,
               pausedAt: new Date().toISOString().slice(0, 10),
             });
+            // Re-read the open transfers rather than guessing the new row.
+            // "At an Agent" is decided by this list, so without it the job the
+            // technician just sent out would be missing from the tab named
+            // after exactly that until the page was reloaded.
+            void fetchOpenTransfers()
+              .then(setOpenTransfers)
+              .catch(() => { /* the tab fills on the next load; never block the queue */ });
             setClaimNotice({
               kind: "ok",
-              text: `${transferJob.id} sent to ${agentName}. It stays in your queue as Paused until it comes back.`,
+              text: `${transferJob.id} sent to ${agentName} — find it under "At an Agent" until it comes back.`,
             });
+            setFilterTab("At an Agent");
           }}
         />
       )}

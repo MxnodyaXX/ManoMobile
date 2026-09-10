@@ -23,6 +23,7 @@ import InternalNotesModal from "@/technician/components/jobs/InternalNotesModal"
 import EscalationModal from "@/technician/components/jobs/EscalationModal";
 import CustomerMessageModal from "@/technician/components/jobs/CustomerMessageModal";
 import TransferAgentModal from "@/technician/components/jobs/TransferAgentModal";
+import { fetchOpenTransfers, type AgentTransfer } from "@/lib/repair/agents";
 import JobInfoModal from "@/technician/components/jobs/JobInfoModal";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -43,9 +44,9 @@ const ff = "'Plus Jakarta Sans', sans-serif";
 
 type ModalKind = Exclude<BenchAction, "start" | "resume">;
 
-type SectionKey = "progress" | "todo" | "pool" | "waiting" | "ready";
+type SectionKey = "progress" | "todo" | "pool" | "agent" | "waiting" | "ready";
 
-interface Buckets { inProgress: RepairJob[]; toDo: RepairJob[]; pool: RepairJob[]; waiting: RepairJob[]; ready: RepairJob[] }
+interface Buckets { inProgress: RepairJob[]; toDo: RepairJob[]; pool: RepairJob[]; atAgent: RepairJob[]; waiting: RepairJob[]; ready: RepairJob[] }
 
 const COLUMNS: {
   key: SectionKey; title: string; tint?: string; empty: string;
@@ -58,6 +59,12 @@ const COLUMNS: {
   // which will still be theirs in an hour.
   { key: "pool",     title: "Available to claim", tint: "#a78bfa", empty: "Nothing unassigned", pick: b => b.pool },
   { key: "todo",     title: "To start",    tint: undefined, empty: "Nothing waiting",     pick: b => b.toDo },
+  // Carved out of Waiting, and sitting directly above it so the relationship
+  // is obvious. Both are "nobody is working on this", but only one of them can
+  // be picked back up today: the other is in another man's workshop, and the
+  // only thing that moves it is a phone call. Mixed together, the job that
+  // needs chasing looked exactly like the job that needs five minutes.
+  { key: "agent",    title: "On agent's hand", tint: "#a78bfa", empty: "Nothing out of the shop", pick: b => b.atAgent },
   { key: "waiting",  title: "Waiting",     tint: "#fbbf24", empty: "Nothing on hold",     pick: b => b.waiting },
   { key: "ready",    title: "Finished",    tint: "#60a5fa", empty: "Nothing to collect",  pick: b => b.ready },
 ];
@@ -77,7 +84,7 @@ export default function MyBench() {
   // Finished work starts folded: it is the only section the technician has
   // nothing left to do about, and on a busy bench it is also the longest.
   const [sectionOpen, setSectionOpen] = useState<Record<SectionKey, boolean>>({
-    progress: true, pool: true, todo: true, waiting: true, ready: false,
+    progress: true, pool: true, todo: true, agent: true, waiting: true, ready: false,
   });
   // One filter for the whole bench. It was per section, which is fine at six
   // jobs and useless at fifty: looking for one job number means searching
@@ -140,6 +147,35 @@ export default function MyBench() {
     j.status === "Completed" || j.status === "Delivered" || (!!j.completedAt && !!j.completionType);
 
   /**
+   * The devices that are physically not in the shop.
+   *
+   * Read from the transfers rather than from the job, because a transfer is
+   * its own record: it carries who has it, since when, and when they said it
+   * would be back, and it can be closed without the job row changing at all.
+   * The job only ever knew it was Pending, which is why a phone at an agent
+   * was indistinguishable from a phone waiting on a battery.
+   *
+   * A failed lookup costs this one section and nothing else — the bench still
+   * lists the work, the way it did before any of this existed.
+   */
+  const [openTransfers, setOpenTransfers] = useState<AgentTransfer[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    void reloadTransfers(live);
+    return () => { live = false; };
+  }, []);
+
+  async function reloadTransfers(live = true) {
+    try {
+      const rows = await fetchOpenTransfers();
+      if (live) setOpenTransfers(rows);
+    } catch { /* the section is a nicety; never take the bench down with it */ }
+  }
+
+  const isAtAgent = (jobId: string) => openTransfers.some(t => t.jobId === jobId);
+
+  /**
    * Repairs with no technician on them.
    *
    * The bench only ever showed `j.technician === me`, so a job booked in
@@ -158,9 +194,15 @@ export default function MyBench() {
         .sort(byOldest)
     : [];
 
-  const inProgress = scoped.filter(j => j.status === "Issued"     && !isFinished(j)).sort(byOldest);
-  const toDo       = scoped.filter(j => j.status === "Non-Issued" && !isFinished(j)).sort(byOldest);
-  const waiting    = scoped.filter(j => j.status === "Pending"    && !isFinished(j)).sort(byOldest);
+  // One job, one bucket — the toolbar's "n of m" and the pill counts both add
+  // the sections up, so a job in two places would be a bench that claims more
+  // work than it has. Out at an agent wins over every live status: it says
+  // where the phone is, and the others only say what was last done to it.
+  const out        = (j: RepairJob) => isAtAgent(j.id) && !isFinished(j);
+  const inProgress = scoped.filter(j => j.status === "Issued"     && !isFinished(j) && !out(j)).sort(byOldest);
+  const toDo       = scoped.filter(j => j.status === "Non-Issued" && !isFinished(j) && !out(j)).sort(byOldest);
+  const atAgent    = scoped.filter(out).sort(byOldest);
+  const waiting    = scoped.filter(j => j.status === "Pending"    && !isFinished(j) && !out(j)).sort(byOldest);
   const ready      = scoped.filter(j => j.status !== "Delivered"  &&  isFinished(j)).sort(byOldest);
 
   // One interval for the whole screen rather than one per card: a bench with
@@ -285,7 +327,7 @@ export default function MyBench() {
   const pendingFor = (jobId: string) =>
     partRequests.filter(r => r.jobId === jobId && r.status === "Pending").length;
 
-  const buckets: Buckets = { inProgress, toDo, pool: unassigned, waiting, ready };
+  const buckets: Buckets = { inProgress, toDo, pool: unassigned, atAgent, waiting, ready };
   // Everything on the bench, for the toolbar's dealer/brand lists and its
   // "n of m" count. A job can only sit in one bucket, so this does not
   // double-count.
@@ -627,7 +669,12 @@ export default function MyBench() {
               pauseReason: `At external agent: ${agentName} — ${reason}`,
               pausedAt: new Date().toISOString().slice(0, 10),
             });
-            setNotice(`${openJob.id} sent to ${agentName}. It stays on your bench as Waiting until it comes back.`);
+            // Re-read the transfers rather than guessing the new row: this
+            // list is what decides the section, so without it the job the
+            // technician just sent out would stay under Waiting until the
+            // page was reloaded — under the very heading this replaced.
+            void reloadTransfers();
+            setNotice(`${openJob.id} sent to ${agentName}. It is now under "On agent's hand" until it comes back.`);
             setModal(null);
           }}
         />

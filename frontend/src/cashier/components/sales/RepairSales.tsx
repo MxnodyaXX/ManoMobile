@@ -31,6 +31,15 @@ interface CompletedRepair {
   /** The number recorded on the job. Carried through so the invoice can take
    *  the customer straight off the repair rather than have it retyped. */
   phone?: string;
+  /**
+   * The number on the originating dealer's own docket.
+   *
+   * A dealer rings up about "#5824", not RM-014 — theirs is the number written
+   * on the bag the handset came in, and ours is the one this system uses. A
+   * till that can only be searched by ours makes the person at the counter
+   * translate before they can look anything up.
+   */
+  dealerJobNo?: string;
   /** Handed over already, but never billed — see invoiceable. */
   uninvoiced?: boolean;
   /**
@@ -495,7 +504,12 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
                   <tr key={r.id}>
                     <td style={invTd}>{i + 1}.</td>
                     <td style={invTd}>{back > 0 ? "Cash Return" : "Repair"}</td>
-                    <td style={invTd}>{r.id} | {r.brand} | {r.model}</td>
+                    {/* The dealer's own number first where there is one: the
+                        person checking this invoice is checking it against
+                        their book, and theirs is the number in it. */}
+                    <td style={invTd}>
+                      {r.dealerJobNo ? `#${r.dealerJobNo} | ` : ""}{r.id} | {r.brand} | {r.model}
+                    </td>
                     <td style={invTd}>{r.imei || "—"}</td>
                     <td style={invTd}>{back > 0 ? "—" : r.warranty}</td>
                     <td style={{ ...invTd, textAlign: "right" as const }}>1</td>
@@ -781,6 +795,7 @@ export default function RepairSales({ initialDealer, initialJobId }: {
         dealer: findDealer(dealers, j)?.name ?? j.dealer ?? "",
         customerName: j.customerName,
         phone: j.phone,
+        dealerJobNo: j.dealerJobNo,
         unidentifiedReason: j.deviceUnidentifiedReason ?? null,
         uninvoiced: j.status === "Delivered" && !j.invoiceNo,
         brand: j.brand,
@@ -819,6 +834,7 @@ export default function RepairSales({ initialDealer, initialJobId }: {
   const dealerRepairs = invoiceable.filter(r =>
     !!selectedDealer && dealerKey(dealers, r.dealer) === dealerKey(dealers, selectedDealer) &&
     (!search || r.id.toLowerCase().includes(q) ||
+      (r.dealerJobNo ?? "").toLowerCase().includes(q) ||
       r.brand.toLowerCase().includes(q) ||
       r.model.toLowerCase().includes(q) ||
       r.imei.includes(search) ||
@@ -1471,7 +1487,7 @@ export default function RepairSales({ initialDealer, initialJobId }: {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by ID, brand, model, IMEI, customer..."
+            placeholder="Job no., dealer no., brand, model, IMEI, customer…"
             disabled={!selectedDealer}
             style={{ width: "100%", padding: "9px 14px 9px 32px", borderRadius: 8, border: "1px solid var(--border)", background: selectedDealer ? "var(--bg-primary)" : "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 12.5, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", opacity: selectedDealer ? 1 : 0.5, boxSizing: "border-box" }}
           />
@@ -1542,8 +1558,25 @@ export default function RepairSales({ initialDealer, initialJobId }: {
                       <td style={{ padding: "11px 14px", textAlign: "center" }}>
                         <input type="checkbox" checked={checked} onChange={() => toggleCheck(r.id)} onClick={(e) => e.stopPropagation()} style={{ accentColor: "var(--accent)", width: 14, height: 14, cursor: "pointer" }} />
                       </td>
+                      {/* Both numbers in the one column, stacked the way Repair
+                          Management stacks them: the dealer's leads, because
+                          that is what gets quoted down the phone and matched
+                          against their docket, and ours sits under it as the
+                          reference this system runs on. A job with no dealer
+                          number just shows ours. */}
                       <td style={{ padding: "11px 14px" }}>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.id}</span>
+                        {r.dealerJobNo ? (
+                          <>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }} title="The dealer's own job number">
+                              #{r.dealerJobNo}
+                            </span>
+                            <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2, fontFamily: "'Plus Jakarta Sans', sans-serif" }} title="Our job number">
+                              {r.id}
+                            </p>
+                          </>
+                        ) : (
+                          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{r.id}</span>
+                        )}
                         {/* Already with the customer. Worth saying plainly:
                             the cashier is billing work that has left the shop,
                             and nothing else on the row would tell them. */}

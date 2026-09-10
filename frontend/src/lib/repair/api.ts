@@ -677,8 +677,19 @@ export async function upsertDealer(dealer: Partial<RepairDealer> & { name: strin
 }
 
 export async function deleteDealer(id: number): Promise<void> {
-  const { error } = await getSupabaseBrowserClient().from("repair_dealers").delete().eq("id", id);
+  // .select(), because a delete the row-level policy refuses is not an error —
+  // it matches nothing and reports success. Asking for the deleted rows back is
+  // the only way to tell "removed" from "not allowed to remove".
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("repair_dealers")
+    .delete()
+    .eq("id", id)
+    .select("id");
+
   if (error) throw new Error(`Could not delete the dealer: ${error.message}`);
+  if (!data || data.length === 0) {
+    throw new Error("The dealer was not removed — your account may not have permission to change the dealer registry.");
+  }
 }
 
 /** Status history for one job, newest first. Written by trigger, read-only here. */

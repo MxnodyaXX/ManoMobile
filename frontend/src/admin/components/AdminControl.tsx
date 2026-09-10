@@ -891,7 +891,7 @@ function DealerModal({ dealer, onSave, onClose }: { dealer: RepairDealer | null;
 // ─── Repair Dealers Manager ───────────────────────────────────────────────────
 
 function DealersManager() {
-  const { dealers, setDealers } = useRepair();
+  const { dealers, saveDealer, removeDealer } = useRepair();
   const toast = useToast();
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<RepairDealer | null | "new">(null);
@@ -953,14 +953,26 @@ function DealersManager() {
         <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{filtered.length} of {dealers.length} dealers</div>
       </div>
 
-      {modal !== null && <DealerModal dealer={modal === "new" ? null : modal} onSave={d => {
+      {/* Announced after the database has agreed, not before. The modal also
+          stays open on a refusal, so the typing is still there to try again
+          with — losing a half-filled form is the second insult after being
+          told something saved when it did not. */}
+      {modal !== null && <DealerModal dealer={modal === "new" ? null : modal} onSave={async d => {
           const isEdit = dealers.some(x => x.id === d.id);
-          setDealers(prev => prev.find(x => x.id === d.id) ? prev.map(x => x.id === d.id ? d : x) : [...prev, d]);
+          const res = await saveDealer(d);
+          if (!res.ok) {
+            toast.dialog("error", "That dealer was not saved", res.error ?? "The database refused the change.");
+            return;
+          }
           toast.dialog("success", isEdit ? "Dealer updated" : "Dealer added", d.name);
           setModal(null);
         }} onClose={() => setModal(null)} />}
-      {deleteTarget && <DeleteConfirm name={deleteTarget.name} onConfirm={() => {
-          setDealers(prev => prev.filter(d => d.id !== deleteTarget.id));
+      {deleteTarget && <DeleteConfirm name={deleteTarget.name} onConfirm={async () => {
+          const res = await removeDealer(deleteTarget.id);
+          if (!res.ok) {
+            toast.dialog("error", "That dealer was not removed", res.error ?? "The database refused the change.");
+            return;
+          }
           toast.dialog("success", "Dealer deleted", `${deleteTarget.name} has been removed from the registry.`);
           setDeleteTarget(null);
         }} onClose={() => setDeleteTarget(null)} />}
