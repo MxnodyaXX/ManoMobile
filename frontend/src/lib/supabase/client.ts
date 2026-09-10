@@ -1,28 +1,97 @@
 "use client";
 
-import { createBrowserClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
+import type { createBrowserClient } from "@supabase/ssr";
+import { tabSessionStorage, TAB_STORAGE_KEY } from "@/lib/supabase/tabSession";
 
 /**
  * The browser Supabase client.
  *
- * Uses @supabase/ssr rather than plain supabase-js so the session lives in
- * cookies instead of localStorage — that is what lets `proxy.ts` (this Next
- * version's rename of middleware) see whether a request is signed in and bounce
- * it to /login before the page renders.
+ * This used to be createBrowserClient from @supabase/ssr, which keeps the
+ * session in cookies so proxy.ts could see it. Cookies belong to the browser,
+ * not to the tab, and that turned out to be the wrong shape for this shop: one
+ * cookie jar meant one login, so a second tab opened as the technician dragged
+ * the till tab along with it mid-invoice.
  *
- * One instance per tab: createBrowserClient memoises internally, but keeping a
- * module-level singleton avoids re-subscribing auth listeners on every render.
+ * The session now lives in sessionStorage — per tab, by definition — through
+ * the adapter in tabSession.ts. Every tab is its own seat, and the same Chrome
+ * can hold the counter, the bench and Admin Control open at once.
+ *
+ * What that costs, and where it went instead:
+ *   · proxy.ts can no longer read the session, because there is no cookie to
+ *     read. It never was the real gate — RLS is — so the redirect for signed-out
+ *     staff moved to <RequireSignIn> on the client.
+ *   · Route handlers that need to know who is calling can no longer read a
+ *     cookie either. They take an Authorization: Bearer header now, sent by
+ *     authedFetch, which is a truer answer anyway: it is the calling tab's
+ *     session rather than whichever one wrote the cookie last.
  */
-let browserClient: ReturnType<typeof createBrowserClient> | undefined;
+/**
+ * The client type this file used to hand out, preserved exactly.
+ *
+ * createBrowserClient is an overloaded declaration, and ReturnType over
+ * overloads with unresolved generics collapses to something very loose — which
+ * is why the whole app can write `data as SomeRow[]` after a .select() built
+ * from a runtime column string, and why nobody had to describe the shape of a
+ * storage response.
+ *
+ * That looseness is not a virtue, but tightening it is a refactor of a hundred
+ * call sites in files that have nothing to do with sessions. Moving the session
+ * out of cookies should change where the session is kept and nothing else, so
+ * the old type is imported (type-only — no cookie code is bundled) and kept.
+ *
+ * Generating real Database types is the proper fix, and its own job.
+ */
+type BrowserClient = ReturnType<typeof createBrowserClient>;
+
+let browserClient: BrowserClient | undefined;
 
 export function getSupabaseBrowserClient() {
   if (!browserClient) {
-    browserClient = createBrowserClient(
+    browserClient = createClient(
       requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
       requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+      {
+        auth: {
+          storage: tabSessionStorage,
+          storageKey: TAB_STORAGE_KEY,
+          persistSession: true,
+          autoRefreshToken: true,
+          // Nothing in this app signs in through a link with a token in the
+          // URL, and leaving it on makes every page load parse the hash.
+          detectSessionInUrl: false,
+        },
+      },
     );
   }
   return browserClient;
+}
+
+/**
+ * The calling tab's access token, for our own API routes.
+ *
+ * Returns null when signed out, which the routes treat as "sign in first".
+ */
+export async function getAccessToken(): Promise<string | null> {
+  if (!isSupabaseConfigured()) return null;
+  const { data } = await getSupabaseBrowserClient().auth.getSession();
+  return data.session?.access_token ?? null;
+}
+
+/**
+ * fetch, with this tab's session attached.
+ *
+ * Every call to one of our own route handlers goes through here. The session
+ * used to travel on its own as a cookie; now it has to be carried explicitly,
+ * and being explicit is the point — the token is the one belonging to the tab
+ * that clicked the button, so an SMS sent from the till is recorded against the
+ * cashier even while a technician is signed in one tab over.
+ */
+export async function authedFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const token = await getAccessToken();
+  const headers = new Headers(init.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return fetch(input, { ...init, headers });
 }
 
 /**

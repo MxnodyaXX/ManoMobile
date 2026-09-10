@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { claimSeed } from "@/lib/supabase/tabSession";
 
 export type StaffRole = "Admin" | "Cashier" | "Technician" | "Accounts";
 
@@ -92,7 +93,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (active) setLoading(false);
     });
 
-    // Keeps every tab in step: signing out in one signs out the rest.
+    // Within this tab only. Sessions are per-tab now, so signing in as the
+    // technician next door no longer reaches in here and changes who the till
+    // thinks it is — which is the entire point of the change.
     const { data: sub } = supabase.auth.onAuthStateChange(async (_event: string, session: Session | null) => {
       if (!active) return;
       setUser(session?.user ?? null);
@@ -110,6 +113,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const supabase = getSupabaseBrowserClient();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error: error.message };
+
+    // A deliberate sign-in is what a new tab should inherit, so this tab takes
+    // over the seed. Only on sign-in, never on a token refresh: otherwise the
+    // seed would drift to whichever open tab renewed last, and opening a new
+    // tab would land on an unpredictable one of the roles already on screen.
+    claimSeed();
 
     // Stamp the sign-in so Admin Control's "Last Login" column means something.
     const { data } = await supabase.auth.getUser();
@@ -139,19 +148,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const supabase = getSupabaseBrowserClient();
     const { error } = await supabase.auth.setSession(payload.session);
     if (error) return { error: error.message, role: null };
+    claimSeed();
 
-    // Read it straight back before the caller navigates. proxy.ts checks the
-    // cookie on the very next request, and a navigation that overtakes the
-    // cookie write lands back on the login screen looking like a failure.
+    // Read it straight back before the caller navigates: a screen that renders
+    // before the session has landed sees nobody signed in and bounces to the
+    // login screen, which looks exactly like a wrong password.
     const { data: check } = await supabase.auth.getUser();
-    if (!check.user) return { error: "Signed in, but the session did not stick. Check that cookies are enabled and try again.", role: null };
+    if (!check.user) return { error: "Signed in, but the session did not stick. Check that this browser allows site data, and try again.", role: null };
 
     return { error: null, role: payload.role ?? null };
   };
 
   const signOut = async () => {
     if (!isSupabaseConfigured()) return;
-    await getSupabaseBrowserClient().auth.signOut();
+    // scope: "local" — this tab, not every device this person is signed in on.
+    // A cashier closing their till should not sign the same account out of the
+    // workshop tablet, and the default would.
+    // Clearing the stored session runs through the tab storage adapter, which
+    // drops the seed too — but only if this tab is the one that owns it. A
+    // second tab signing out must not stop new tabs inheriting the till that
+    // is still signed in next door.
+    await getSupabaseBrowserClient().auth.signOut({ scope: "local" });
     setUser(null);
     setProfile(null);
   };

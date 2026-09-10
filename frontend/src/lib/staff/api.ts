@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { authedFetch } from "@/lib/supabase/client";
 
 /**
  * The staff directory — the `profiles` table.
@@ -107,7 +108,7 @@ export interface NewStaffInput {
  */
 export async function createStaff(input: NewStaffInput): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await fetch("/api/staff", {
+    const res = await authedFetch("/api/staff", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
@@ -128,7 +129,7 @@ export async function createStaff(input: NewStaffInput): Promise<{ ok: boolean; 
  */
 export async function setStaffPassword(profileId: string, password: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await fetch("/api/staff/password", {
+    const res = await authedFetch("/api/staff/password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ profileId, password }),

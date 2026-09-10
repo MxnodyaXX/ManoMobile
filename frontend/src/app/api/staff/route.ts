@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { getCaller } from "@/lib/supabase/server";
 
 /**
  * POST /api/staff — create a staff login.
@@ -38,8 +38,10 @@ export async function POST(request: Request) {
   }
 
   // ── Gate 1: signed in ──
-  const supabase = await getSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  // Who is calling comes from the request's own bearer token, not a cookie:
+  // several roles can be signed in across several tabs, and the answer has to
+  // be the tab that clicked, not whichever one signed in last.
+  const { supabase, user } = await getCaller(request);
   if (!user) return Response.json({ ok: false, error: "Sign in first." }, { status: 401 });
 
   // ── Gate 2: an Admin ──

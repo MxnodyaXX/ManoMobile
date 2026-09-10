@@ -790,7 +790,13 @@ export async function signedPhotoUrls(paths: string[], expiresInSeconds = 3600):
     console.error("Could not sign intake photo URLs:", error.message);
     return [];
   }
-  return (data ?? []).map((d: { signedUrl: string }) => d.signedUrl).filter(Boolean);
+  // createSignedUrls reports per path: a row whose object is missing comes back
+  // with signedUrl null and its own error, while the call as a whole succeeds.
+  // This was annotated as always-a-string and leant on filter(Boolean) to tidy
+  // up after itself, which worked but told the next reader the wrong thing.
+  return (data ?? [])
+    .map((d: { signedUrl: string | null }) => d.signedUrl)
+    .filter((u: string | null): u is string => !!u);
 }
 
 // ─── Dealer job-number clashes ───────────────────────────────────────────────

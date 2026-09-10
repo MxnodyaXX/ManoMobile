@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { ThemeProvider } from "@/lib/ui/theme";
 import { AuthProvider } from "@/lib/auth/AuthContext";
+import RequireSignIn from "@/lib/auth/RequireSignIn";
 import { ToastProvider } from "@/lib/ui/toast";
 import AppearanceProvider from "@/lib/settings/AppearanceProvider";
 import NumberInputGuards from "@/lib/ui/NumberInputGuards";
@@ -26,7 +27,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider>
           <AuthProvider>
             <AppearanceProvider>
-              <ToastProvider>{children}</ToastProvider>
+              {/* Inside AuthProvider, because it is the only thing that knows
+                  whether this tab has anybody in it. See RequireSignIn. */}
+              <ToastProvider>
+                <RequireSignIn>{children}</RequireSignIn>
+              </ToastProvider>
             </AppearanceProvider>
           </AuthProvider>
         </ThemeProvider>

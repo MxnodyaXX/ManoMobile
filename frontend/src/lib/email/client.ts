@@ -2,6 +2,7 @@
 
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { JobEmailEvent } from "@/lib/email/templates";
+import { authedFetch } from "@/lib/supabase/client";
 
 /**
  * Browser-side access to customer email: asking the server to send, and
@@ -21,7 +22,7 @@ export interface SendEmailArgs {
 
 export async function sendEmail(args: SendEmailArgs): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await fetch("/api/email/send", {
+    const res = await authedFetch("/api/email/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(args),
