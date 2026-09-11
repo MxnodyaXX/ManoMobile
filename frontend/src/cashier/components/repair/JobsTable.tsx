@@ -490,8 +490,8 @@ const COLUMNS: Record<ColId, ColSpec> = {
   // Rejected ones aren't real cost yet). The info icon opens the line-item
   // breakdown rather than cramming it into the cell.
   partsCost: { label: "Parts Cost", align: "right", render: j => <PartsCostCell job={j} /> },
-  // Parts and labour stacked in one column — see JobCostCell.
-  jobCost: { label: "Parts / Labour", align: "right", render: j => <JobCostCell job={j} /> },
+  // Parts, labour and any outside-workshop charge, stacked — see JobCostCell.
+  jobCost: { label: "Repair Cost", align: "right", render: j => <JobCostCell job={j} /> },
 };
 
 /** Columns per shop-facing view. Anything not listed falls back to DEFAULT_COLS
@@ -650,6 +650,7 @@ function PartsUsedModal({ job, onClose }: { job: RepairJob; onClose: () => void 
  */
 function JobCostCell({ job }: { job: RepairJob }) {
   const { partRequests, parts } = useParts();
+  const { agentCosts } = useRepair();
   const [open, setOpen] = useState(false);
 
   const requests = partRequests.filter(r => r.jobId === job.id);
@@ -658,6 +659,15 @@ function JobCostCell({ job }: { job: RepairJob }) {
   // Only what the technician actually entered. Jobs finished before labour was
   // recorded show a dash rather than a zero, which would read as "free".
   const labour = job.labourCost;
+  /**
+   * What an outside workshop charged for this repair.
+   *
+   * Absent unless the device actually went out, so a repair done entirely
+   * in-house shows two lines rather than three with a zero on the end. Money
+   * paid to an agent is a cost of the repair exactly the way a screen is —
+   * it just leaves by a different door, and it used to leave unrecorded.
+   */
+  const agent = agentCosts[job.id];
 
   const row = (label: string, value: React.ReactNode) => (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, whiteSpace: "nowrap" }}>
@@ -666,7 +676,7 @@ function JobCostCell({ job }: { job: RepairJob }) {
     </div>
   );
 
-  if (requests.length === 0 && labour === undefined) {
+  if (requests.length === 0 && labour === undefined && agent === undefined) {
     return <span style={{ fontSize: 12, color: "var(--text-muted)" }}>—</span>;
   }
 
@@ -693,6 +703,11 @@ function JobCostCell({ job }: { job: RepairJob }) {
             title={labour === undefined ? "Finished before labour was recorded" : undefined}
           >
             {labour === undefined ? "—" : rs(labour)}
+          </span>
+        ))}
+        {agent !== undefined && row("Agent", (
+          <span style={{ ...plain, color: "#a78bfa" }} title="Charged by the outside workshop this device was sent to">
+            {rs(agent)}
           </span>
         ))}
       </div>
@@ -2628,7 +2643,7 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
           transfers={openTransfers}
           jobs={allJobs}
           onOpenJob={setDetailsJob}
-          footnote="A device is marked back in from the technician's job list, where it was sent out."
+          footnote="A device is marked back in on the technician side, under At Repair Agents, with what the agent charged."
         />
       )}
 

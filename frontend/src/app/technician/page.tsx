@@ -13,6 +13,7 @@ import TechNavbar    from "@/technician/components/layout/TechNavbar";
 import MyBench       from "@/technician/components/bench/MyBench";
 import TechDashboard from "@/technician/components/dashboard/TechDashboard";
 import MyJobs        from "@/technician/components/jobs/MyJobs";
+import AgentJobs     from "@/technician/components/agents/AgentJobs";
 import PendingCollection from "@/technician/components/collection/PendingCollection";
 import PartsAvailability from "@/technician/components/parts/PartsAvailability";
 import MyPerformance from "@/technician/components/performance/MyPerformance";
@@ -213,7 +214,7 @@ function TechPageInner() {
   if (!techName) {
     return <TechSelect onSelect={setPicked} />;
   }
-  const MANAGED_PAGES: TechPage[] = ["My Jobs", "Pending Collection", "Parts & Stock", "Job History", "My Performance", "My Shift"];
+  const MANAGED_PAGES: TechPage[] = ["My Jobs", "At Repair Agents", "Pending Collection", "Parts & Stock", "Job History", "My Performance", "My Shift"];
   const isManaged = MANAGED_PAGES.includes(activePage);
 
   return (
@@ -251,6 +252,7 @@ function TechPageInner() {
                 offers them. */}
             {activePage === "Dashboard"          && <TechDashboard />}
             {activePage === "My Jobs"            && <MyJobs />}
+            {activePage === "At Repair Agents"   && <AgentJobs technicianName={techName} />}
             {activePage === "Pending Collection" && <PendingCollection />}
             {activePage === "Parts & Stock"      && <PartsAvailability />}
             {activePage === "Job History"        && <JobHistory techName={techName} />}

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   X, AlertTriangle, Play, Pause, CheckCircle,
-  XCircle, ArrowRight, Shield, CheckSquare, DollarSign, ChevronDown, Wrench,
+  XCircle, ArrowRight, Shield, CheckSquare, DollarSign, ChevronDown, Wrench, Building2,
 } from "lucide-react";
 import { type RepairJob, type JobStatus, type CompletionType, type EstimateApproval, type ApprovalChannel, useRepair, isInHouseDealer } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
@@ -13,6 +13,7 @@ import { useParts } from "@/cashier/contexts/PartsContext";
 import { rulesForTechnician, type EffectiveRules } from "@/lib/settings/staffRules";
 import { labourFromRate, describeRate } from "@/lib/repair/labour";
 import { useToast } from "@/lib/ui/toast";
+import { fetchJobTransfers, transferCost, type AgentTransfer } from "@/lib/repair/agents";
 import { useWarranty, type WarrantyScope } from "@/cashier/contexts/WarrantyContext";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
 
@@ -262,6 +263,39 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
   const partsCost    = jobPartLines.reduce((sum, l) => sum + l.lineTotal, 0);
   const unpricedPart = jobPartLines.some(l => !l.priced);
 
+  /**
+   * What this device cost at an outside workshop, if it went to one.
+   *
+   * Read here rather than passed in, because it is the completion form that
+   * needs it and nowhere else on the bench does. Money already handed to an
+   * agent is spent whatever gets charged for the repair — a technician who
+   * cannot see it prices the job on parts and their own time and gives away
+   * the difference.
+   *
+   * Only returned trips count. A device still out cannot be being completed.
+   */
+  const [agentTrips, setAgentTrips] = useState<AgentTransfer[]>([]);
+  /**
+   * Said out loud rather than swallowed.
+   *
+   * This was a silent catch, on the reasoning that one line of a cost
+   * breakdown must never block a completion. True — but silent also means a
+   * job that went to an agent shows no agent at all and looks like one that
+   * never left the shop, with nothing anywhere to say why. The completion is
+   * still never blocked; the technician is just told the figure is missing.
+   */
+  const [agentError, setAgentError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    fetchJobTransfers(job.id)
+      .then(rows => { if (live) { setAgentTrips(rows.filter(t => t.status === "Returned")); setAgentError(null); } })
+      .catch(e => { if (live) setAgentError(e instanceof Error ? e.message : String(e)); });
+    return () => { live = false; };
+  }, [job.id]);
+
+  const agentCost = agentTrips.reduce((sum, t) => sum + transferCost(t), 0);
+
   // Parts used (prefilled from those same requests) + future faults — both printed on the receipt.
   const installedParts = jobPartLines.map(l => `${l.name}${l.qty > 1 ? ` ×${l.qty}` : ""}`);
   const [partsUsedText, setPartsUsedText] = useState(installedParts.join("\n"));
@@ -321,8 +355,10 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
     : suggestedLabour === null ? "" : String(suggestedLabour);
   const labourCost = Math.max(0, parseFloat(labourValue) || 0);
 
-  // Parts and labour together are what the job actually cost.
-  const jobCost   = partsCost + labourCost;
+  // Parts, labour and any outside workshop together are what the job cost.
+  // The agent's bill used to be missing from this sum, so a repair sent out
+  // could show a healthy margin while the shop was down on it.
+  const jobCost   = partsCost + labourCost + agentCost;
   const jobMargin = revisedNum - jobCost;
   const atALoss   = jobCost > 0 && jobMargin < -0.001;
   const needsLossAck = atALoss && chargeable;
@@ -580,12 +616,31 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
    * tappable bar, the state on the right — so an optional block reads the same
    * wherever it appears in this sheet.
    */
+  /**
+   * The panel a fold opens into.
+   *
+   * The fields used to be siblings of the header with a gap between them, so
+   * an open "Device details" was a grey bar and then some loose inputs
+   * floating underneath it — nothing said the IMEI box belonged to the section
+   * that had just been opened, and on a form with three folds it was guesswork
+   * which fields came from which. Squared against the header, bordered on the
+   * other three sides, it is one object.
+   */
+  const foldBody: React.CSSProperties = {
+    display: "flex", flexDirection: "column", gap: 10,
+    padding: "13px 12px", fontFamily: ff,
+    border: "1px solid var(--border)", borderTop: "none",
+    borderRadius: "0 0 9px 9px", background: "var(--bg-card)",
+  };
+
   const fold = (label: string, open: boolean, toggle: () => void, hint: string) => (
     <button
       onClick={toggle}
       style={{
         display: "flex", alignItems: "center", gap: 8, width: "100%",
-        minHeight: 44, padding: "0 12px", borderRadius: 9, cursor: "pointer",
+        minHeight: 44, padding: "0 12px", cursor: "pointer",
+        // Square where the panel meets it, so the two read as one control.
+        borderRadius: open ? "9px 9px 0 0" : 9,
         background: "var(--bg-secondary)", border: "1px solid var(--border)",
         fontFamily: ff, textAlign: "left",
       }}
@@ -610,7 +665,38 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
   return createPortal(
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(6px)" }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 20, padding: "28px 28px 24px", width: "min(920px, 96vw)", maxHeight: "92vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 20, boxShadow: "0 24px 64px rgba(0,0,0,0.6)", fontFamily: ff }}>
+
+      {/*
+        The band layout, shipped with the component rather than in globals.css.
+
+        It is layout that belongs to one form and nothing else, and keeping it
+        here means the markup and the rule that positions it cannot get out of
+        step — a stylesheet is a separate bundle, and a form that silently
+        falls back to one tall column because the CSS is a version behind is
+        indistinguishable from a form that was never laid out.
+
+        Fixed column counts, not auto-fit: the point is that the form has the
+        same shape on every job, so a section never moves because an optional
+        one above it happened to render.
+      */}
+      <style>{`
+        .suj-cols-2, .suj-cols-3 { display: grid; gap: 14px; align-items: start; grid-template-columns: 1fr; }
+        @media (min-width: 760px) { .suj-cols-2 { grid-template-columns: 1fr 1fr; } }
+        @media (min-width: 1000px) { .suj-cols-3 { grid-template-columns: 1fr 1fr 1fr; } }
+      `}</style>
+      {/*
+        Wide enough to finish a job without scrolling.
+
+        At 920px every section was full width, so the form was one tall column
+        and completing a repair meant scrolling past the charge to find the
+        warranty, then back up when the loss warning appeared somewhere above.
+        The extra width is not decoration — it is what lets the sections that
+        belong side by side actually sit side by side.
+
+        maxHeight stays as a safety net for short screens and for the jobs that
+        open every optional section at once. It is a floor, not the design.
+      */}
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 20, padding: "22px 24px 20px", width: "min(1220px, 97vw)", maxHeight: "94vh", height: "fit-content", overflowY: "auto", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 24px 64px rgba(0,0,0,0.6)", fontFamily: ff }}>
 
         {/* Success */}
         {confirmed ? (
@@ -764,7 +850,7 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                  type end up on different screens from the Complete button.
                  Sections that carry a table or a full checklist still span both
                  columns; only the short ones pair up. */
-              <div className="complete-grid" style={{ display: "grid", gap: 16, alignItems: "start" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
                 {/*
                   The first thing asked, because it decides everything under it:
@@ -774,7 +860,7 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                   before knowing whether the job had a cost at all.
                 */}
                 {/* How this job ended — drives the charge, the warranty and the receipt */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 10, gridColumn: "1 / -1" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {sec("How did this job end? *")}
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {COMPLETION_TYPES.map(t => {
@@ -875,7 +961,15 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                 </div>
 
 
-                {/* Estimate & approval gate */}
+                {/* ── What this job is worth ────────────────────────────────
+                    Three figures, one row: what the customer pays, what the
+                    technician charges the shop, and what an outside workshop
+                    charged. They are read against each other — the margin at
+                    the bottom of the parts fold is literally the first minus
+                    the other two — so they belong on one line rather than
+                    scattered down the form. */}
+                <div className="suj-cols-3">
+
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <DollarSign size={13} color="#fbbf24" />
@@ -905,71 +999,8 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                     </div>
                   </div>
 
-                  {needsApproval && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "12px 13px", borderRadius: 10, background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.3)" }}>
-                      <div style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
-                        <AlertTriangle size={14} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
-                        <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
-                          Final cost is <strong style={{ color: "#fbbf24" }}>Rs. {(revisedNum - originalEstimate).toLocaleString()} higher</strong> than quoted.
-                          Customer approval is required before completing.
-                        </p>
-                      </div>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {(["In-store", "SMS", "WhatsApp", "Phone"] as ApprovalChannel[]).map(c => (
-                          <button key={c} onClick={() => setApprChannel(c)} style={{
-                            padding: "5px 11px", borderRadius: 7, fontSize: 11.5, fontWeight: 600,
-                            border: `1px solid ${apprChannel === c ? "#fbbf24" : "var(--border)"}`,
-                            background: apprChannel === c ? "rgba(251,191,36,0.14)" : "var(--bg-secondary)",
-                            color: apprChannel === c ? "#fbbf24" : "var(--text-muted)", cursor: "pointer", fontFamily: ff,
-                          }}>{c}</button>
-                        ))}
-                      </div>
-                      {apprChannel === "In-store" ? (
-                        <SignaturePad value={apprSig} onChange={setApprSig} height={110} label="Customer Approval Signature *" />
-                      ) : (
-                        <input value={apprRef} onChange={e => setApprRef(e.target.value)} placeholder={`${apprChannel} reference / note (e.g. "approved by reply at 14:32")`} style={inputStyle} />
-                      )}
-                    </div>
-                  )}
 
 
-                  {/* Work summary (technician remarks → printed on the receipt) */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {/* A Return has to be explained, so that one is never folded. */}
-                  {completionType === "Return"
-                    ? sec("Reason Not Repaired * (required)")
-                    : fold("Job remarks", notesOpen, () => setNotesOpen(v => !v),
-                        completionNotes.trim() ? "Written" : "Optional")}
-                  {(completionType === "Return" || notesOpen || completionNotes.trim() !== "") && (
-                  <>
-                  {completionType !== "Return" && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {QUICK_SUMMARIES.map(q => (
-                        <button
-                          key={q}
-                          onClick={() => setCompletionNotes(n => (n.trim() ? `${n.trim()}, ${q}` : q))}
-                          style={{
-                            minHeight: 32, padding: "0 11px", borderRadius: 16, fontSize: 11.5,
-                            background: "var(--bg-secondary)", border: "1px solid var(--border)",
-                            color: "var(--text-secondary)", cursor: "pointer", fontFamily: ff,
-                          }}
-                        >
-                          + {q}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <textarea placeholder={completionType === "Return"
-                    ? "Why the repair could not be completed — what was tried, what failed…"
-                    : "Describe all work performed — parts replaced, tests done, issues found…"} value={completionNotes} onChange={e => setCompletionNotes(e.target.value)} rows={3} style={inputStyle} />
-                  <p style={{ fontSize: 11, color: completionNotes.trim().length > 5 ? TA : "var(--text-muted)", fontFamily: ff }}>
-                    {completionType === "Return"
-                      ? <>{completionNotes.trim().length} chars {completionNotes.trim().length > 5 ? "✓" : "(min 6)"}</>
-                      : <>Printed on the customer&apos;s receipt if you fill it in.</>}
-                  </p>
-                  </>
-                  )}
-                </div>
 
                 </div>
 
@@ -1009,6 +1040,94 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                     </p>
                   </div>
 
+                {/* The third figure. Always rendered, even when the device
+                    never left the shop: a column that appears and disappears
+                    would move the other two around from job to job, and a
+                    quiet "not sent out" is also the answer to a question the
+                    technician might be about to ask. */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Building2 size={13} color="#a78bfa" />
+                    {sec("Repair Agent")}
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginBottom: 3 }}>
+                      Paid to an outside workshop (Rs.)
+                    </p>
+                    {agentTrips.length === 0 ? (
+                      <div style={{ ...inputStyle, background: "var(--bg-primary)", color: "var(--text-muted)", display: "flex", alignItems: "center" }}>
+                        Not sent to an agent
+                      </div>
+                    ) : (
+                      <div style={{ ...inputStyle, background: "rgba(167,139,250,0.08)", borderColor: "rgba(167,139,250,0.35)", color: "#a78bfa", fontWeight: 700, display: "flex", alignItems: "center" }}>
+                        {agentCost.toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+                  {/* Which trip, and when — the two dates are how a technician
+                      recognises the one they are being charged for. */}
+                  {agentTrips.map(t => (
+                    <p key={t.id} style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.6 }}>
+                      <strong style={{ color: "var(--text-secondary)" }}>{t.agentName ?? "Unnamed agent"}</strong>
+                      {" · "}Rs. {transferCost(t).toLocaleString()}
+                      <span style={{ display: "block" }}>
+                        Sent {new Date(t.sentAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+                        {t.returnedAt ? ` → back ${new Date(t.returnedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}` : ""}
+                        {t.actualCost == null && (t.agreedCost != null ? " · quoted, not confirmed" : " · no charge recorded")}
+                      </span>
+                    </p>
+                  ))}
+                </div>
+                </div>
+
+                {agentError && (
+                  <div style={{
+                    display: "flex", gap: 8, alignItems: "flex-start",
+                    padding: "10px 12px", borderRadius: 10, fontFamily: ff,
+                    background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)",
+                  }}>
+                    <AlertTriangle size={14} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+                    <p style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+                      Could not check whether this device went to a repair agent, so any outside cost is
+                      missing from the totals below.
+                      <span style={{ display: "block", color: "var(--text-muted)", marginTop: 3 }}>{agentError}</span>
+                    </p>
+                  </div>
+                )}
+
+                {/* ── Approval, when the price went up ──────────────────────
+                    A full-width band rather than a field inside Final Cost:
+                    four channel buttons and a signature pad do not fit a third
+                    of a row, and this is not a figure — it is what has to
+                    happen because one of the figures changed. */}
+                {needsApproval && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "12px 13px", borderRadius: 10, background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.3)" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
+                      <AlertTriangle size={14} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+                      <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                        Final cost is <strong style={{ color: "#fbbf24" }}>Rs. {(revisedNum - originalEstimate).toLocaleString()} higher</strong> than quoted.
+                        Customer approval is required before completing.
+                      </p>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {(["In-store", "SMS", "WhatsApp", "Phone"] as ApprovalChannel[]).map(c => (
+                        <button key={c} onClick={() => setApprChannel(c)} style={{
+                          padding: "5px 11px", borderRadius: 7, fontSize: 11.5, fontWeight: 600,
+                          border: `1px solid ${apprChannel === c ? "#fbbf24" : "var(--border)"}`,
+                          background: apprChannel === c ? "rgba(251,191,36,0.14)" : "var(--bg-secondary)",
+                          color: apprChannel === c ? "#fbbf24" : "var(--text-muted)", cursor: "pointer", fontFamily: ff,
+                        }}>{c}</button>
+                      ))}
+                    </div>
+                    {apprChannel === "In-store" ? (
+                      <SignaturePad value={apprSig} onChange={setApprSig} height={110} label="Customer Approval Signature *" />
+                    ) : (
+                      <input value={apprRef} onChange={e => setApprRef(e.target.value)} placeholder={`${apprChannel} reference / note (e.g. "approved by reply at 14:32")`} style={inputStyle} />
+                    )}
+                  </div>
+                )}
+
+
                 {/*
                   The device's own identity, captured while it is open.
 
@@ -1017,102 +1136,12 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                   nothing to read. It opens itself when either is missing, which
                   on this shop's jobs is most of them.
                 */}
-                {/* Nothing at all when intake already captured both — an empty
-                    fold saying "Recorded" is a row of chrome asking to be read
-                    on every single job that does not need it. */}
-                {deviceIncomplete && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8, gridColumn: "1 / -1" }}>
-                    {fold("Device details", deviceOpen, () => setDeviceOpen(v => !v),
-                      deviceNeed.modelNumber && deviceNeed.imei ? "Model no. and IMEI missing"
-                        : deviceNeed.modelNumber ? "Model number missing"
-                          : "IMEI missing")}
-
-                    {deviceOpen && (
-                      <DeviceDetailsFields job={job} value={deviceDraft} onChange={setDeviceDraft} inputStyle={inputStyle} />
-                    )}
-                  </div>
-                )}
-
-                {/* Parts used, with what they cost the shop */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, gridColumn: "1 / -1" }}>
-                  {fold("Parts used", partsOpen || jobPartLines.length > 0, () => setPartsOpen(v => !v),
-                    jobPartLines.length > 0
-                      ? `${jobPartLines.length} ${jobPartLines.length === 1 ? "part" : "parts"} · Rs. ${partsCost.toLocaleString()}`
-                      : "None")}
-
-                  {(partsOpen || jobPartLines.length > 0) && (
-                  <>
-                  {(jobPartLines.length > 0 || labourCost > 0) && (
-                    <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", fontFamily: ff }}>
-                      {jobPartLines.map(l => (
-                        <div key={l.id} style={{
-                          display: "flex", alignItems: "center", gap: 8, padding: "8px 11px",
-                          borderBottom: "1px solid var(--border)", fontSize: 12,
-                        }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-                              {l.name}{l.qty > 1 ? ` ×${l.qty}` : ""}
-                            </p>
-                            <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 1 }}>
-                              {l.priced ? `Rs. ${l.unitCost.toLocaleString()} each` : "No catalogue price"}
-                              {!l.installed && " · not marked installed"}
-                            </p>
-                          </div>
-                          <span style={{ fontSize: 12.5, fontWeight: 700, color: l.priced ? "var(--text-primary)" : "var(--text-muted)" }}>
-                            {l.priced ? `Rs. ${l.lineTotal.toLocaleString()}` : "—"}
-                          </span>
-                        </div>
-                      ))}
-
-                      {/* Parts and labour against what is being charged */}
-                      <div style={{ padding: "9px 11px", background: "var(--bg-secondary)", display: "flex", flexDirection: "column", gap: 5, fontSize: 12 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span style={{ color: "var(--text-secondary)" }}>Parts cost</span>
-                          <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>Rs. {partsCost.toLocaleString()}</span>
-                        </div>
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span style={{ color: "var(--text-secondary)" }}>Technician&apos;s charge</span>
-                          <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>Rs. {labourCost.toLocaleString()}</span>
-                        </div>
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span style={{ color: "var(--text-secondary)" }}>
-                            {chargeable ? "Charging" : `Charging (${completionType})`}
-                          </span>
-                          <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>Rs. {revisedNum.toLocaleString()}</span>
-                        </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 5, borderTop: "1px solid var(--border)" }}>
-                          <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
-                            {jobMargin < 0 ? "Loss on this job" : "Margin"}
-                          </span>
-                          <span style={{ fontWeight: 800, color: jobMargin < 0 ? "#f87171" : TA }}>
-                            {jobMargin < 0 ? "−" : ""}Rs. {Math.abs(jobMargin).toLocaleString()}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {unpricedPart && (
-                    <p style={{ fontSize: 11, color: "#fbbf24", fontFamily: ff, lineHeight: 1.5 }}>
-                      One or more parts are no longer in the catalogue, so their cost is not included in the total above.
-                    </p>
-                  )}
-
-                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginTop: 2 }}>
-                    Parts used (one per line) — printed on the receipt
-                  </p>
-                  <textarea placeholder="e.g. iPhone 13 Rear Camera Module" value={partsUsedText} onChange={e => setPartsUsedText(e.target.value)} rows={2} style={inputStyle} />
-                  </>
-                  )}
-                </div>
-
-                {/*
-                  Outside the fold on purpose. It refuses the submit until it is
-                  answered, and a blocker hidden inside a collapsed section is a
-                  button that will not work for a reason nobody can see.
-                */}
+                {/* ── The repair itself ─────────────────────────────────────
+                    What the device is, and what went into it. */}
+                {/* A warning that refuses the submit must never be something
+                    you have to scroll past, so it stays full width and first. */}
                 {needsLossAck && (
-                  <div style={{ gridColumn: "1 / -1" }}>
+                  <div>
                     <div style={{
                       padding: "11px 13px", borderRadius: 10,
                       background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.4)",
@@ -1136,158 +1165,318 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                   </div>
                 )}
 
-                {/* Future faults — worth recording when spotted, never worth
-                    blocking a finished job on, so it folds away with the rest
-                    of the optional detail. */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, gridColumn: "1 / -1" }}>
-                  <button
-                    onClick={() => setExtrasOpen(o => !o)}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 8, width: "100%",
-                      minHeight: 44, padding: "0 12px", borderRadius: 9, cursor: "pointer",
-                      fontFamily: ff, textAlign: "left",
-                      background: "var(--bg-secondary)", border: "1px solid var(--border)",
-                    }}
-                  >
-                    <span style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                      Future Faults Spotted
-                    </span>
-                    <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: futureFaults.trim() ? TA : "var(--text-muted)" }}>
-                      {futureFaults.trim() ? "Noted" : "Optional"}
-                    </span>
-                    <ChevronDown
-                      size={14}
-                      style={{ color: "var(--text-muted)", transform: extrasOpen ? "rotate(180deg)" : undefined, transition: "transform 0.18s" }}
-                    />
-                  </button>
-                  {extrasOpen && (
-                    <textarea placeholder="e.g. Battery health at 82% — may need replacement soon" value={futureFaults} onChange={e => setFutureFaults(e.target.value)} rows={2} style={inputStyle} />
-                  )}
-                </div>
+                {/* ── Everything else, filled column-wise ───────────────────
+                    Two stacks, not a row of pairs. Pairing put a one-line
+                    fold beside a section that opens to twenty, and left a
+                    band of dead space under the short one. Stacks let each
+                    column run to its own length, so the form ends where its
+                    content does. Reading order is down the left, then down
+                    the right. */}
+                <div className="suj-cols-2">
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
+                  {/* Nothing at all when intake already captured both — an empty
+                      fold saying "Recorded" is a row of chrome asking to be read
+                      on every single job that does not need it. */}
+                  {deviceIncomplete ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                      {fold("Device details", deviceOpen, () => setDeviceOpen(v => !v),
+                        deviceNeed.modelNumber && deviceNeed.imei ? "Model no. and IMEI missing"
+                          : deviceNeed.modelNumber ? "Model number missing"
+                            : "IMEI missing")}
 
-                {/* Functional tests — collapsed by default.
-                    Eleven checks are worth having on a screen replacement and
-                    pointless on a software reset, so this opens on demand
-                    rather than standing between every job and its Complete
-                    button. The header carries the count, so a technician can
-                    see at a glance whether anything was recorded. */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, gridColumn: "1 / -1" }}>
-                  <button
-                    onClick={() => setTestsOpen(o => !o)}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 8, width: "100%",
-                      padding: "10px 12px", borderRadius: 9, cursor: "pointer", fontFamily: ff,
-                      background: "var(--bg-secondary)", border: "1px solid var(--border)",
-                      textAlign: "left",
-                    }}
-                  >
-                    <CheckSquare size={13} color={TA} />
-                    <span style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                      Functional Test Checklist
-                    </span>
-                    <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: testsAnswered === 0 ? "var(--text-muted)" : testsFailed > 0 ? "#f87171" : TA }}>
-                      {testsAnswered === 0 ? "Not filled in" : `${testsPassed}/${testsTotal} passed`}
-                    </span>
-                    <ChevronDown
-                      size={14}
-                      style={{ color: "var(--text-muted)", transform: testsOpen ? "rotate(180deg)" : undefined, transition: "transform 0.18s" }}
-                    />
-                  </button>
-
-                  {testsOpen && (<>
-
-                  {/* Marking eleven checks one at a time is the slowest part of
-                      finishing a job — set them all, then correct the odd one. */}
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {([
-                      { label: "Select all passed", v: true as const,  col: TA },
-                      { label: "Mark all failed",   v: false as const, col: "#f87171" },
-                      { label: "Clear all",         v: null as null,   col: "#94a3b8" },
-                    ]).map(b => (
-                      <button
-                        key={b.label}
-                        onClick={() => setTestResults(Object.fromEntries(FUNCTIONAL_TESTS.map(t => [t, b.v])))}
-                        style={{
-                          padding: "5px 11px", borderRadius: 7, fontSize: 11, fontWeight: 600,
-                          border: `1px solid ${b.col}40`, background: `${b.col}10`, color: b.col,
-                          cursor: "pointer", fontFamily: ff, transition: "all 0.12s",
-                        }}
-                      >
-                        {b.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div style={{ background: "var(--bg-secondary)", borderRadius: 10, border: "1px solid var(--border)", padding: "4px 0" }}>
-                    {FUNCTIONAL_TESTS.map(test => {
-                      const v = testResults[test];
-                      return (
-                        <div key={test} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderBottom: "1px solid var(--border)" }}>
-                          <span style={{ fontSize: 12.5, color: "var(--text-primary)", fontFamily: ff }}>{test}</span>
-                          <div style={{ display: "flex", gap: 4 }}>
-                            {([true, false, null] as const).map((s, i) => {
-                              const isActive = v === s;
-                              const col = s === true ? TA : s === false ? "#f87171" : "#94a3b8";
-                              const label = s === true ? "✓" : s === false ? "✕" : "—";
-                              return (
-                                <button key={i} onClick={() => setTestResults(prev => ({ ...prev, [test]: s }))} style={{
-                                  width: 28, height: 28, borderRadius: 6, fontSize: 12, fontWeight: 700,
-                                  border: `1px solid ${isActive ? col + "50" : "var(--border)"}`,
-                                  background: isActive ? col + "14" : "var(--bg-card)",
-                                  color: isActive ? col : "var(--text-muted)",
-                                  cursor: "pointer", transition: "all 0.12s",
-                                }}>{label}</button>
-                              );
-                            })}
-                          </div>
+                      {deviceOpen && (
+                        <div style={foldBody}>
+                          <DeviceDetailsFields job={job} value={deviceDraft} onChange={setDeviceDraft} inputStyle={inputStyle} />
                         </div>
-                      );
-                    })}
-                  </div>
-                  <textarea placeholder="Test notes (optional)…" value={testNotes} onChange={e => setTestNotes(e.target.value)} rows={2} style={inputStyle} />
-                  </>)}
-                </div>
+                      )}
+                    </div>
+                  ) : <div />}
 
-                {/* Warranty */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, gridColumn: "1 / -1" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <Shield size={13} color="#a78bfa" />
-                    {sec("Warranty")}
+                  {/* Future faults — worth recording when spotted, never worth
+                      blocking a finished job on, so it folds away with the rest
+                      of the optional detail. */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <button
+                      onClick={() => setExtrasOpen(o => !o)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8, width: "100%",
+                        minHeight: 44, padding: "0 12px", borderRadius: 9, cursor: "pointer",
+                        fontFamily: ff, textAlign: "left",
+                        background: "var(--bg-secondary)", border: "1px solid var(--border)",
+                      }}
+                    >
+                      <span style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        Future Faults Spotted
+                      </span>
+                      <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: futureFaults.trim() ? TA : "var(--text-muted)" }}>
+                        {futureFaults.trim() ? "Noted" : "Optional"}
+                      </span>
+                      <ChevronDown
+                        size={14}
+                        style={{ color: "var(--text-muted)", transform: extrasOpen ? "rotate(180deg)" : undefined, transition: "transform 0.18s" }}
+                      />
+                    </button>
+                    {extrasOpen && (
+                      <textarea placeholder="e.g. Battery health at 82% — may need replacement soon" value={futureFaults} onChange={e => setFutureFaults(e.target.value)} rows={2} style={inputStyle} />
+                    )}
                   </div>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {WARRANTY_OPTIONS.map(o => (
-                      <button key={o.days} onClick={() => setWarrantyDays(o.days)} style={{
-                        padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
-                        border: `1px solid ${warrantyDays === o.days ? "#a78bfa50" : "var(--border)"}`,
-                        background: warrantyDays === o.days ? "rgba(167,139,250,0.12)" : "var(--bg-secondary)",
-                        color: warrantyDays === o.days ? "#a78bfa" : "var(--text-muted)",
-                        cursor: "pointer", fontFamily: ff, transition: "all 0.12s",
-                      }}>{o.label}</button>
-                    ))}
-                  </div>
-                  {warrantyDays > 0 && (
+
+                  {/* Warranty */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Shield size={13} color="#a78bfa" />
+                      {sec("Warranty")}
+                    </div>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {(["Parts & Labour", "Parts Only", "Labour Only"] as WarrantyScope[]).map(sc => (
-                        <button key={sc} onClick={() => setWarrantyScope(sc)} style={{
-                          padding: "5px 11px", borderRadius: 7, fontSize: 11, fontWeight: 600,
-                          border: `1px solid ${warrantyScope === sc ? "#a78bfa50" : "var(--border)"}`,
-                          background: warrantyScope === sc ? "rgba(167,139,250,0.10)" : "var(--bg-secondary)",
-                          color: warrantyScope === sc ? "#a78bfa" : "var(--text-muted)",
-                          cursor: "pointer", fontFamily: ff,
-                        }}>{sc}</button>
+                      {WARRANTY_OPTIONS.map(o => (
+                        <button key={o.days} onClick={() => setWarrantyDays(o.days)} style={{
+                          padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                          border: `1px solid ${warrantyDays === o.days ? "#a78bfa50" : "var(--border)"}`,
+                          background: warrantyDays === o.days ? "rgba(167,139,250,0.12)" : "var(--bg-secondary)",
+                          color: warrantyDays === o.days ? "#a78bfa" : "var(--text-muted)",
+                          cursor: "pointer", fontFamily: ff, transition: "all 0.12s",
+                        }}>{o.label}</button>
                       ))}
                     </div>
-                  )}
-                  {warrantyDays > 0 && (
-                    <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff }}>
-                      Warranty is issued now but <strong style={{ color: "#a78bfa" }}>activates when the customer collects</strong> the device.
+                    {warrantyDays > 0 && (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {(["Parts & Labour", "Parts Only", "Labour Only"] as WarrantyScope[]).map(sc => (
+                          <button key={sc} onClick={() => setWarrantyScope(sc)} style={{
+                            padding: "5px 11px", borderRadius: 7, fontSize: 11, fontWeight: 600,
+                            border: `1px solid ${warrantyScope === sc ? "#a78bfa50" : "var(--border)"}`,
+                            background: warrantyScope === sc ? "rgba(167,139,250,0.10)" : "var(--bg-secondary)",
+                            color: warrantyScope === sc ? "#a78bfa" : "var(--text-muted)",
+                            cursor: "pointer", fontFamily: ff,
+                          }}>{sc}</button>
+                        ))}
+                      </div>
+                    )}
+                    {warrantyDays > 0 && (
+                      <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff }}>
+                        Warranty is issued now but <strong style={{ color: "#a78bfa" }}>activates when the customer collects</strong> the device.
+                      </p>
+                    )}
+                    {warrantyDays === CHECKING_WARRANTY && (
+                      <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                        No warranty is issued yet — the counter settles it at handover. Pick a period
+                        here if you already know what this repair should carry.
+                      </p>
+                    )}
+                  </div>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
+                  {/* Parts used, with what they cost the shop */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                    {fold("Parts used", partsOpen || jobPartLines.length > 0 || agentCost > 0, () => setPartsOpen(v => !v),
+                      jobPartLines.length > 0
+                        ? `${jobPartLines.length} ${jobPartLines.length === 1 ? "part" : "parts"} · Rs. ${partsCost.toLocaleString()}`
+                        : "None")}
+
+                    {(partsOpen || jobPartLines.length > 0 || agentCost > 0) && (
+                    <div style={foldBody}>
+                    {(jobPartLines.length > 0 || labourCost > 0 || agentCost > 0) && (
+                      <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", fontFamily: ff }}>
+                        {jobPartLines.map(l => (
+                          <div key={l.id} style={{
+                            display: "flex", alignItems: "center", gap: 8, padding: "8px 11px",
+                            borderBottom: "1px solid var(--border)", fontSize: 12,
+                          }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <p style={{ color: "var(--text-primary)", fontWeight: 600 }}>
+                                {l.name}{l.qty > 1 ? ` ×${l.qty}` : ""}
+                              </p>
+                              <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 1 }}>
+                                {l.priced ? `Rs. ${l.unitCost.toLocaleString()} each` : "No catalogue price"}
+                                {!l.installed && " · not marked installed"}
+                              </p>
+                            </div>
+                            <span style={{ fontSize: 12.5, fontWeight: 700, color: l.priced ? "var(--text-primary)" : "var(--text-muted)" }}>
+                              {l.priced ? `Rs. ${l.lineTotal.toLocaleString()}` : "—"}
+                            </span>
+                          </div>
+                        ))}
+
+                        {/* Parts and labour against what is being charged */}
+                        <div style={{ padding: "9px 11px", background: "var(--bg-secondary)", display: "flex", flexDirection: "column", gap: 5, fontSize: 12 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span style={{ color: "var(--text-secondary)" }}>Parts cost</span>
+                            <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>Rs. {partsCost.toLocaleString()}</span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span style={{ color: "var(--text-secondary)" }}>Technician&apos;s charge</span>
+                            <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>Rs. {labourCost.toLocaleString()}</span>
+                          </div>
+                          {agentCost > 0 && (
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span style={{ color: "var(--text-secondary)" }}>Repair agent</span>
+                              <span style={{ fontWeight: 700, color: "#a78bfa" }}>Rs. {agentCost.toLocaleString()}</span>
+                            </div>
+                          )}
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span style={{ color: "var(--text-secondary)" }}>
+                              {chargeable ? "Charging" : `Charging (${completionType})`}
+                            </span>
+                            <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>Rs. {revisedNum.toLocaleString()}</span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 5, borderTop: "1px solid var(--border)" }}>
+                            <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
+                              {jobMargin < 0 ? "Loss on this job" : "Margin"}
+                            </span>
+                            <span style={{ fontWeight: 800, color: jobMargin < 0 ? "#f87171" : TA }}>
+                              {jobMargin < 0 ? "−" : ""}Rs. {Math.abs(jobMargin).toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {unpricedPart && (
+                      <p style={{ fontSize: 11, color: "#fbbf24", fontFamily: ff, lineHeight: 1.5 }}>
+                        One or more parts are no longer in the catalogue, so their cost is not included in the total above.
+                      </p>
+                    )}
+
+                    <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginTop: 2 }}>
+                      Parts used (one per line) — printed on the receipt
                     </p>
-                  )}
-                  {warrantyDays === CHECKING_WARRANTY && (
-                    <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
-                      No warranty is issued yet — the counter settles it at handover. Pick a period
-                      here if you already know what this repair should carry.
+                    <textarea placeholder="e.g. iPhone 13 Rear Camera Module" value={partsUsedText} onChange={e => setPartsUsedText(e.target.value)} rows={2} style={inputStyle} />
+                    </div>
+                    )}
+                  </div>
+
+                  {/* Functional tests — collapsed by default.
+                      Eleven checks are worth having on a screen replacement and
+                      pointless on a software reset, so this opens on demand
+                      rather than standing between every job and its Complete
+                      button. The header carries the count, so a technician can
+                      see at a glance whether anything was recorded. */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <button
+                      onClick={() => setTestsOpen(o => !o)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8, width: "100%",
+                        padding: "10px 12px", borderRadius: 9, cursor: "pointer", fontFamily: ff,
+                        background: "var(--bg-secondary)", border: "1px solid var(--border)",
+                        textAlign: "left",
+                      }}
+                    >
+                      <CheckSquare size={13} color={TA} />
+                      <span style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        Functional Test Checklist
+                      </span>
+                      <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: testsAnswered === 0 ? "var(--text-muted)" : testsFailed > 0 ? "#f87171" : TA }}>
+                        {testsAnswered === 0 ? "Not filled in" : `${testsPassed}/${testsTotal} passed`}
+                      </span>
+                      <ChevronDown
+                        size={14}
+                        style={{ color: "var(--text-muted)", transform: testsOpen ? "rotate(180deg)" : undefined, transition: "transform 0.18s" }}
+                      />
+                    </button>
+
+                    {testsOpen && (<>
+
+                    {/* Marking eleven checks one at a time is the slowest part of
+                        finishing a job — set them all, then correct the odd one. */}
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {([
+                        { label: "Select all passed", v: true as const,  col: TA },
+                        { label: "Mark all failed",   v: false as const, col: "#f87171" },
+                        { label: "Clear all",         v: null as null,   col: "#94a3b8" },
+                      ]).map(b => (
+                        <button
+                          key={b.label}
+                          onClick={() => setTestResults(Object.fromEntries(FUNCTIONAL_TESTS.map(t => [t, b.v])))}
+                          style={{
+                            padding: "5px 11px", borderRadius: 7, fontSize: 11, fontWeight: 600,
+                            border: `1px solid ${b.col}40`, background: `${b.col}10`, color: b.col,
+                            cursor: "pointer", fontFamily: ff, transition: "all 0.12s",
+                          }}
+                        >
+                          {b.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ background: "var(--bg-secondary)", borderRadius: 10, border: "1px solid var(--border)", padding: "4px 0" }}>
+                      {FUNCTIONAL_TESTS.map(test => {
+                        const v = testResults[test];
+                        return (
+                          <div key={test} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderBottom: "1px solid var(--border)" }}>
+                            <span style={{ fontSize: 12.5, color: "var(--text-primary)", fontFamily: ff }}>{test}</span>
+                            <div style={{ display: "flex", gap: 4 }}>
+                              {([true, false, null] as const).map((s, i) => {
+                                const isActive = v === s;
+                                const col = s === true ? TA : s === false ? "#f87171" : "#94a3b8";
+                                const label = s === true ? "✓" : s === false ? "✕" : "—";
+                                return (
+                                  <button key={i} onClick={() => setTestResults(prev => ({ ...prev, [test]: s }))} style={{
+                                    width: 28, height: 28, borderRadius: 6, fontSize: 12, fontWeight: 700,
+                                    border: `1px solid ${isActive ? col + "50" : "var(--border)"}`,
+                                    background: isActive ? col + "14" : "var(--bg-card)",
+                                    color: isActive ? col : "var(--text-muted)",
+                                    cursor: "pointer", transition: "all 0.12s",
+                                  }}>{label}</button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <textarea placeholder="Test notes (optional)…" value={testNotes} onChange={e => setTestNotes(e.target.value)} rows={2} style={inputStyle} />
+                    </>)}
+                  </div>
+
+                  {/*
+                    Last, and full width.
+
+                    It used to sit directly under Final Cost, inside it — the
+                    second thing on the form, above the charge, the parts and the
+                    warranty. Nothing here is optional except this: a job can be
+                    completed without a word of it. Sitting third from the top it
+                    read as something to deal with before going on, and pushed
+                    every field that actually gates the submit further down.
+                  */}
+                    {/* Work summary (technician remarks → printed on the receipt) */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                    {/* A Return has to be explained, so that one is never folded. */}
+                    {completionType === "Return"
+                      ? <div style={{ marginBottom: 7 }}>{sec("Reason Not Repaired * (required)")}</div>
+                      : fold("Job remarks", notesOpen || completionNotes.trim() !== "", () => setNotesOpen(v => !v),
+                          completionNotes.trim() ? "Written" : "Optional")}
+                    {(completionType === "Return" || notesOpen || completionNotes.trim() !== "") && (
+                    <div style={completionType === "Return"
+                      ? { ...foldBody, borderTop: "1px solid var(--border)", borderRadius: 9 }
+                      : foldBody}>
+                    {completionType !== "Return" && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {QUICK_SUMMARIES.map(q => (
+                          <button
+                            key={q}
+                            onClick={() => setCompletionNotes(n => (n.trim() ? `${n.trim()}, ${q}` : q))}
+                            style={{
+                              minHeight: 32, padding: "0 11px", borderRadius: 16, fontSize: 11.5,
+                              background: "var(--bg-secondary)", border: "1px solid var(--border)",
+                              color: "var(--text-secondary)", cursor: "pointer", fontFamily: ff,
+                            }}
+                          >
+                            + {q}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <textarea placeholder={completionType === "Return"
+                      ? "Why the repair could not be completed — what was tried, what failed…"
+                      : "Describe all work performed — parts replaced, tests done, issues found…"} value={completionNotes} onChange={e => setCompletionNotes(e.target.value)} rows={3} style={inputStyle} />
+                    <p style={{ fontSize: 11, color: completionNotes.trim().length > 5 ? TA : "var(--text-muted)", fontFamily: ff }}>
+                      {completionType === "Return"
+                        ? <>{completionNotes.trim().length} chars {completionNotes.trim().length > 5 ? "✓" : "(min 6)"}</>
+                        : <>Printed on the customer&apos;s receipt if you fill it in.</>}
                     </p>
-                  )}
+                    </div>
+                    )}
+                  </div>
+                  </div>
                 </div>
               </div>
             )}

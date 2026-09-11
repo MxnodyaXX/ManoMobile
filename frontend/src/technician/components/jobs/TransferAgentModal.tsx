@@ -38,7 +38,10 @@ export default function TransferAgentModal({
 
   const submit = async () => {
     if (agentId === "") { setError("Choose the agent this device is going to."); return; }
-    if (!reason.trim()) { setError("Say why it is being sent out — it goes on the job record."); return; }
+    // The reason is not required. A technician standing at the counter with the
+    // device in their hand should not have to write an essay to send it three
+    // doors down, and a field that blocks the button is a field that gets
+    // filled with "repair" to get past it.
 
     setBusy(true);
     setError(null);
@@ -48,7 +51,9 @@ export default function TransferAgentModal({
         await transferJobToAgent({
           jobId: job.id,
           agentId: agentId as number,
-          reason: reason.trim(),
+          // Blank means blank: an empty string would be stored as a reason
+          // that reads as "" on every screen that shows one.
+          reason: reason.trim() || undefined,
           expectedReturn: expectedReturn || undefined,
           agreedCost: agreedCost ? parseFloat(agreedCost) : undefined,
           sentBy: technicianName,
@@ -132,7 +137,7 @@ export default function TransferAgentModal({
           </div>
 
           <div>
-            <label style={label}>Reason for sending out *</label>
+            <label style={label}>Reason for sending out <span style={{ fontWeight: 500, letterSpacing: 0, textTransform: "none" }}>(optional)</span></label>
             <textarea
               value={reason}
               onChange={e => setReason(e.target.value)}

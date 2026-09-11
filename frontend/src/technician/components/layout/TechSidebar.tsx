@@ -1,9 +1,9 @@
 "use client";
 
-import { PackageCheck, Layers, History, LogOut, Wrench, TrendingUp, Timer, type LucideIcon } from "lucide-react";
+import { PackageCheck, Layers, History, LogOut, Wrench, TrendingUp, Timer, Building2, type LucideIcon } from "lucide-react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 
-export type TechPage = "My Bench" | "Dashboard" | "My Jobs" | "Pending Collection" | "Parts & Stock" | "Job History" | "My Performance" | "My Shift";
+export type TechPage = "My Bench" | "Dashboard" | "My Jobs" | "At Repair Agents" | "Pending Collection" | "Parts & Stock" | "Job History" | "My Performance" | "My Shift";
 
 /**
  * One primary destination, everything else secondary.
@@ -17,6 +17,10 @@ const PRIMARY_NAV: { id: TechPage; icon: LucideIcon; label: string }[] = [
 ];
 
 const SECONDARY_NAV: { id: TechPage; icon: LucideIcon; label: string }[] = [
+  // First of the secondary list, because it is the only one about devices that
+  // are not in the building. Everything below it can wait until somebody has a
+  // reason to look; a phone at an agent is one nobody can see.
+  { id: "At Repair Agents",   icon: Building2,       label: "At Repair Agents"   },
   { id: "Pending Collection", icon: PackageCheck,    label: "Pending Collection" },
   { id: "Parts & Stock",      icon: Layers,          label: "Parts & Stock"      },
   { id: "Job History",        icon: History,         label: "Job History"        },

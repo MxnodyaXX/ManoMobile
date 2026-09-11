@@ -433,7 +433,7 @@ export default function TechDashboard() {
       <AgentsOutPanel
         transfers={myTransfers}
         jobs={myJobs}
-        footnote="Mark one back in from My Jobs, under the At an Agent tab."
+        footnote="Mark one back in — with what the agent charged — under At Repair Agents."
       />
 
       {/* Lower row: Paused jobs + Approved parts notifications */}

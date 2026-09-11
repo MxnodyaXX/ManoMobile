@@ -32,12 +32,25 @@ export interface AgentTransfer {
   status: TransferStatus;
   reason: string | null;
   expectedReturn: string | null;
+  /** What the agent quoted before the device left. Never overwritten. */
   agreedCost: number | null;
+  /**
+   * What the agent actually charged, taken when the device is received back.
+   *
+   * Separate from the quote on purpose: "agreed 3,500, charged 5,000" is a
+   * fact about that agent worth being able to see, and one that is gone for
+   * good if the receipt writes over the quote.
+   */
+  actualCost: number | null;
   sentAt: string;
   sentBy: string | null;
   returnedAt: string | null;
   returnNotes: string | null;
+  receivedBy: string | null;
 }
+
+/** What this transfer cost, as best as it is known. */
+export const transferCost = (t: AgentTransfer) => t.actualCost ?? t.agreedCost ?? 0;
 
 interface AgentRow {
   id: number; name: string; contact: string; address: string;
@@ -141,8 +154,10 @@ export function useAgents() {
 
 interface TransferRow {
   id: number; job_id: string; agent_id: number; status: TransferStatus;
-  reason: string | null; expected_return: string | null; agreed_cost: number | string | null;
-  sent_at: string; sent_by: string | null; returned_at: string | null; return_notes: string | null;
+  reason: string | null; expected_return: string | null;
+  agreed_cost: number | string | null; actual_cost: number | string | null;
+  sent_at: string; sent_by: string | null; returned_at: string | null;
+  return_notes: string | null; received_by: string | null;
   repair_agents: { name: string } | { name: string }[] | null;
 }
 
@@ -157,25 +172,75 @@ const rowToTransfer = (r: TransferRow): AgentTransfer => {
     reason: r.reason,
     expectedReturn: r.expected_return,
     agreedCost: r.agreed_cost == null ? null : Number(r.agreed_cost),
+    actualCost: r.actual_cost == null ? null : Number(r.actual_cost),
     sentAt: r.sent_at,
     sentBy: r.sent_by,
     returnedAt: r.returned_at,
     returnNotes: r.return_notes,
+    receivedBy: r.received_by,
   };
 };
 
-const TRANSFER_SELECT = "id, job_id, agent_id, status, reason, expected_return, agreed_cost, sent_at, sent_by, returned_at, return_notes, repair_agents (name)";
+const TRANSFER_SELECT = "id, job_id, agent_id, status, reason, expected_return, agreed_cost, actual_cost, sent_at, sent_by, returned_at, return_notes, received_by, repair_agents (name)";
 
 /** Every transfer still out at an agent, newest first. */
 export async function fetchOpenTransfers(): Promise<AgentTransfer[]> {
+  return fetchTransfers(["Sent"]);
+}
+
+/**
+ * Transfers by status, newest first.
+ *
+ * The agents screen wants both halves: what is still out, and what came back —
+ * because a device is not finished when it returns, it is finished when the
+ * technician closes the job, and the charge has to stay visible until then.
+ */
+export async function fetchTransfers(statuses: TransferStatus[] = ["Sent", "Returned"]): Promise<AgentTransfer[]> {
   const { data, error } = await getSupabaseBrowserClient()
     .from("repair_agent_transfers")
     .select(TRANSFER_SELECT)
-    .eq("status", "Sent")
+    .in("status", statuses)
     .order("sent_at", { ascending: false });
 
   if (error) throw new Error(`Could not load agent transfers: ${error.message}`);
   return (data as unknown as TransferRow[]).map(rowToTransfer);
+}
+
+/**
+ * Every outside-workshop trip one job has made, oldest first.
+ *
+ * For the completion form, which has to show the technician what the shop has
+ * already paid on this repair before they decide what to charge for it.
+ */
+export async function fetchJobTransfers(jobId: string): Promise<AgentTransfer[]> {
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("repair_agent_transfers")
+    .select(TRANSFER_SELECT)
+    .eq("job_id", jobId)
+    .order("sent_at", { ascending: true });
+
+  if (error) throw new Error(`Could not load agent transfers for ${jobId}: ${error.message}`);
+  return (data as unknown as TransferRow[]).map(rowToTransfer);
+}
+
+/**
+ * Outside-workshop cost per job, from v_job_agent_cost.
+ *
+ * Read as a map rather than a list: every caller wants "what did this job cost
+ * outside", and a screen showing forty rows should not scan a list forty times.
+ */
+export async function fetchAgentCostsByJob(): Promise<Record<string, number>> {
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("v_job_agent_cost")
+    .select("job_id, agent_cost");
+
+  if (error) throw new Error(`Could not load agent costs: ${error.message}`);
+
+  const out: Record<string, number> = {};
+  for (const r of (data ?? []) as { job_id: string; agent_cost: number | string }[]) {
+    out[r.job_id] = Number(r.agent_cost) || 0;
+  }
+  return out;
 }
 
 export interface NewTransfer {
@@ -218,10 +283,30 @@ export async function transferJobToAgent(t: NewTransfer): Promise<AgentTransfer>
   return rowToTransfer(data as unknown as TransferRow);
 }
 
-export async function markTransferReturned(transferId: number, notes?: string): Promise<void> {
+export interface TransferReceipt {
+  /** What the agent charged. Left null when nobody knows yet. */
+  actualCost?: number | null;
+  notes?: string;
+  receivedBy?: string;
+}
+
+/**
+ * Take a device back in from an agent.
+ *
+ * The charge is asked for here rather than at any later point because here is
+ * the only moment somebody is holding the agent's slip. A repair whose outside
+ * cost is entered a week later is a repair that was priced without it.
+ */
+export async function markTransferReturned(transferId: number, receipt: TransferReceipt = {}): Promise<void> {
   const { error } = await getSupabaseBrowserClient()
     .from("repair_agent_transfers")
-    .update({ status: "Returned", returned_at: new Date().toISOString(), return_notes: notes ?? null })
+    .update({
+      status: "Returned",
+      returned_at: new Date().toISOString(),
+      return_notes: receipt.notes?.trim() || null,
+      actual_cost: receipt.actualCost ?? null,
+      received_by: receipt.receivedBy ?? null,
+    })
     .eq("id", transferId);
 
   if (error) throw new Error(`Could not mark the transfer returned: ${error.message}`);

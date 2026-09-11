@@ -7,6 +7,7 @@ import type { JobSmsEvent } from "@/lib/sms/templates";
 import { notifyJobEmail } from "@/lib/email/notify";
 import { rulesForTechnician } from "@/lib/settings/staffRules";
 import { fetchJobs, fetchDealers, insertJob, patchJob, upsertDealer, deleteDealer, claimJob as claimJobRow, UNASSIGNED_TECHNICIAN } from "@/lib/repair/api";
+import { fetchAgentCostsByJob } from "@/lib/repair/agents";
 import { useRealtimeTable } from "@/lib/supabase/useRealtime";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -380,6 +381,19 @@ interface RepairContextValue {
    */
   saveDealer: (dealer: RepairDealer) => Promise<{ ok: boolean; error?: string }>;
   removeDealer: (id: number) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * What each job has cost in outside workshop fees, by job id.
+   *
+   * Summed over every returned transfer, so a device that went out twice reads
+   * as both. Lives here rather than on the job because a job can be sent out
+   * more than once, and a column on the job would only ever hold whichever
+   * figure was written last.
+   *
+   * Absent means no outside work — not zero. A repair that cost nothing
+   * outside and a repair nobody has priced yet are different things, and only
+   * one of them should show a figure.
+   */
+  agentCosts: Record<string, number>;
   /** True while the first load is in flight. */
   loading: boolean;
   /** Last backend error, for surfacing in the UI. */
@@ -399,6 +413,7 @@ const RepairContext = createContext<RepairContextValue>({
   setDealers: () => {},
   saveDealer: async () => ({ ok: true }),
   removeDealer: async () => ({ ok: true }),
+  agentCosts: {},
   loading: false,
   error: null,
   refresh: async () => {},
@@ -451,6 +466,8 @@ export function RepairProvider({ children }: { children: ReactNode }) {
     notifyJobEvent(event, job);
   }, []);
 
+  const [agentCosts, setAgentCosts] = useState<Record<string, number>>({});
+
   const load = useCallback(async () => {
     if (!configured) return;
     try {
@@ -460,6 +477,14 @@ export function RepairProvider({ children }: { children: ReactNode }) {
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+
+    // Separately, and never fatally. Outside-work costs are one line on a cost
+    // breakdown; failing to read them must not leave the shop without its jobs.
+    try {
+      setAgentCosts(await fetchAgentCostsByJob());
+    } catch {
+      /* the line is simply absent until the next refresh */
     }
   }, [configured]);
 
@@ -683,10 +708,10 @@ export function RepairProvider({ children }: { children: ReactNode }) {
   }, [configured]);
 
   const value = useMemo<RepairContextValue>(() => ({
-    jobs, addJob, updateJob, claimJob, dealers, setDealers, saveDealer, removeDealer,
+    jobs, addJob, updateJob, claimJob, dealers, setDealers, saveDealer, removeDealer, agentCosts,
     loading, error, refresh: load,
     backend: configured ? "supabase" : "local",
-  }), [jobs, addJob, updateJob, claimJob, dealers, setDealers, saveDealer, removeDealer, loading, error, load, configured]);
+  }), [jobs, addJob, updateJob, claimJob, dealers, setDealers, saveDealer, removeDealer, agentCosts, loading, error, load, configured]);
 
   return <RepairContext.Provider value={value}>{children}</RepairContext.Provider>;
 }

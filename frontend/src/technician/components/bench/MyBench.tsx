@@ -10,6 +10,7 @@ import { isUnassigned, claimRepairJob } from "@/lib/repair/api";
 import { useTech } from "@/technician/contexts/TechContext";
 import { useParts } from "@/cashier/contexts/PartsContext";
 import BenchCard, { type BenchAction } from "@/technician/components/bench/BenchCard";
+import BenchTable from "@/technician/components/bench/BenchTable";
 import PersonalInsights from "@/technician/components/bench/PersonalInsights";
 import BenchFilters, {
   applyBenchFilter, isFiltering, EMPTY_FILTER, type BenchFilter, type BenchView,
@@ -24,6 +25,7 @@ import EscalationModal from "@/technician/components/jobs/EscalationModal";
 import CustomerMessageModal from "@/technician/components/jobs/CustomerMessageModal";
 import TransferAgentModal from "@/technician/components/jobs/TransferAgentModal";
 import { fetchOpenTransfers, type AgentTransfer } from "@/lib/repair/agents";
+import ReceiveFromAgentModal from "@/technician/components/agents/ReceiveFromAgentModal";
 import JobInfoModal from "@/technician/components/jobs/JobInfoModal";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -42,7 +44,8 @@ const ff = "'Plus Jakarta Sans', sans-serif";
  * behind the card's ⋯ menu or in the secondary nav.
  */
 
-type ModalKind = Exclude<BenchAction, "start" | "resume">;
+// "receive" has its own sheet, which needs the transfer rather than the job.
+type ModalKind = Exclude<BenchAction, "start" | "resume" | "receive">;
 
 type SectionKey = "progress" | "todo" | "pool" | "agent" | "waiting" | "ready";
 
@@ -174,6 +177,9 @@ export default function MyBench() {
   }
 
   const isAtAgent = (jobId: string) => openTransfers.some(t => t.jobId === jobId);
+  const transferFor = (jobId: string) => openTransfers.find(t => t.jobId === jobId);
+  /** The transfer being taken back in, while its sheet is open. */
+  const [receiving, setReceiving] = useState<AgentTransfer | null>(null);
 
   /**
    * Repairs with no technician on them.
@@ -271,6 +277,23 @@ export default function MyBench() {
       }
 
       setNotice(`${job.id} is yours — it has moved to "To start".`);
+      return;
+    }
+
+    /**
+     * The device is back from the outside workshop.
+     *
+     * Its own sheet, because taking a phone back in is not a status change —
+     * it is a receipt, and the number on the agent's slip has to be captured
+     * while somebody is holding it. See ReceiveFromAgentModal.
+     */
+    if (action === "receive") {
+      const transfer = transferFor(job.id);
+      if (!transfer) {
+        setNotice(`${job.id} has no open transfer to close. Refresh and try again.`);
+        return;
+      }
+      setReceiving(transfer);
       return;
     }
 
@@ -566,6 +589,17 @@ export default function MyBench() {
                         {all.length === 0 ? col.empty : "Nothing here matches that search"}
                       </p>
                     ) : (
+                      view === "table" ? (
+                        <BenchTable
+                          jobs={list}
+                          onAction={handle}
+                          showTechnician={shopWide}
+                          technicianName={technicianName}
+                          shopWide={shopWide}
+                          transferFor={transferFor}
+                          partsPendingFor={pendingFor}
+                        />
+                      ) : (
                       <div style={view === "list" ? {
                         display: "flex", flexDirection: "column", gap: 6,
                       } : view === "compact" ? {
@@ -606,10 +640,14 @@ export default function MyBench() {
                             readOnly={shopWide && !isUnassigned(j.technician) && j.technician !== technicianName}
                             startedAt={jobMeta[j.id]?.startedAt ?? (j.startedAt ? new Date(j.startedAt) : undefined)}
                             partsPending={pendingFor(j.id)}
+                            // Overrides every action on the card: a device out
+                            // of the building can only be received back.
+                            atAgent={transferFor(j.id) ?? null}
                             onAction={handle}
                           />
                         ))}
                       </div>
+                      )
                     )}
                   </div>
                 )}
@@ -655,6 +693,39 @@ export default function MyBench() {
       {openJob && modal?.kind === "info" && (
         <JobInfoModal job={openJob} onClose={() => setModal(null)} />
       )}
+      {/* Back in the shop, with what it cost */}
+      {receiving && (
+        <ReceiveFromAgentModal
+          transfer={receiving}
+          job={jobs.find(j => j.id === receiving.jobId)}
+          technicianName={technicianName}
+          onClose={() => setReceiving(null)}
+          onReceived={() => {
+            /**
+             * Straight into In progress.
+             *
+             * The phone is on the bench and the technician is holding it —
+             * asking them to press Resume afterwards would be asking them to
+             * say so twice. The pause reason goes with it: "At external agent"
+             * stops being true the moment it comes back.
+             */
+            void updateJob(receiving.jobId, {
+              status: "Issued",
+              startedAt: jobs.find(j => j.id === receiving.jobId)?.startedAt ?? new Date().toISOString(),
+              pauseReason: undefined,
+              pausedAt: undefined,
+            });
+            setJobMeta(receiving.jobId, { lastPausedAt: undefined, pauseReason: undefined });
+            addActivity({
+              jobId: receiving.jobId, type: "status_change",
+              description: `Received back from ${receiving.agentName ?? "the repair agent"}`,
+            });
+            void reloadTransfers();
+            setNotice(`${receiving.jobId} is back in the shop and in progress.`);
+          }}
+        />
+      )}
+
       {openJob && modal?.kind === "transfer" && (
         <TransferAgentModal
           job={openJob}
@@ -666,7 +737,10 @@ export default function MyBench() {
             // see where it physically is.
             void updateJob(openJob.id, {
               status: "Pending",
-              pauseReason: `At external agent: ${agentName} — ${reason}`,
+              // The reason is optional now, so it is only appended when there
+              // is one — "At external agent: RIZVI — " reads like something
+              // went missing.
+              pauseReason: reason ? `At external agent: ${agentName} — ${reason}` : `At external agent: ${agentName}`,
               pausedAt: new Date().toISOString().slice(0, 10),
             });
             // Re-read the transfers rather than guessing the new row: this

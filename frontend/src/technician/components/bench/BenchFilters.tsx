@@ -1,6 +1,6 @@
 "use client";
 
-import { Search, X, LayoutGrid, Grid2x2, Rows3 } from "lucide-react";
+import { Search, X, LayoutGrid, Grid2x2, Rows3, Table2 } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -77,10 +77,17 @@ const control: React.CSSProperties = {
  * while it is in your hand. Rows are the finding view: fifty jobs on one
  * screen when you know what you are looking for. Compact is between them: a
  * row's height, three to five across, so a whole section fits without a job
- * shrinking to a line of text. None replaces the others, so the choice is the
- * technician's and it sticks.
+ * shrinking to a line of text.
+ *
+ * Table is the comparing view. The other three put every field in a different
+ * place on every job, which is what makes them good to work from and useless
+ * to scan down: a column of due dates is read in one pass, forty cards are
+ * not. It is the one to reach for when the question is about the set rather
+ * than about any one job.
+ *
+ * None replaces the others, so the choice is the technician's and it sticks.
  */
-export type BenchView = "cards" | "compact" | "list";
+export type BenchView = "cards" | "compact" | "list" | "table";
 
 export interface BenchSectionTab {
   key: string;
@@ -200,12 +207,13 @@ export default function BenchFilters({
   );
 }
 
-/** Cards or rows, as a two-state segmented control. */
+/** Cards, tiles, rows or a table — the technician picks, and it sticks. */
 function ViewSwitch({ view, onChange }: { view: BenchView; onChange: (v: BenchView) => void }) {
   const opts: { id: BenchView; label: string; icon: typeof LayoutGrid }[] = [
     { id: "cards",   label: "Cards",   icon: LayoutGrid },
     { id: "compact", label: "Compact", icon: Grid2x2 },
     { id: "list",    label: "List",    icon: Rows3 },
+    { id: "table",   label: "Table",   icon: Table2 },
   ];
   return (
     <div style={{ display: "flex", gap: 2, padding: 2, borderRadius: 10, background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Play, Pause, CheckCircle, Package, MoreHorizontal, Eye,
-  Stethoscope, StickyNote, AlertTriangle, Send, MessageSquare, History, Hand, Smartphone, BellRing,
+  Stethoscope, StickyNote, AlertTriangle, Send, MessageSquare, History, Hand, Smartphone, BellRing, PackageCheck,
 } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import { hasOpenInquiry } from "@/lib/repair/inquiry";
@@ -30,6 +30,10 @@ const ff = "'Plus Jakarta Sans', sans-serif";
 
 export type BenchAction =
   | "start" | "claim" | "claimStart" | "pause" | "resume" | "complete" | "parts"
+  // Taking a device back in from an outside workshop. Not "resume": the phone
+  // is not in the building, so there is nothing to resume — the only true next
+  // step is somebody walking back in with it.
+  | "receive"
   | "device" | "diagnostic" | "notes" | "escalate" | "transfer" | "message" | "activity"
   // Read-only. The only thing offered on another technician's job.
   | "info";
@@ -66,8 +70,18 @@ function fmtElapsed(startedAt: Date): string {
   return h > 0 ? `${h}:${mm}:${String(s).padStart(2, "0")}` : `${mm}:${String(s).padStart(2, "0")}`;
 }
 
-export default function BenchCard({ job, startedAt, partsPending, onAction, variant = "card", showTimer = true, showTechnician = false, readOnly = false }: {
+export default function BenchCard({ job, startedAt, partsPending, onAction, variant = "card", showTimer = true, showTechnician = false, readOnly = false, atAgent }: {
   job: RepairJob;
+  /**
+   * Set when the device is out at an outside workshop.
+   *
+   * It overrides every other action on the card. The job's status still says
+   * Pending, and on that alone the card offered Resume — an invitation to
+   * start working on a phone that is a mile away. What the status cannot know
+   * is where the device physically is, and that is the only thing that decides
+   * what can be done next.
+   */
+  atAgent?: { agentName: string | null; sentAt: string } | null;
   /** When the timer started, for a job in progress. */
   startedAt?: Date;
   /** Part requests on this job still waiting on Admin. */
@@ -360,6 +374,21 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
         </p>
       )}
 
+      {/* Where the phone is, in the colour the rest of the system uses for it.
+          The pause banner above says the same thing in words when a reason was
+          typed; this says it when one was not, and says it the same way every
+          time. */}
+      {atAgent && (
+        <p style={{
+          fontSize: 12, color: "var(--text-secondary)", fontFamily: ff, lineHeight: 1.5,
+          padding: "9px 11px", borderRadius: 9,
+          background: "rgba(167,139,250,0.08)", border: "1px solid rgba(167,139,250,0.28)",
+        }}>
+          At <strong style={{ color: "#a78bfa" }}>{atAgent.agentName ?? "an outside workshop"}</strong>
+          {" "}since {new Date(atAgent.sentAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+        </p>
+      )}
+
       {/* What to do about it */}
       <div style={{ display: "flex", gap: row || compact ? 6 : 8, alignItems: "stretch", flexWrap: row || compact ? "nowrap" : "wrap", flexShrink: 0 }}>
         {readOnly && (
@@ -367,7 +396,19 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
             <Eye size={16} />{compact ? "" : " More info"}
           </button>
         )}
-        {!readOnly && inProgress && (
+        {/* Out of the building: one action, and it is not about the repair.
+            Complete, Start, Resume and Pause are all things you do to a phone
+            you are holding. */}
+        {!readOnly && atAgent && (
+          <button
+            onClick={() => onAction("receive", job)}
+            title={`At ${atAgent.agentName ?? "an agent"} — record it back in the shop`}
+            style={btn("primary")}
+          >
+            <PackageCheck size={16} />{!compact && " Received back"}
+          </button>
+        )}
+        {!readOnly && !atAgent && inProgress && (
           <>
             <button onClick={() => onAction("complete", job)} title="Complete" style={btn("primary")}>
               <CheckCircle size={16} />{!compact && " Complete"}
@@ -390,7 +431,7 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
             phone up now. Rolling them into one button would either start the
             clock on work nobody has touched, or make every technician press
             twice for the common case. */}
-        {!readOnly && notStarted && unclaimed && (
+        {!readOnly && !atAgent && notStarted && unclaimed && (
           <>
             <button onClick={() => onAction("claim", job)} title="Claim only — put your name on it without starting the clock" style={btn("quiet")}>
               <Hand size={13} strokeWidth={2.4} />
@@ -403,12 +444,12 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
           </>
         )}
 
-        {!readOnly && notStarted && !unclaimed && (
+        {!readOnly && !atAgent && notStarted && !unclaimed && (
           <button onClick={() => onAction("start", job)} title="Start" style={btn("primary")}>
             <Play size={16} />{!compact && " Start"}
           </button>
         )}
-        {!readOnly && done && (
+        {!readOnly && !atAgent && done && (
           <span title="Waiting for collection" style={{
             display: "flex", alignItems: "center", gap: 7, flex: row ? "0 0 auto" : "1 1 auto",
             minHeight: row || compact ? 36 : 44, padding: row || compact ? "0 11px" : "0 14px",
@@ -420,7 +461,7 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
             <CheckCircle size={15} color="#60a5fa" />{compact ? "" : row ? " Collect" : " Waiting for collection"}
           </span>
         )}
-        {!readOnly && paused && (
+        {!readOnly && !atAgent && paused && (
           <>
             <button onClick={() => onAction("resume", job)} title="Resume" style={btn("primary")}>
               <Play size={16} />{!compact && " Resume"}
