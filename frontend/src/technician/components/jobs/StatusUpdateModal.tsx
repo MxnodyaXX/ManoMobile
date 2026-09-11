@@ -415,13 +415,12 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
     if (!selectedNext) return "Choose the new status above.";
     if (selectedNext === "Pending" && pauseReason.trim().length <= 3) return "Give a reason for putting the job on hold.";
     if (selectedNext === "Completed") {
-      // Optional on a normal or free-of-charge repair — the device works, and
-      // forcing a sentence out of a busy bench just produces "done". A Return
-      // is different: nothing was repaired, and that explanation is printed on
-      // the customer's receipt, so it stays required.
-      if ((completionType === "Return" || completionType === "Cash Return") && completionNotes.trim().length <= 5) {
-        return "Explain why the repair could not be completed (at least 6 characters).";
-      }
+      // The remarks are optional on every outcome, a Return included. This
+      // used to demand six characters on a Return, on the grounds that the
+      // reason is printed on the customer's receipt — which is true, and
+      // produced "not fixed" typed into the box to get past it. A required
+      // field that gets the same three words every time records nothing; the
+      // box is still there, still opens itself on a Return, and still prints.
       // A Cash Return with no figure is a job that says money is owed without
       // saying how much, which nobody downstream can act on.
       if (completionType === "Cash Return" && !(parseFloat(cashReturnAmount) > 0)) {
@@ -445,8 +444,7 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
     if (!selectedNext) return false;
     if (selectedNext === "Pending")   return pauseReason.trim().length > 3;
     if (selectedNext === "Completed") {
-      return ((completionType !== "Return" && completionType !== "Cash Return") || completionNotes.trim().length > 5)
-        && (completionType !== "Cash Return" || parseFloat(cashReturnAmount) > 0)
+      return (completionType !== "Cash Return" || parseFloat(cashReturnAmount) > 0)
         && (!needsApproval || approvalCaptured)
         && labourValue.trim() !== ""
         && (!needsLossAck || lossAccepted);
@@ -896,7 +894,7 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                   {completionType !== "Normal" && completionType !== "Cash Return" && (
                     <p style={{ fontSize: 11.5, color: "#fbbf24", fontFamily: ff, lineHeight: 1.5 }}>
                       {completionType === "Return"
-                        ? "Nothing will be charged and no warranty is issued. Explain below what could not be repaired — it goes on the customer's receipt."
+                        ? "Nothing will be charged and no warranty is issued. If you say below what could not be repaired, it goes on the customer's receipt."
                         : "Nothing will be charged. A warranty can still be issued for the work done."}
                     </p>
                   )}
@@ -1439,15 +1437,19 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                   */}
                     {/* Work summary (technician remarks → printed on the receipt) */}
                   <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                    {/* A Return has to be explained, so that one is never folded. */}
-                    {completionType === "Return"
-                      ? <div style={{ marginBottom: 7 }}>{sec("Reason Not Repaired * (required)")}</div>
-                      : fold("Job remarks", notesOpen || completionNotes.trim() !== "", () => setNotesOpen(v => !v),
-                          completionNotes.trim() ? "Written" : "Optional")}
+                    {/* The same fold on every outcome. On a Return it opens by
+                        itself and asks a different question — the device was
+                        not fixed, so "what was done" becomes "what could not
+                        be" — but it is still a fold, still optional, and can
+                        still be closed. */}
+                    {fold(
+                      completionType === "Return" ? "Reason not repaired" : "Job remarks",
+                      notesOpen || completionType === "Return" || completionNotes.trim() !== "",
+                      () => setNotesOpen(v => !v),
+                      completionNotes.trim() ? "Written" : "Optional",
+                    )}
                     {(completionType === "Return" || notesOpen || completionNotes.trim() !== "") && (
-                    <div style={completionType === "Return"
-                      ? { ...foldBody, borderTop: "1px solid var(--border)", borderRadius: 9 }
-                      : foldBody}>
+                    <div style={foldBody}>
                     {completionType !== "Return" && (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                         {QUICK_SUMMARIES.map(q => (
@@ -1468,10 +1470,8 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                     <textarea placeholder={completionType === "Return"
                       ? "Why the repair could not be completed — what was tried, what failed…"
                       : "Describe all work performed — parts replaced, tests done, issues found…"} value={completionNotes} onChange={e => setCompletionNotes(e.target.value)} rows={3} style={inputStyle} />
-                    <p style={{ fontSize: 11, color: completionNotes.trim().length > 5 ? TA : "var(--text-muted)", fontFamily: ff }}>
-                      {completionType === "Return"
-                        ? <>{completionNotes.trim().length} chars {completionNotes.trim().length > 5 ? "✓" : "(min 6)"}</>
-                        : <>Printed on the customer&apos;s receipt if you fill it in.</>}
+                    <p style={{ fontSize: 11, color: completionNotes.trim() ? TA : "var(--text-muted)", fontFamily: ff }}>
+                      Printed on the customer&apos;s receipt if you fill it in.
                     </p>
                     </div>
                     )}
