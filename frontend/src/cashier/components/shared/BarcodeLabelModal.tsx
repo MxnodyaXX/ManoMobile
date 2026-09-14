@@ -60,6 +60,15 @@ interface BarcodeLabelModalProps {
    * dialog on its own, this just removes every step on our side of it.
    */
   silent?: boolean;
+  /**
+   * Put as a question, with a way to say no.
+   *
+   * The dialog was built for somebody who had already decided to print —
+   * one button, and the X to change their mind. Offered unprompted after an
+   * intake, that reads as a step to get through rather than a choice, so this
+   * mode titles it as a question and adds "Not now" beside Print.
+   */
+  ask?: boolean;
   onClose: () => void;
 }
 
@@ -77,7 +86,7 @@ interface BarcodeLabelModalProps {
  * until it fits. Runs for both axes since a narrower label (38mm) can
  * overflow sideways even when a wider one (50mm) had enough slack.
  */
-export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, outsideDealer = false, silent = false, onClose }: BarcodeLabelModalProps) {
+export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, outsideDealer = false, silent = false, ask = false, onClose }: BarcodeLabelModalProps) {
   const { barcodeSettings: s } = useInventory();
   const labelRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -402,7 +411,11 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Tag size={15} color="var(--accent)" />
-            <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>{variant === "repair" ? "Print Repair Tag" : variant === "part" ? "Print Part Label" : "Print Barcode Label"}</p>
+            <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>
+              {ask
+                ? (variant === "repair" ? "Print a repair tag?" : "Print a label?")
+                : variant === "repair" ? "Print Repair Tag" : variant === "part" ? "Print Part Label" : "Print Barcode Label"}
+            </p>
           </div>
           <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <X size={14} />
@@ -431,12 +444,22 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
           {/* Rendered at its true physical size, so what's previewed here is what prints. */}
           {labelContent}
 
-          <button
-            onClick={handlePrint}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 20px", borderRadius: 8, fontSize: 13, fontWeight: 600, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--accent-fg)", cursor: "pointer", fontFamily: ff }}
-          >
-            <Printer size={14} /> {variant === "repair" ? "Print Repair Tag" : variant === "part" ? "Print Part Label" : "Print Label"}
-          </button>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+            {ask && (
+              <button
+                onClick={onClose}
+                style={{ padding: "9px 18px", borderRadius: 8, fontSize: 13, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: ff }}
+              >
+                Not now
+              </button>
+            )}
+            <button
+              onClick={handlePrint}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 20px", borderRadius: 8, fontSize: 13, fontWeight: 600, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--accent-fg)", cursor: "pointer", fontFamily: ff }}
+            >
+              <Printer size={14} /> {variant === "repair" ? "Print Repair Tag" : variant === "part" ? "Print Part Label" : "Print Label"}
+            </button>
+          </div>
         </div>
       </div>
     </div>,

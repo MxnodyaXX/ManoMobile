@@ -1961,10 +1961,11 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
         }
       }
 
-      // The device tag prints itself — no click needed. True zero-dialog
-      // silence depends on the browser being launched with silent/kiosk
-      // printing to the label printer; this just removes every step on our
-      // side of that regardless.
+      // Our own customer's device gets its tag printed without a click. A
+      // dealer's device is asked about instead — see the modal below. True
+      // zero-dialog silence depends on the browser being launched with
+      // silent/kiosk printing to the label printer; this just removes every
+      // step on our side of that regardless.
       setAutoPrintJob(job);
       // The intake is now a real job — its draft has served its purpose.
       removeDraft(draftId);
@@ -2185,9 +2186,16 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
       </div>
 
       {createdJob && <JobReceiptPopup job={createdJob} onNew={startNewRepair} onClose={onClose} />}
+      {/* Whose device decides whether the tag prints itself. Mano Mobile's own
+          repairs always get a tag — the phone goes on the shelf under our
+          number and the customer comes back with a slip. A dealer's device
+          usually arrives already labelled with their docket, and a second tag
+          fired at the printer unasked was a tag peeled off and binned. So for
+          a dealer's job the same dialog opens as a question instead. */}
       {autoPrintJob && (
         <BarcodeLabelModal
-          silent
+          silent={isInHouseDealer(dealers, autoPrintJob)}
+          ask={!isInHouseDealer(dealers, autoPrintJob)}
           variant="repair"
           jobId={autoPrintJob.id}
           dealerJobNo={autoPrintJob.dealerJobNo}
