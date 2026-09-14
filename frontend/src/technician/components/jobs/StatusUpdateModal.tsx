@@ -10,8 +10,8 @@ import { type RepairJob, type JobStatus, type CompletionType, type EstimateAppro
 import { useTech } from "@/technician/contexts/TechContext";
 import DeviceDetailsFields, { draftFromJob, missingOn, type DeviceDraft } from "@/technician/components/jobs/DeviceDetailsFields";
 import { useParts } from "@/cashier/contexts/PartsContext";
-import { rulesForTechnician, fetchStaffRules, type EffectiveRules } from "@/lib/settings/staffRules";
-import { useTechnicians } from "@/lib/repair/technicians";
+import { rulesForTechnician, type EffectiveRules } from "@/lib/settings/staffRules";
+import { useTechnicians, useDefaultTechnician } from "@/lib/repair/technicians";
 import { isUnassigned } from "@/lib/repair/api";
 import { labourFromRate, describeRate } from "@/lib/repair/labour";
 import { useToast } from "@/lib/ui/toast";
@@ -167,34 +167,14 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
    * and empty — required — when it came off the unassigned pile.
    */
   const { technicians } = useTechnicians();
-  const [completedBy, setCompletedBy] = useState<string>(isUnassigned(job.technician) ? "" : job.technician);
+  const [completedByChoice, setCompletedBy] = useState<string>(isUnassigned(job.technician) ? "" : job.technician);
 
-  /**
-   * Pre-select the shop's default technician for an unassigned job.
-   *
-   * The same flag intake uses to pre-fill the assignment — Admin → Permissions
-   * → "Default technician" — so the two screens agree on who the work goes to
-   * when nobody said. In a one-technician shop that is the answer every time,
-   * and a required dropdown that always wants the same name is a click the
-   * cashier makes forty times a day. Only fills an empty box: a job that
-   * already has a name, or a name the cashier already picked, is left alone.
-   */
-  useEffect(() => {
-    if (!adminBench || !isUnassigned(job.technician) || technicians.length === 0) return;
-    let active = true;
-    fetchStaffRules()
-      .then(rows => {
-        if (!active) return;
-        const defaultId = rows.find(r => r.isDefaultTechnician)?.profileId;
-        const name = defaultId ? technicians.find(t => t.id === defaultId)?.name : undefined;
-        // One technician on the roster is a default whether or not the flag
-        // was ever set.
-        const chosen = name ?? (technicians.length === 1 ? technicians[0].name : undefined);
-        if (chosen) setCompletedBy(prev => (prev ? prev : chosen));
-      })
-      .catch(() => { /* the cashier picks by hand */ });
-    return () => { active = false; };
-  }, [adminBench, job.technician, technicians]);
+  // Pre-select the shop's default technician for a job that came off the
+  // unassigned pile — the same flag intake and the bench's start picker use,
+  // so every screen agrees on who the work goes to when nobody said. Applied
+  // when read, so a name the cashier already picked is never overwritten.
+  const fallbackTech = useDefaultTechnician(technicians);
+  const completedBy = completedByChoice || (adminBench && isUnassigned(job.technician) ? fallbackTech ?? "" : "");
   // Whose rate and rules the form runs on. Off the admin bench this is simply
   // the technician; on it, the one named above.
   const workerName = adminBench ? (completedBy || job.technician) : technicianName;

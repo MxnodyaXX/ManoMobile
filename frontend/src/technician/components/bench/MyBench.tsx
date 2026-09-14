@@ -11,6 +11,7 @@ import { useTech } from "@/technician/contexts/TechContext";
 import { useParts } from "@/cashier/contexts/PartsContext";
 import BenchCard, { type BenchAction } from "@/technician/components/bench/BenchCard";
 import BenchTable from "@/technician/components/bench/BenchTable";
+import PickTechnicianModal from "@/technician/components/bench/PickTechnicianModal";
 import PersonalInsights from "@/technician/components/bench/PersonalInsights";
 import BenchFilters, {
   applyBenchFilter, isFiltering, EMPTY_FILTER, type BenchFilter, type BenchView,
@@ -190,6 +191,13 @@ export default function MyBench() {
   const transferFor = (jobId: string) => openTransfers.find(t => t.jobId === jobId);
   /** The transfer being taken back in, while its sheet is open. */
   const [receiving, setReceiving] = useState<AgentTransfer | null>(null);
+  /**
+   * The unassigned job the whole-shop bench is about to start, while it asks
+   * who is doing it. The name goes on before the clock does — see
+   * PickTechnicianModal for why it cannot wait until Finish.
+   */
+  const [assigning, setAssigning] = useState<RepairJob | null>(null);
+  const [assignError, setAssignError] = useState<string | null>(null);
 
   /**
    * Repairs with no technician on them.
@@ -206,6 +214,10 @@ export default function MyBench() {
   const unassigned = canClaim
     ? jobs
         .filter(j => isUnassigned(j.technician))
+        // Not started, as well as not held. A job that is Issued under nobody
+        // — started from the whole-shop bench before it asked who — belongs
+        // in In progress, and was appearing there and here at once.
+        .filter(j => j.status === "Non-Issued")
         .filter(j => j.status !== "Cancelled" && !isFinished(j))
         .sort(byOldest)
     : [];
@@ -308,6 +320,12 @@ export default function MyBench() {
         return;
       }
       setReceiving(transfer);
+      return;
+    }
+
+    if (action === "start" && adminBench && isUnassigned(job.technician)) {
+      setAssignError(null);
+      setAssigning(job);
       return;
     }
 
@@ -732,6 +750,43 @@ export default function MyBench() {
       {openJob && modal?.kind === "info" && (
         <JobInfoModal job={openJob} onClose={() => setModal(null)} />
       )}
+      {/* Whose bench an unassigned job lands on, before it starts */}
+      {assigning && (
+        <PickTechnicianModal
+          job={assigning}
+          busy={busyId === assigning.id}
+          error={assignError}
+          onClose={() => { setAssigning(null); setAssignError(null); }}
+          onPick={async name => {
+            const job = assigning;
+            setBusyId(job.id);
+            setAssignError(null);
+            try {
+              /**
+               * Two writes, in this order. The claim is the database function
+               * with p_for — it puts the technician's name on the job and
+               * records the cashier as the one who pressed it, atomically, so
+               * two people grabbing the same phone cannot both win. Then the
+               * ordinary start, which is what puts it in In progress.
+               */
+              await claimRepairJob(job.id, name);
+              await refresh();
+              const claimed = jobs.find(j => j.id === job.id) ?? { ...job, technician: name };
+              // The claim wrote its own history line naming both people, and
+              // the start below writes "Job started by …" — a third line here
+              // would say the same thing again.
+              await handle("start", { ...claimed, technician: name });
+              setAssigning(null);
+              setNotice(`${job.id} is on ${name}'s bench and in progress.`);
+            } catch (e) {
+              setAssignError(e instanceof Error ? e.message : "That job could not be started.");
+            } finally {
+              setBusyId(null);
+            }
+          }}
+        />
+      )}
+
       {/* Back in the shop, with what it cost */}
       {receiving && (
         <ReceiveFromAgentModal

@@ -87,3 +87,36 @@ export function useTechnicians(): TechniciansState {
 
   return { technicians, loading, error, source: configured ? "database" : "fallback" };
 }
+
+/**
+ * The technician the shop falls back to when nobody said.
+ *
+ * Admin → Permissions → "Default technician" — the same flag intake uses to
+ * pre-fill the assignment on a new job. In a one-technician shop it is the
+ * answer every time, and a roster of one is a default whether or not the flag
+ * was ever set. Null while loading, and null when the shop genuinely has not
+ * chosen — a required picker should then stay empty rather than guess.
+ */
+export function useDefaultTechnician(technicians: Technician[]): string | null {
+  const [name, setName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (technicians.length === 0) return;
+    let active = true;
+    // Imported lazily so this module stays usable outside the settings
+    // context, and so the roster hook above carries no settings dependency.
+    import("@/lib/settings/staffRules")
+      .then(({ fetchStaffRules }) => fetchStaffRules())
+      .then(rows => {
+        if (!active) return;
+        const id = rows.find(r => r.isDefaultTechnician)?.profileId;
+        setName(id ? technicians.find(t => t.id === id)?.name ?? null : null);
+      })
+      .catch(() => { /* no flag readable; the roster-of-one rule below still applies */ });
+    return () => { active = false; };
+  }, [technicians]);
+
+  // A roster of one is a default whether or not the flag was ever set —
+  // derived, so it needs no state and is right on the first render.
+  return name ?? (technicians.length === 1 ? technicians[0].name : null);
+}
