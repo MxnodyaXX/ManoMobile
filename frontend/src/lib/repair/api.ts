@@ -328,8 +328,14 @@ export async function fetchJobsByImei(imei: string, excludeId?: string): Promise
  *   caller's own, as it always was. See migration 20260914000050.
  */
 export async function claimRepairJob(jobId: string, forTechnician?: string): Promise<RepairJob> {
-  const { data, error } = await getSupabaseBrowserClient()
-    .rpc("claim_repair_job", { p_job_id: jobId, p_for: forTechnician ?? null });
+  // p_for is only sent when there is one. PostgREST matches a function by the
+  // parameters it is handed, so sending p_for: null against a database that
+  // has not yet run 20260914000050 finds no function at all — and a technician
+  // claiming their own work, who never needed the parameter, was refused with
+  // a message blaming the wrong migration. Without it, the one-argument call
+  // matches the old function and the new one alike.
+  const args = forTechnician ? { p_job_id: jobId, p_for: forTechnician } : { p_job_id: jobId };
+  const { data, error } = await getSupabaseBrowserClient().rpc("claim_repair_job", args);
 
   if (error) {
     if (/already been started/i.test(error.message)) {
@@ -344,8 +350,12 @@ export async function claimRepairJob(jobId: string, forTechnician?: string): Pro
     if (/not an active technician/i.test(error.message)) {
       throw new Error(error.message);
     }
-    if (/claim_repair_job/.test(error.message) || error.code === "42883") {
-      throw new Error("Claiming is not set up yet — run migration 20260902000019_technician_workflow.sql.");
+    if (/claim_repair_job/.test(error.message) || error.code === "42883" || error.code === "PGRST202") {
+      // Two migrations can be behind, and they fail the same way. Which one
+      // is told by what was asked for: only the newer function knows p_for.
+      throw new Error(forTechnician
+        ? "Claiming for another technician is not set up yet — run migration 20260914000050_claim_on_behalf.sql."
+        : "Claiming is not set up yet — run migration 20260902000019_technician_workflow.sql.");
     }
     throw new Error(error.message);
   }
