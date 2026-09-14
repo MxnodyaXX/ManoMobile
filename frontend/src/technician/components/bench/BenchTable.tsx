@@ -47,8 +47,10 @@ const fmtDate = (d?: string) => {
  */
 export default function BenchTable({
   jobs, onAction, showTechnician = false, technicianName, shopWide = false,
-  transferFor, partsPendingFor,
+  transferFor, partsPendingFor, adminBench = false,
 }: {
+  /** The whole-shop bench: nothing is read-only, and the pool starts rather than claims. */
+  adminBench?: boolean;
   jobs: RepairJob[];
   onAction: (action: BenchAction, job: RepairJob) => void;
   showTechnician?: boolean;
@@ -93,8 +95,8 @@ export default function BenchTable({
         <tbody>
           {jobs.map((job, i) => {
             const agent = transferFor(job.id) ?? null;
-            const readOnly = shopWide && !isUnassigned(job.technician) && job.technician !== technicianName;
-            const actions = benchActions(job, { atAgent: agent, readOnly });
+            const readOnly = !adminBench && shopWide && !isUnassigned(job.technician) && job.technician !== technicianName;
+            const actions = benchActions(job, { atAgent: agent, readOnly, adminBench });
             const late = daysOverdue(job);
             const pending = partsPendingFor(job.id);
             const asking = hasOpenInquiry(job);

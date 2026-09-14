@@ -70,7 +70,7 @@ function fmtElapsed(startedAt: Date): string {
   return h > 0 ? `${h}:${mm}:${String(s).padStart(2, "0")}` : `${mm}:${String(s).padStart(2, "0")}`;
 }
 
-export default function BenchCard({ job, startedAt, partsPending, onAction, variant = "card", showTimer = true, showTechnician = false, readOnly = false, atAgent }: {
+export default function BenchCard({ job, startedAt, partsPending, onAction, variant = "card", showTimer = true, showTechnician = false, readOnly = false, atAgent, adminBench = false }: {
   job: RepairJob;
   /**
    * Set when the device is out at an outside workshop.
@@ -82,6 +82,8 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
    * what can be done next.
    */
   atAgent?: { agentName: string | null; sentAt: string } | null;
+  /** The whole-shop bench: an unassigned job starts rather than being claimed. */
+  adminBench?: boolean;
   /** When the timer started, for a job in progress. */
   startedAt?: Date;
   /** Part requests on this job still waiting on Admin. */
@@ -431,7 +433,7 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
             phone up now. Rolling them into one button would either start the
             clock on work nobody has touched, or make every technician press
             twice for the common case. */}
-        {!readOnly && !atAgent && notStarted && unclaimed && (
+        {!readOnly && !atAgent && notStarted && unclaimed && !adminBench && (
           <>
             <button onClick={() => onAction("claim", job)} title="Claim only — put your name on it without starting the clock" style={btn("quiet")}>
               <Hand size={13} strokeWidth={2.4} />
@@ -444,7 +446,7 @@ export default function BenchCard({ job, startedAt, partsPending, onAction, vari
           </>
         )}
 
-        {!readOnly && !atAgent && notStarted && !unclaimed && (
+        {!readOnly && !atAgent && notStarted && (!unclaimed || adminBench) && (
           <button onClick={() => onAction("start", job)} title="Start" style={btn("primary")}>
             <Play size={16} />{!compact && " Start"}
           </button>

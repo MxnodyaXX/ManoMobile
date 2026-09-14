@@ -321,9 +321,15 @@ export async function fetchJobsByImei(imei: string, excludeId?: string): Promise
  * Throws with a message worth showing — "already started by another technician"
  * is the answer, not an error to swallow.
  */
-export async function claimRepairJob(jobId: string): Promise<RepairJob> {
+/**
+ * @param forTechnician  Whose bench it lands on, when that is not the caller.
+ *   Only an Admin or an Admin Cashier may name somebody else — the counter
+ *   working the technician's bench for them. Left out, the job is the
+ *   caller's own, as it always was. See migration 20260914000050.
+ */
+export async function claimRepairJob(jobId: string, forTechnician?: string): Promise<RepairJob> {
   const { data, error } = await getSupabaseBrowserClient()
-    .rpc("claim_repair_job", { p_job_id: jobId });
+    .rpc("claim_repair_job", { p_job_id: jobId, p_for: forTechnician ?? null });
 
   if (error) {
     if (/already been started/i.test(error.message)) {
@@ -331,6 +337,12 @@ export async function claimRepairJob(jobId: string): Promise<RepairJob> {
     }
     if (/not permitted/i.test(error.message)) {
       throw new Error("You are not permitted to claim unassigned repairs.");
+    }
+    if (/somebody else/i.test(error.message)) {
+      throw new Error("Only an Admin or an Admin Cashier can claim a repair onto another technician's bench.");
+    }
+    if (/not an active technician/i.test(error.message)) {
+      throw new Error(error.message);
     }
     if (/claim_repair_job/.test(error.message) || error.code === "42883") {
       throw new Error("Claiming is not set up yet — run migration 20260902000019_technician_workflow.sql.");

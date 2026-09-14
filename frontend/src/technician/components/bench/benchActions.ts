@@ -42,10 +42,16 @@ export interface BenchActionContext {
   atAgent?: { agentName: string | null } | null;
   /** Somebody else's job: seeing across the workshop is not changing it. */
   readOnly?: boolean;
+  /**
+   * The whole-shop bench. An unassigned job is started, not claimed: there
+   * is nobody to claim it for yet, and the person who did the work is named
+   * when it is finished.
+   */
+  adminBench?: boolean;
 }
 
 export function benchActions(job: RepairJob, ctx: BenchActionContext = {}): BenchActionSpec[] {
-  const { atAgent, readOnly } = ctx;
+  const { atAgent, readOnly, adminBench } = ctx;
 
   if (readOnly) {
     // Dropped, not disabled: a greyed-out Complete invites a second click and
@@ -92,7 +98,7 @@ export function benchActions(job: RepairJob, ctx: BenchActionContext = {}): Benc
     // claiming and starting also says you have picked the phone up now.
     // Rolling them into one would either start the clock on work nobody has
     // touched, or make every technician press twice for the common case.
-    if (isUnassigned(job.technician)) {
+    if (isUnassigned(job.technician) && !adminBench) {
       return [
         { id: "claim",      label: "Claim only",   icon: Hand, tone: "quiet",   title: "Claim only — put your name on it without starting the clock" },
         { id: "claimStart", label: "Claim & start", icon: Play, tone: "primary", title: "Claim and start working on it now" },

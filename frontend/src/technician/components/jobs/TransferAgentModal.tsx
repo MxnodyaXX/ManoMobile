@@ -6,6 +6,7 @@ import { X, Send, AlertCircle, Building2 } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import { useAgents, transferJobToAgent } from "@/lib/repair/agents";
 import { useToast } from "@/lib/ui/toast";
+import { useTech } from "@/technician/contexts/TechContext";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -26,6 +27,9 @@ export default function TransferAgentModal({
   onTransferred: (agentName: string, reason: string) => void;
 }) {
   const { agents, loading, configured } = useAgents();
+  // sent_by is who handed the device over, which is not always the
+  // technician it is assigned to — the counter can send it out for them.
+  const { actorName } = useTech();
   const [agentId, setAgentId] = useState<number | "">("");
   const [reason, setReason] = useState("");
   const [expectedReturn, setExpectedReturn] = useState("");
@@ -56,7 +60,7 @@ export default function TransferAgentModal({
           reason: reason.trim() || undefined,
           expectedReturn: expectedReturn || undefined,
           agreedCost: agreedCost ? parseFloat(agreedCost) : undefined,
-          sentBy: technicianName,
+          sentBy: actorName || technicianName,
         });
       }
       toast.dialog("success", `${job.id} sent out`, `The device is now with ${agent?.name ?? "the agent"}.`);

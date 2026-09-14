@@ -2,6 +2,7 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { Wrench, ArrowRight, History, CheckCircle, XCircle, User } from "lucide-react";
 import { RepairProvider, useRepair } from "@/cashier/contexts/RepairContext";
 import { useTechnicians } from "@/lib/repair/technicians";
@@ -22,6 +23,7 @@ import JobScanFab    from "@/cashier/components/shared/JobScanFab";
 import JobInfoModal  from "@/technician/components/jobs/JobInfoModal";
 import TabTitle       from "@/lib/ui/TabTitle";
 import { useAuth }    from "@/lib/auth/AuthContext";
+import { useMyPermissions } from "@/lib/settings/staffRules";
 import { useJobSlot } from "@/lib/repair/useJobSlot";
 
 const TA = "#34d399";
@@ -176,11 +178,45 @@ function TechSelect({ onSelect }: { onSelect: (name: string) => void }) {
   );
 }
 
+// ─── Not a technician, and not allowed to drive one's bench ──────────────────
+
+function NotYourBench({ role }: { role: string }) {
+  return (
+    <div style={{
+      minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+      background: "var(--bg-primary)", fontFamily: ff, padding: "40px 20px",
+    }}>
+      <div style={{ maxWidth: 440, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+        <div style={{ width: 52, height: 52, borderRadius: 14, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Wrench size={22} color="#f87171" />
+        </div>
+        <p style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>This is the technician&rsquo;s side</p>
+        <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+          You are signed in as <strong>{role}</strong>. A technician&rsquo;s bench can be worked by the
+          technician, an Admin, or an Admin Cashier — ask whoever holds the Admin login to give
+          your account the admin-cashier tick under Staff.
+        </p>
+        <Link href="/" style={{ fontSize: 13, fontWeight: 600, color: "var(--accent)", marginTop: 6 }}>Back to the login screen</Link>
+      </div>
+    </div>
+  );
+}
+
 // ─── Inner page (reads searchParams) ─────────────────────────────────────────
 
 function TechPageInner() {
   const searchParams = useSearchParams();
   const urlTech = searchParams.get("tech");
+  /**
+   * The whole-shop bench.
+   *
+   * Not any one technician's — every job, with the name it is assigned to,
+   * all of them actionable, and a Finish that asks who did the work. For the
+   * counter in a shop where the split between till and bench is more of an
+   * idea than a wall. Same gate as picking somebody's bench: Admin or Admin
+   * Cashier.
+   */
+  const wantsAdminBench = searchParams.get("bench") === "all";
 
   const [picked, setPicked] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<TechPage>("My Bench");
@@ -198,8 +234,18 @@ function TechPageInner() {
    * for the one case that still needs it: an Admin looking at somebody else's
    * bench, who has a session but not a technician's name.
    */
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, loading: authLoading } = useAuth();
   const sessionTech = profile?.role === "Technician" ? (profile.fullName || "").trim() : "";
+  /**
+   * Who may pick a bench that is not their own.
+   *
+   * An Admin always could. The Admin Cashier now can too — the counter
+   * working the technician's bench for them is the point of this — and
+   * nobody else: a plain Cashier or Accounts login on a technician's bench
+   * would be able to finish jobs they cannot even see the parts for.
+   */
+  const { isAdminCashier, loading: permsLoading } = useMyPermissions();
+  const mayDrive = profile?.role === "Admin" || isAdminCashier;
 
   // If a name was passed in the URL, accept it once the roster has loaded.
   const { technicians } = useTechnicians();
@@ -209,9 +255,19 @@ function TechPageInner() {
     }
   }, [urlTech, technicians]);
 
-  const techName = sessionTech || picked;
+  // On the whole-shop bench the "technician" the shell runs as is the person
+  // at the keyboard, so nothing downstream records a blank actor; the bench
+  // itself never lists by that name.
+  const adminBench = wantsAdminBench && !sessionTech && mayDrive;
+  const techName = sessionTech || (adminBench ? (profile?.fullName || "").trim() || "Admin" : picked);
 
   if (!techName) {
+    // Nothing decided until both the session and the permission are known;
+    // a flash of the picker for somebody about to be refused is worse than a
+    // beat of nothing.
+    if (authLoading || permsLoading) return null;
+    if (!profile) return <TechSelect onSelect={setPicked} />;
+    if (!mayDrive) return <NotYourBench role={profile.role} />;
     return <TechSelect onSelect={setPicked} />;
   }
   const MANAGED_PAGES: TechPage[] = ["My Jobs", "At Repair Agents", "Pending Collection", "Parts & Stock", "Job History", "My Performance", "My Shift"];
@@ -221,14 +277,14 @@ function TechPageInner() {
     <RepairProvider>
     <WarrantyProvider>
     <PartsProvider>
-    <TechProvider technicianName={techName}>
-      <TabTitle role="Technician" name={techName} />
+    <TechProvider technicianName={techName} adminBench={adminBench}>
+      <TabTitle role="Technician" name={adminBench ? "Admin technician" : techName} />
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
 
         <TechSidebar
           activePage={activePage}
           onNavigate={setActivePage}
-          techName={techName}
+          techName={adminBench ? `Admin technician · ${techName}` : techName}
           onLogout={() => { void signOut().then(() => window.location.assign("/")); }}
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}

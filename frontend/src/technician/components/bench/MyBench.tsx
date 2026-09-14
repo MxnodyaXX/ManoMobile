@@ -29,6 +29,7 @@ import ReceiveFromAgentModal from "@/technician/components/agents/ReceiveFromAge
 import JobInfoModal from "@/technician/components/jobs/JobInfoModal";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
+const TA = "#34d399";
 
 /**
  * The technician's whole day, on one screen.
@@ -74,7 +75,13 @@ const COLUMNS: {
 
 export default function MyBench() {
   const { jobs, updateJob, refresh } = useRepair();
-  const { technicianName, jobMeta, setJobMeta, partRequests, addActivity } = useTech();
+  const { technicianName, actorName, onBehalf, adminBench, jobMeta, setJobMeta, partRequests, addActivity } = useTech();
+  /**
+   * "by A-Cashier" on every activity line the counter writes for the
+   * technician. Empty when the technician is doing their own work, so the
+   * ordinary case reads exactly as it did.
+   */
+  const byActor = onBehalf ? ` by ${actorName}` : "";
   const { parts } = useParts();
 
   // Which job has which sheet open, and — for the status sheet — the
@@ -115,7 +122,8 @@ export default function MyBench() {
    * way to make the number meaningless.
    */
   const [scope, setScope] = useState<"mine" | "shop">("mine");
-  const shopWide = scope === "shop";
+  // The admin bench has no "mine" — the cashier holds no jobs of their own.
+  const shopWide = adminBench || scope === "shop";
 
   // Cancelled work is nobody's queue. It is excluded here rather than in each
   // bucket, since the buckets filter on status and Cancelled matches none of
@@ -132,7 +140,9 @@ export default function MyBench() {
   const showTimer = shopRules.trackJobTime;
 
   const ratesFor = useTechnicianRates();
-  const canClaim = ratesFor(technicianName)?.canClaimUnassigned ?? true;
+  // The counter working the whole shop may take anything off the pile; the
+  // per-technician permission is about technicians helping themselves.
+  const canClaim = adminBench || (ratesFor(technicianName)?.canClaimUnassigned ?? true);
   const byOldest = (a: RepairJob, b: RepairJob) =>
     new Date(a.startedAt ?? a.createdAt).getTime() - new Date(b.startedAt ?? b.createdAt).getTime();
 
@@ -242,7 +252,11 @@ export default function MyBench() {
         // Through the database function, not updateJob: the check has to be
         // part of the write or two technicians looking at the same pool can
         // both win. See migration 20260902000019.
-        await claimRepairJob(job.id);
+        //
+        // Onto THIS bench, whoever is pressing. Without the name the function
+        // would stamp the caller's own — and the counter claiming a job for
+        // the technician would put the cashier's name on the work.
+        await claimRepairJob(job.id, onBehalf ? technicianName : undefined);
         // The claim is a database function, so nothing in this app's state
         // knows it happened. Without this the job stayed in "Available to
         // claim", and tapping it again told the technician it had been taken —
@@ -257,7 +271,7 @@ export default function MyBench() {
       setBusyId(null);
       addActivity({
         jobId: job.id, type: "status_change",
-        description: `Claimed by ${technicianName}`,
+        description: onBehalf ? `Claimed for ${technicianName} by ${actorName}` : `Claimed by ${technicianName}`,
       });
       /**
        * Claimed and started in one press.
@@ -314,7 +328,7 @@ export default function MyBench() {
       setJobMeta(job.id, { startedAt: job.startedAt ? new Date(job.startedAt) : now, lastPausedAt: undefined, pauseReason: undefined });
       addActivity({
         jobId: job.id, type: "status_change",
-        description: action === "resume" ? "Work resumed" : "Job started",
+        description: (action === "resume" ? "Work resumed" : "Job started") + byActor,
       });
       return;
     }
@@ -379,6 +393,29 @@ export default function MyBench() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 26, fontFamily: ff }}>
+      {/* Which hat. The counter driving the technician's bench is the whole
+          point of this mode, and the one way it goes wrong is forgetting
+          whose bench it is — so it is said at the top, every time, in the
+          technician's colour. */}
+      {(onBehalf || adminBench) && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+          padding: "11px 16px", borderRadius: 12,
+          background: `${TA}10`, border: `1px solid ${TA}40`,
+        }}>
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: TA, flexShrink: 0 }} />
+          <p style={{ fontSize: 13, color: "var(--text-primary)" }}>
+            {adminBench ? (
+              <>You are working <strong>the whole shop&rsquo;s</strong> bench as <strong>{actorName}</strong>.
+              Every job shows who it is assigned to; when you finish one, you will be asked who did the work.</>
+            ) : (
+              <>You are working <strong>{technicianName}&rsquo;s</strong> bench as <strong>{actorName}</strong>.
+              Everything you do here is recorded as {technicianName.split(" ")[0]}&rsquo;s work, done by you.</>
+            )}
+          </p>
+        </div>
+      )}
+
       {/* Follows the switch below. Their own figures on My bench, the shop's
           on Whole shop — the same five questions either way, so the row does
           not change shape when the scope does.
@@ -448,7 +485,7 @@ export default function MyBench() {
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", marginBottom: 3 }}>
-            {shopWide ? "The whole shop" : `${technicianName}'s bench`}
+            {adminBench ? "Admin technician — the whole shop" : shopWide ? "The whole shop" : `${technicianName}'s bench`}
           </h1>
           <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
             {inProgress.length > 0
@@ -464,7 +501,7 @@ export default function MyBench() {
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: 3, padding: 3, borderRadius: 10, background: "var(--bg-card)", border: "1px solid var(--border)" }}>
+        {!adminBench && <div style={{ display: "flex", gap: 3, padding: 3, borderRadius: 10, background: "var(--bg-card)", border: "1px solid var(--border)" }}>
           {([
             ["mine", "My bench", `${mine.length}`],
             ["shop", "Whole shop", `${jobs.filter(j => j.status !== "Cancelled").length}`],
@@ -488,7 +525,7 @@ export default function MyBench() {
               </button>
             );
           })}
-        </div>
+        </div>}
       </div>
 
       {notice && (
@@ -598,6 +635,7 @@ export default function MyBench() {
                           shopWide={shopWide}
                           transferFor={transferFor}
                           partsPendingFor={pendingFor}
+                          adminBench={adminBench}
                         />
                       ) : (
                       <div style={view === "list" ? {
@@ -637,7 +675,8 @@ export default function MyBench() {
                             // Visible to everyone, actionable only by the
                             // technician holding it. Unclaimed work stays
                             // claimable — that is the whole point of the pool.
-                            readOnly={shopWide && !isUnassigned(j.technician) && j.technician !== technicianName}
+                            readOnly={!adminBench && shopWide && !isUnassigned(j.technician) && j.technician !== technicianName}
+                            adminBench={adminBench}
                             startedAt={jobMeta[j.id]?.startedAt ?? (j.startedAt ? new Date(j.startedAt) : undefined)}
                             partsPending={pendingFor(j.id)}
                             // Overrides every action on the card: a device out
@@ -718,7 +757,7 @@ export default function MyBench() {
             setJobMeta(receiving.jobId, { lastPausedAt: undefined, pauseReason: undefined });
             addActivity({
               jobId: receiving.jobId, type: "status_change",
-              description: `Received back from ${receiving.agentName ?? "the repair agent"}`,
+              description: `Received back from ${receiving.agentName ?? "the repair agent"}${byActor}`,
             });
             void reloadTransfers();
             setNotice(`${receiving.jobId} is back in the shop and in progress.`);

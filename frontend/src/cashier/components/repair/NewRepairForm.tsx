@@ -257,7 +257,7 @@ const onCheckboxKeyDown = (toggle: () => void) => (e: React.KeyboardEvent) => {
 type RequiredField =
   | "jobNumber"                          // step 1, only when not auto-generated
   | "dealerJobNo"                        // step 1, only for another shop's device
-  | "customerName" | "customerContact"   // step 1
+  | "customerName"                       // step 1
   | "deviceModel" | "deviceBrand"        // step 1
   | "estimatedCost"                      // step 2
   | "termsAccepted";                     // step 2
@@ -265,6 +265,13 @@ type RequiredField =
 // Intake photos and the customer signature are deliberately absent: they are
 // strongly recommended evidence, but a job can be booked in without them.
 // Terms acceptance is the one thing the final step blocks on.
+//
+// customerContact is not required either. Mano Mobile's own customers still
+// walk in without a phone — a child sent with the handset, someone whose only
+// number is the one being repaired — and a wall at step 1 sent the cashier
+// typing 0000000000 to get past it, which then looked like a real number to
+// every screen downstream. Blank is a truer record, and the SMS path already
+// skips a job with no number rather than failing on it.
 //
 // dealerJobNo is deliberately NOT required, even for another shop's device —
 // some dealers just don't hand over their own number for a given drop-off.
@@ -278,7 +285,7 @@ type RequiredField =
 // or type one. deviceModel already had full error-UI wired up but was never
 // actually enforced here — that looks like an oversight, fixed alongside it.
 const REQUIRED_BY_STEP: Record<number, RequiredField[]> = {
-  1: ["jobNumber", "customerName", "customerContact", "deviceModel", "deviceBrand"],
+  1: ["jobNumber", "customerName", "deviceModel", "deviceBrand"],
   2: ["estimatedCost", "termsAccepted"],
 };
 
@@ -286,7 +293,6 @@ const FIELD_LABELS: Record<RequiredField, string> = {
   jobNumber: "Job Number",
   dealerJobNo: "Dealer's Job Number",
   customerName: "Full Name",
-  customerContact: "Contact Number",
   deviceModel: "Device Model",
   deviceBrand: "Device Brand",
   estimatedCost: "Estimated Repair Cost",
@@ -597,10 +603,10 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
                 {/* Contact number comes first — typing a number already in
                     our job history fills in the rest below, so it's worth
                     asking for before the fields it can fill. */}
-                <div data-field="customerContact" className={bad("customerContact") ? "field-shake" : undefined}>
-                  <label style={labelStyle}>Contact Number *</label>
+                <div data-field="customerContact">
+                  <label style={labelStyle}>Contact Number</label>
                   <input
-                    style={{ ...inputStyle, ...(bad("customerContact") ? invalidStyle : {}) }}
+                    style={inputStyle}
                     value={data.customerContact}
                     onChange={(e) => handleCustomerContact(e.target.value)}
                     inputMode="tel"
@@ -611,7 +617,6 @@ function Step1({ data, onChange, isMobile, dealers, errors, nextJobNo, dealerNoC
                       <CheckCircle2 size={12} /> Returning customer: <strong>{customerMatch}</strong>
                     </p>
                   )}
-                  <FieldError show={bad("customerContact")}>Enter a contact number</FieldError>
                 </div>
                 <div>
                   <label style={labelStyle}>NIC Number</label>
@@ -1819,9 +1824,7 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
     const fromAnotherShop = !!picked && !picked.inHouse;
     // The customer panel is hidden for another shop's device, so requiring
     // fields nobody can see would trap the wizard on a step with nothing to fix.
-    if (f === "customerName" || f === "customerContact") {
-      if (fromAnotherShop) return false;
-    }
+    if (f === "customerName" && fromAnotherShop) return false;
     // The brand field is not on screen for an unidentifiable device, so
     // requiring it would block the wizard on a field nobody can fill in.
     if (f === "deviceBrand" && form.modelNumberUnavailable) return false;

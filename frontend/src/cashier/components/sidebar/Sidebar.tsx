@@ -4,7 +4,8 @@ import { useState } from "react";
 import { sidebarData } from "@/cashier/data/sidebarData";
 import { roleMenus } from "@/cashier/data/sidebarRoles";
 import { motion } from "framer-motion";
-import { ChevronLeft, ChevronRight, LogOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, LogOut, Wrench } from "lucide-react";
+import { useTechnicians } from "@/lib/repair/technicians";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useMyModuleAccess } from "@/lib/settings/moduleAccess";
 import { useMyPermissions } from "@/lib/settings/staffRules";
@@ -77,6 +78,27 @@ export default function Sidebar({ activePage, onNavigate, isOpen = false, onClos
    * the shop.
    */
   const { profile, signOut } = useAuth();
+  /**
+   * The technicians whose bench this counter may work.
+   *
+   * Only for an Admin Cashier — see the gate on the technician page — and only
+   * listed when there is somebody to list. Opens in a new tab on purpose: the
+   * till stays where it is, and since every tab holds its own login the bench
+   * opens already signed in as this cashier.
+   */
+  const { technicians } = useTechnicians();
+  const benches = isAdminCashier ? technicians.filter(t => t.name.trim()) : [];
+  const openBench = (name: string) => {
+    window.open(`/technician?tech=${encodeURIComponent(name)}`, "_blank", "noopener");
+    if (isMobile && onClose) onClose();
+  };
+  // Every job in the shop on one bench, actionable, with Finish asking who
+  // did the work. Listed first: in a shop with one technician it is the one
+  // that gets used.
+  const openAdminBench = () => {
+    window.open("/technician?bench=all", "_blank", "noopener");
+    if (isMobile && onClose) onClose();
+  };
 
   const menuItems = sidebarData
     .filter((item) => roleMenus[userRole].includes(item.title))
@@ -229,6 +251,56 @@ export default function Sidebar({ activePage, onNavigate, isOpen = false, onClos
             );
           })}
         </nav>
+
+        {/* Work the bench — the counter doing the technician's job for them.
+            Under the nav rather than in it: it is not a page of this shell,
+            it opens the other one. */}
+        {benches.length > 0 && (
+          <div style={{ padding: "0 12px 4px" }}>
+            {(!collapsed || isMobile) && (
+              <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", padding: "8px 10px 4px" }}>
+                Work the bench
+              </p>
+            )}
+            <button
+              onClick={openAdminBench}
+              title={`Open the whole shop's bench in a new tab and work it as ${profile?.fullName || "yourself"}`}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 10,
+                padding: collapsed && !isMobile ? "9px 0" : "9px 10px",
+                justifyContent: collapsed && !isMobile ? "center" : "flex-start",
+                borderRadius: 9, border: "1px solid rgba(52,211,153,0.3)", background: "rgba(52,211,153,0.07)",
+                color: "var(--text-primary)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", textAlign: "left",
+                fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 2,
+              }}
+            >
+              <Wrench size={15} color="#34d399" style={{ flexShrink: 0 }} />
+              {(!collapsed || isMobile) && <span>Whole shop</span>}
+            </button>
+            {benches.map(t => (
+              <button
+                key={t.name}
+                onClick={() => openBench(t.name)}
+                title={`Open ${t.name}'s bench in a new tab and work it as ${profile?.fullName || "yourself"}`}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: 10,
+                  padding: collapsed && !isMobile ? "9px 0" : "9px 10px",
+                  justifyContent: collapsed && !isMobile ? "center" : "flex-start",
+                  borderRadius: 9, border: "1px solid transparent", background: "transparent",
+                  color: "var(--text-secondary)", fontSize: 12.5, cursor: "pointer", textAlign: "left",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-card)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-primary)"; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-secondary)"; }}
+              >
+                <Wrench size={15} color="#34d399" style={{ flexShrink: 0 }} />
+                {(!collapsed || isMobile) && (
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Who is signed in, and the way out */}
         {profile && (

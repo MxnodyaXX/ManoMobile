@@ -6,6 +6,7 @@ import { X, PackageCheck, AlertCircle, Building2 } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import { markTransferReturned, type AgentTransfer } from "@/lib/repair/agents";
 import { useToast } from "@/lib/ui/toast";
+import { useTech } from "@/technician/contexts/TechContext";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -38,6 +39,9 @@ export default function ReceiveFromAgentModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
+  // received_by is who took it back in — the counter, when it is working the
+  // bench — not the technician the job belongs to.
+  const { actorName } = useTech();
 
   const typed = cost.trim() === "" ? null : Number(cost);
 
@@ -55,7 +59,7 @@ export default function ReceiveFromAgentModal({
         // return is the reason a job goes back to the bench rather than
         // straight to the counter, and it still cost whatever the agent charged.
         notes: [fixed ? "Repaired" : "Returned unrepaired", notes.trim()].filter(Boolean).join(" — "),
-        receivedBy: technicianName,
+        receivedBy: actorName || technicianName,
       });
       toast.dialog(
         "success",

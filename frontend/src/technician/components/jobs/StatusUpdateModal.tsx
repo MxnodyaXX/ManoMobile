@@ -10,7 +10,9 @@ import { type RepairJob, type JobStatus, type CompletionType, type EstimateAppro
 import { useTech } from "@/technician/contexts/TechContext";
 import DeviceDetailsFields, { draftFromJob, missingOn, type DeviceDraft } from "@/technician/components/jobs/DeviceDetailsFields";
 import { useParts } from "@/cashier/contexts/PartsContext";
-import { rulesForTechnician, type EffectiveRules } from "@/lib/settings/staffRules";
+import { rulesForTechnician, fetchStaffRules, type EffectiveRules } from "@/lib/settings/staffRules";
+import { useTechnicians } from "@/lib/repair/technicians";
+import { isUnassigned } from "@/lib/repair/api";
 import { labourFromRate, describeRate } from "@/lib/repair/labour";
 import { useToast } from "@/lib/ui/toast";
 import { fetchJobTransfers, transferCost, type AgentTransfer } from "@/lib/repair/agents";
@@ -153,7 +155,49 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
   // the dealer is who we deal with, and they already know their own quote.
   // The approval gate below only makes sense for a Mano Mobile customer.
   const isManoMobileJob = isInHouseDealer(dealers, job);
-  const { technicianName, setJobMeta, getElapsedMinutes, diagnostics, addActivity, saveFunctionalTest, saveWarranty, partRequests } = useTech();
+  const { technicianName, actorName, adminBench, setJobMeta, getElapsedMinutes, diagnostics, addActivity, saveFunctionalTest, saveWarranty, partRequests } = useTech();
+
+  /**
+   * Who actually did the work, when that is not who is pressing Finish.
+   *
+   * On the whole-shop bench the person at the keyboard is the cashier, and a
+   * job finished there has to name its technician: the labour rate, the
+   * revenue-per-technician figures and the name on the warranty all follow
+   * whoever this says. It starts as the job's own technician when it has one,
+   * and empty — required — when it came off the unassigned pile.
+   */
+  const { technicians } = useTechnicians();
+  const [completedBy, setCompletedBy] = useState<string>(isUnassigned(job.technician) ? "" : job.technician);
+
+  /**
+   * Pre-select the shop's default technician for an unassigned job.
+   *
+   * The same flag intake uses to pre-fill the assignment — Admin → Permissions
+   * → "Default technician" — so the two screens agree on who the work goes to
+   * when nobody said. In a one-technician shop that is the answer every time,
+   * and a required dropdown that always wants the same name is a click the
+   * cashier makes forty times a day. Only fills an empty box: a job that
+   * already has a name, or a name the cashier already picked, is left alone.
+   */
+  useEffect(() => {
+    if (!adminBench || !isUnassigned(job.technician) || technicians.length === 0) return;
+    let active = true;
+    fetchStaffRules()
+      .then(rows => {
+        if (!active) return;
+        const defaultId = rows.find(r => r.isDefaultTechnician)?.profileId;
+        const name = defaultId ? technicians.find(t => t.id === defaultId)?.name : undefined;
+        // One technician on the roster is a default whether or not the flag
+        // was ever set.
+        const chosen = name ?? (technicians.length === 1 ? technicians[0].name : undefined);
+        if (chosen) setCompletedBy(prev => (prev ? prev : chosen));
+      })
+      .catch(() => { /* the cashier picks by hand */ });
+    return () => { active = false; };
+  }, [adminBench, job.technician, technicians]);
+  // Whose rate and rules the form runs on. Off the admin bench this is simply
+  // the technician; on it, the one named above.
+  const workerName = adminBench ? (completedBy || job.technician) : technicianName;
   const { parts: catalog } = useParts();
   const { issueWarranty } = useWarranty();
 
@@ -227,11 +271,18 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
 
   useEffect(() => {
     let active = true;
-    rulesForTechnician(technicianName)
+    // No technician named yet (the admin bench, before the picker is used):
+    // resolve to no rules rather than the previous technician's. Through the
+    // same promise path as the real lookup, so the effect body itself never
+    // sets state.
+    const lookup = !workerName || isUnassigned(workerName)
+      ? Promise.resolve<EffectiveRules | null>(null)
+      : rulesForTechnician(workerName);
+    lookup
       .then(r => { if (active) setRules(r); })
       .catch(() => { /* defaults apply */ });
     return () => { active = false; };
-  }, [technicianName]);
+  }, [workerName]);
   const [warrantyScope, setWarrantyScope] = useState<WarrantyScope>("Parts & Labour");
 
   /**
@@ -415,6 +466,9 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
     if (!selectedNext) return "Choose the new status above.";
     if (selectedNext === "Pending" && pauseReason.trim().length <= 3) return "Give a reason for putting the job on hold.";
     if (selectedNext === "Completed") {
+      if (adminBench && !completedBy.trim()) {
+        return "Choose the technician who did this repair.";
+      }
       // The remarks are optional on every outcome, a Return included. This
       // used to demand six characters on a Return, on the grounds that the
       // reason is printed on the customer's receipt — which is true, and
@@ -444,7 +498,8 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
     if (!selectedNext) return false;
     if (selectedNext === "Pending")   return pauseReason.trim().length > 3;
     if (selectedNext === "Completed") {
-      return (completionType !== "Cash Return" || parseFloat(cashReturnAmount) > 0)
+      return (!adminBench || completedBy.trim() !== "")
+        && (completionType !== "Cash Return" || parseFloat(cashReturnAmount) > 0)
         && (!needsApproval || approvalCaptured)
         && labourValue.trim() !== ""
         && (!needsLossAck || lossAccepted);
@@ -479,6 +534,17 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
       setJobMeta(job.id, { completedAt: now, completionNotes, lastPausedAt: now });
       completedPatch.completedAt = now.toISOString().slice(0, 10);
       completedPatch.techRemarks = completionNotes.trim();
+      // The name goes on the job here, at the one moment the whole-shop bench
+      // knows it. A job that came off the pile has carried "Unassigned" until
+      // now, and everything that reports by technician reads this column.
+      if (adminBench && completedBy.trim() && completedBy.trim() !== job.technician) {
+        completedPatch.technician = completedBy.trim();
+        // Put on their bench by the counter, not picked up by them. Without
+        // this the stage trigger would guess "Self-Taken" from the job having
+        // been Unassigned a moment ago.
+        completedPatch.assignmentSource = "Assigned";
+        addActivity({ jobId: job.id, type: "status_change", description: `Work credited to ${completedBy.trim()} by ${actorName}` });
+      }
 
       // Finished without ever being started in the system — a quick job the
       // technician did in one go. Stamp a start anyway: a job with a completion
@@ -543,7 +609,7 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
           amount: revisedNum, approvedBy: job.customerName, channel: apprChannel,
           signature: apprChannel === "In-store" ? apprSig : undefined,
           reference: apprChannel !== "In-store" ? apprRef : undefined,
-          approvedAt: now.toISOString(), recordedByStaff: technicianName,
+          approvedAt: now.toISOString(), recordedByStaff: actorName,
         };
         addActivity({ jobId: job.id, type: "note_added", description: `Revised estimate Rs. ${revisedNum.toLocaleString()} approved by customer (${apprChannel})` });
       }
@@ -857,6 +923,34 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                   column beside a Final Cost field the technician had to fill in
                   before knowing whether the job had a cost at all.
                 */}
+                {/* Who did it. Only on the whole-shop bench, and first, because
+                    the labour rate pre-filled two rows down comes from this
+                    answer — asking for it afterwards would show a figure, let
+                    the cashier accept it, and then change it. */}
+                {adminBench && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Wrench size={13} color={TA} />
+                      {sec(isUnassigned(job.technician) ? "Repaired by * (required)" : "Repaired by")}
+                    </div>
+                    <select
+                      value={completedBy}
+                      onChange={e => setCompletedBy(e.target.value)}
+                      style={{ ...inputStyle, cursor: "pointer", maxWidth: 360 }}
+                    >
+                      <option value="">— Choose the technician —</option>
+                      {technicians.map(t => (
+                        <option key={t.name} value={t.name}>{t.name}</option>
+                      ))}
+                    </select>
+                    <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                      {isUnassigned(job.technician)
+                        ? "This job was never assigned. The technician named here gets the work — and their rate fills in the charge below."
+                        : `Assigned to ${job.technician}. Change it only if somebody else actually did the repair.`}
+                    </p>
+                  </div>
+                )}
+
                 {/* How this job ended — drives the charge, the warranty and the receipt */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {sec("How did this job end? *")}

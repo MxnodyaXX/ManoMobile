@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 import { useParts, type PartRequest, type PartRequestStatus } from "@/cashier/contexts/PartsContext";
+import { useAuth } from "@/lib/auth/AuthContext";
 import { rulesForTechnician } from "@/lib/settings/staffRules";
 
 // Part-request types/state now live in PartsContext — it's the cross-role
@@ -117,6 +118,28 @@ export interface ShiftRecord {
 
 interface TechContextValue {
   technicianName: string;
+  /**
+   * Who is actually at the keyboard.
+   *
+   * Usually the technician themselves, and then the two names are the same.
+   * When the Admin Cashier works the bench for them, technicianName is still
+   * the technician — the labour rate, My Performance and the name on the
+   * warranty all key off it and must — while this is the cashier, so the
+   * audit trail can say who pressed the button.
+   */
+  actorName: string;
+  /** True when actorName is not the technician: the counter is driving. */
+  onBehalf: boolean;
+  /**
+   * The whole shop's bench, worked by the counter.
+   *
+   * Not any one technician's. Every job is listed with the name it is
+   * assigned to, every one can be acted on, and a job finished here asks who
+   * actually did the work — because the person pressing Finish is the
+   * cashier, and the labour rate and the performance figures belong to
+   * whoever held the screwdriver.
+   */
+  adminBench: boolean;
 
   // Part requests. Approving/rejecting a Pending one is an Admin action —
   // see useParts().resolveRequest — not exposed here.
@@ -177,8 +200,13 @@ let escSeq = 1;
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
-export function TechProvider({ children, technicianName }: { children: ReactNode; technicianName: string }) {
+export function TechProvider({ children, technicianName, adminBench = false }: { children: ReactNode; technicianName: string; adminBench?: boolean }) {
   const { partRequests, requestPart: rawRequestPart, markPartInstalled } = useParts();
+  const { profile } = useAuth();
+  // Fall back to the technician's own name rather than "" so nothing
+  // downstream ever records a blank actor while the profile is still loading.
+  const actorName = (profile?.fullName || "").trim() || technicianName;
+  const onBehalf = actorName !== technicianName;
   const [jobMetaMap, setJobMetaMap]       = useState<Record<string, JobMeta>>({});
   const [diagnostics, setDiagnostics]     = useState<Record<string, DiagnosticReport>>({});
   const [activityLog, setActivityLog]     = useState<Record<string, ActivityEntry[]>>({});
@@ -298,7 +326,7 @@ export function TechProvider({ children, technicianName }: { children: ReactNode
 
   return (
     <TechContext.Provider value={{
-      technicianName,
+      technicianName, actorName, onBehalf, adminBench,
       partRequests, requestPart, markPartInstalled,
       jobMeta: jobMetaMap, setJobMeta, getElapsedMinutes,
       diagnostics, saveDiagnostic,
