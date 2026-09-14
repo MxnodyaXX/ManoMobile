@@ -597,9 +597,15 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
         </p>
       </div>
 
-      {/* Bounded, and scrolling inside itself. However long the history is, the
-          accounts above and below stay where they were. */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 260, overflowY: "auto", paddingRight: 2 }}>
+      {/* One bound at a time.
+
+          The preview is already cut to PREVIEW rows, so it needs no pixel cap
+          — and it had one, at 260px, which five rows overran. The fifth row
+          was clipped and the box scrolled inside itself to reveal it, which
+          read as the whole list having been squeezed to fit. The pixel cap
+          only earns its place once "show all" lets the list run long: then
+          it scrolls, and the accounts above and below stay where they were. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: showAll ? 440 : undefined, overflowY: showAll ? "auto" : undefined, paddingRight: showAll ? 2 : 0 }}>
         {loading && <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff }}>Loading…</p>}
         {error && <p style={{ fontSize: 12, color: "var(--danger)", fontFamily: ff, lineHeight: 1.5 }}>{error}</p>}
         {!loading && !error && groups.length === 0 && (
@@ -619,9 +625,14 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
           const back = g.kind === "Refund" || g.amount < 0;
 
           return (
-            <div key={g.key} style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 13px" }}>
-                <div style={{ width: 30, height: 30, borderRadius: 8, background: t.tint, border: `1px solid ${t.edge}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            // flexShrink: 0, because overflow: hidden (there for the rounded
+            // corners) also lets a flex item shrink below its content. In the
+            // capped, scrolling "show all" box the column was squeezing every
+            // row to fit instead of scrolling, and the second line of each —
+            // the job numbers and the due date — was cut in half.
+            <div key={g.key} style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden", flexShrink: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px" }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: t.tint, border: `1px solid ${t.edge}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   <Icon size={13} color={t.color} />
                 </div>
 
