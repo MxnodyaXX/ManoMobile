@@ -55,14 +55,18 @@ export async function saveInvoiceDocument(invoiceNo: string, html: string, pageC
   try {
     const sb = getSupabaseBrowserClient();
     const { data: { user } } = await sb.auth.getUser();
-    await sb.from("invoice_documents").insert({
+    const { error } = await sb.from("invoice_documents").insert({
       invoice_no: invoiceNo,
       html,
       page_css: pageCss ?? null,
       created_by: user?.id ?? null,
     });
-  } catch {
-    /* see above */
+    // Not thrown — see above — but not silent either. A history with a gap in
+    // it and no trace of why is what made this take a day to find. A duplicate
+    // (23505) is the one expected refusal: the document was already stored.
+    if (error && error.code !== "23505") console.warn(`Invoice ${invoiceNo} was not stored for history:`, error.message);
+  } catch (e) {
+    console.warn(`Invoice ${invoiceNo} was not stored for history:`, e);
   }
 }
 
@@ -81,16 +85,31 @@ export function usePersistInvoiceDocument(
 ) {
   const saved = useRef<string | null>(null);
 
+  /**
+   * After every render, not only when the number changes.
+   *
+   * This ran on [invoiceNo, ref, pageCss], and the Repair Sales screen sets
+   * the number one render before it shows the invoice — the panel is gated on
+   * a view switch that happens after the sale commits. So the effect ran once,
+   * found no element, returned, and had no reason ever to run again. Every
+   * repair invoice issued from that screen was lost to history while the
+   * Issue Job dialog, which renders both in the same pass, kept its.
+   *
+   * Running each render costs one ref read and one string compare once saved.
+   * The element may also say it is not ready yet — the printable renders a
+   * plain layout while its designed template loads, and capturing that would
+   * store the wrong invoice for good, since the table has no update policy.
+   */
   useEffect(() => {
     if (!invoiceNo || saved.current === invoiceNo) return;
     const el = ref.current;
-    if (!el) return;
+    if (!el || el.dataset.templatePending) return;
 
     saved.current = invoiceNo;
     // outerHTML, matching exactly what every print handler in this app copies —
     // so what is stored is what comes out of the printer, not a near-miss.
     void saveInvoiceDocument(invoiceNo, el.outerHTML, pageCss);
-  }, [invoiceNo, ref, pageCss]);
+  });
 }
 
 /**

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { insertSaleItems, type NewSaleItem } from "@/lib/sales/saleItems";
 import type { SaleTx, TxCategory, TxStatus } from "@/cashier/contexts/SalesContext";
 
 /**
@@ -32,6 +33,14 @@ export interface SaleExtras {
   /** Structured cart lines, only for sales whose stock needs to be reversible
    *  on void — see void_sale() in the migration. */
   lineItems?: SaleLineItem[];
+  /**
+   * The lines of the invoice as printed — see migration 20260915000052.
+   *
+   * Different from lineItems, and both are written when a sale has products
+   * on it: lineItems is the terse list void_sale() restocks from, this is the
+   * description a person reads. Written straight after the header lands.
+   */
+  saleItems?: NewSaleItem[];
 }
 
 type Row = Record<string, unknown>;
@@ -135,6 +144,14 @@ export async function insertSale(sale: Omit<SaleTx, "id">, extras: SaleExtras = 
     .single();
 
   if (error) throw new Error(explain(error.message, error.code));
+
+  // The lines, under the header that now exists. Not best-effort like the two
+  // stampings below: an invoice whose lines are missing shows as an older,
+  // summary-only sale, and the counter should hear about it rather than find
+  // out from Invoice History a week later.
+  if (extras.saleItems && extras.saleItems.length > 0) {
+    await insertSaleItems((data as Row).id as string, sale.invoiceNo, extras.saleItems);
+  }
 
   const jobIds = extras.jobIds ?? [];
   if (jobIds.length > 0) {

@@ -36,6 +36,12 @@ import { useTableSort, SortHeader, type SortValue } from "@/lib/ui/useTableSort"
 import { useJobCashReturns, refundRepairAdvance } from "@/lib/accounts/cashReturns";
 import { useJobSlot } from "@/lib/repair/useJobSlot";
 import { cleanImei, imeiIssue, cleanPhone, phoneIssue, FieldWarning } from "@/lib/ui/identifiers";
+import { useWarranty } from "@/cashier/contexts/WarrantyContext";
+import { WARRANTY_PERIODS, warrantyLine, periodFromDays, periodOf, outcomeTag, type WarrantyPeriod } from "@/lib/repair/warrantyLine";
+import Combobox from "@/cashier/components/shared/Combobox";
+import { useDeviceBrands } from "@/lib/repair/brands";
+import { useDeviceModelLookup } from "@/lib/repair/deviceModels";
+import { normaliseModelNumber } from "@/cashier/data/modelNumbers";
 
 interface FinishJobData {
   actionTaken: string;
@@ -1235,6 +1241,31 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
   const set = <K extends keyof RepairJob>(k: K, v: RepairJob[K]) =>
     setDraft(d => ({ ...d, [k]: v }));
 
+  /**
+   * The same pickers intake has, so correcting a device here offers the same
+   * names as booking one in. Typed free, these fields drifted — "Samsung",
+   * "SAMSUNG" and "Samsng" were three brands to every report that grouped by
+   * one — and the model number, which intake resolves to a brand and model
+   * from the reference table, was a bare box that resolved nothing.
+   */
+  const brands = useDeviceBrands();
+  const { lookup: modelLookup, models: knownModels } = useDeviceModelLookup();
+  const brandOptions = Array.from(new Set([...brands, String(val("brand") ?? "")].filter(Boolean))).sort();
+  // Models for the brand in the box, so the list is the handful that apply
+  // rather than every phone the shop has ever seen.
+  const modelOptions = Array.from(new Set(
+    knownModels
+      .filter(m => !val("brand") || m.brand.toLowerCase() === String(val("brand")).toLowerCase())
+      .map(m => m.model),
+  )).sort();
+  const modelNumberOptions = Array.from(new Set(knownModels.map(m => m.modelNumber))).sort();
+  const setModelNumber = (raw: string) => {
+    set("modelNumber", raw);
+    // Recognised → brand and model answer themselves, as they do at intake.
+    const hit = modelLookup.get(normaliseModelNumber(raw));
+    if (hit) { set("brand", hit.brand); set("model", hit.model); }
+  };
+
   const dirty = Object.keys(draft).length > 0;
 
   const commit = async () => {
@@ -1373,6 +1404,10 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
 
   const sc      = statusConfig[job.status];
   const StatusIcon = sc.icon;
+  // Finished means estimatedCost has become the final price and the quote
+  // lives in originalEstimate. Before that there is one figure, the quote.
+  const finished = job.status === "Completed" || job.status === "Delivered" || (!!job.completedAt && !!job.completionType);
+  const quoted   = Number(val("originalEstimate") ?? val("estimatedCost") ?? 0);
   // Read through the draft so it moves while the two figures above it are
   // being corrected. Off the saved row it would contradict them.
   const balance = Number(val("estimatedCost") ?? 0) - Number(val("advancePaid") ?? 0);
@@ -1679,21 +1714,100 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
             </>)}
 
             {section(<Smartphone size={11} strokeWidth={2.4} />, "Device", "#4ade80", <>
-              {field("Brand", "brand")}
-              {field("Model", "model")}
+              {editing ? (
+                <div>
+                  <label style={lab}>Brand</label>
+                  <Combobox
+                    value={String(val("brand") ?? "")}
+                    options={brandOptions}
+                    onChange={v => set("brand", v)}
+                    placeholder="Type or select…"
+                    inputStyle={{ ...fieldBox, width: "100%", boxSizing: "border-box", background: "var(--bg-primary)", borderColor: "var(--accent-glow)", outline: "none" }}
+                  />
+                </div>
+              ) : field("Brand", "brand")}
+              {editing ? (
+                <div>
+                  <label style={lab}>Model</label>
+                  <input
+                    list="job-edit-models"
+                    value={String(val("model") ?? "")}
+                    onChange={e => set("model", e.target.value)}
+                    style={{ ...fieldBox, width: "100%", boxSizing: "border-box", background: "var(--bg-primary)", borderColor: "var(--accent-glow)", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+                  />
+                  <datalist id="job-edit-models">{modelOptions.map(m => <option key={m} value={m} />)}</datalist>
+                </div>
+              ) : field("Model", "model")}
               {field("IMEI no.", "imei", { mono: true, kind: "imei" })}
-              {field("Model number", "modelNumber", { mono: true })}
+              {editing ? (
+                <div>
+                  <label style={lab}>Model number</label>
+                  <input
+                    list="job-edit-model-numbers"
+                    value={String(val("modelNumber") ?? "")}
+                    onChange={e => setModelNumber(e.target.value)}
+                    placeholder="SM-A145F"
+                    style={{ ...fieldBox, width: "100%", boxSizing: "border-box", background: "var(--bg-primary)", borderColor: "var(--accent-glow)", outline: "none", fontFamily: "monospace" }}
+                  />
+                  <datalist id="job-edit-model-numbers">{modelNumberOptions.map(m => <option key={m} value={m} />)}</datalist>
+                  {modelLookup.get(normaliseModelNumber(String(val("modelNumber") ?? ""))) && (
+                    <p style={{ fontSize: 10.5, color: "#4ade80", marginTop: 4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                      Recognised — brand and model filled in.
+                    </p>
+                  )}
+                </div>
+              ) : field("Model number", "modelNumber", { mono: true })}
               {field("Reported fault", "issue", { grow: true })}
             </>)}
 
             {section(<Wallet size={11} strokeWidth={2.4} />, "Charges", "#fbbf24", <>
-              {field("Estimated cost (Rs.)", "estimatedCost", { type: "number" })}
+              {/* Two figures, because they are two facts. estimatedCost is
+                  what the customer will be charged — the quote until the job
+                  is finished, the final price after — and originalEstimate
+                  keeps the quote once the final is written over it. One box
+                  labelled "Estimated cost" showed whichever the field held,
+                  so on a finished job the estimate was gone and the final was
+                  mislabelled as an estimate. */}
+              <div>
+                <label style={lab}>Estimated cost (Rs.)</label>
+                {editing ? (
+                  <input
+                    type="number" min={0}
+                    value={quoted}
+                    onChange={e => {
+                      const n = Number(e.target.value);
+                      set("originalEstimate", n);
+                      // Before completion the quote IS the charge: changing it
+                      // changes what the bench will finish against.
+                      if (!finished) set("estimatedCost", n);
+                    }}
+                    style={{ ...fieldBox, width: "100%", boxSizing: "border-box", background: "var(--bg-primary)", borderColor: "var(--accent-glow)", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+                  />
+                ) : (
+                  <div style={readSt}>{rs(quoted)}</div>
+                )}
+              </div>
+              <div>
+                <label style={lab}>Final price (Rs.)</label>
+                {editing && finished ? (
+                  <input
+                    type="number" min={0}
+                    value={Number(val("estimatedCost") ?? 0)}
+                    onChange={e => set("estimatedCost", Number(e.target.value))}
+                    style={{ ...fieldBox, width: "100%", boxSizing: "border-box", background: "var(--bg-primary)", borderColor: "var(--accent-glow)", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+                  />
+                ) : (
+                  <div style={{ ...readSt, color: finished ? "var(--text-primary)" : "var(--text-muted)" }} title={finished ? undefined : "Set by the technician when the job is finished"}>
+                    {finished ? rs(Number(val("estimatedCost") ?? 0)) : "Set at completion"}
+                  </div>
+                )}
+              </div>
               {field("Advance paid (Rs.)", "advancePaid", { type: "number" })}
-              {/* The figure both fields above are actually about. It was in
+              {/* The figure the fields above are actually about. It was in
                   neither mode — every cashier worked it out in their head. */}
               <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 13px", borderRadius: 8, background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                  {balance >= 0 ? "Balance on the estimate" : "Advance over the estimate"}
+                  {balance >= 0 ? (finished ? "Balance on the final price" : "Balance on the estimate") : "Advance over the price"}
                 </span>
                 <span style={{ fontSize: 14.5, fontWeight: 800, color: balance > 0 ? "#fbbf24" : balance < 0 ? "#60a5fa" : "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                   {rs(Math.abs(balance))}
@@ -1912,7 +2026,22 @@ export function IssueJobModal({ job, onClose, onIssued }: {
    * from, and what somebody chases in a month.
    */
   const [creditAccount, setCreditAccount] = useState<CreditAccount | null>(null);
-  const [warranty,      setWarranty]      = useState("NO WARRANTY [NORMAL]");
+  /**
+   * The warranty line, in two halves.
+   *
+   * The period comes from the warranty the technician issued at completion
+   * when there is one, so the counter is confirming rather than retyping.
+   * The outcome is not asked at all: the job knows whether it was a normal
+   * repair, a return, a cash return or free of charge, and the invoice used
+   * to say "[NORMAL]" on every one of them because that was the first option
+   * in a list.
+   */
+  const { getWarrantyForJob } = useWarranty();
+  const issued = getWarrantyForJob(job.id);
+  const [period, setPeriod] = useState<WarrantyPeriod>(
+    issued ? periodFromDays(issued.durationDays) : periodOf(job.jobWarranty),
+  );
+  const warranty = warrantyLine(period, job.completionType);
   const [submitting,    setSubmitting]    = useState(false);
 
   const discountAmt      = parseFloat(discount) || 0;
@@ -2053,11 +2182,19 @@ export function IssueJobModal({ job, onClose, onIssued }: {
 
             <div>
               <label style={labelSt}>Warranty</label>
-              <select value={warranty} onChange={(e) => setWarranty(e.target.value)} style={{ ...inputSt, cursor: "pointer" }}>
-                {["NO WARRANTY [NORMAL]", "NO WARRANTY [RETURN]", "NO WARRANTY [FOC]", "1 MONTH WARRANTY [NORMAL]", "3 MONTHS WARRANTY [NORMAL]", "6 MONTHS WARRANTY [NORMAL]", "1 YEAR WARRANTY [NORMAL]"].map(w => (
+              <select value={period} onChange={(e) => setPeriod(e.target.value as WarrantyPeriod)} style={{ ...inputSt, cursor: "pointer" }}>
+                {WARRANTY_PERIODS.map(w => (
                   <option key={w} value={w}>{w}</option>
                 ))}
               </select>
+              {/* What will print, with the outcome the job already carries.
+                  Said here so a Return going out as [RETURN] is seen before
+                  it is on paper, not discovered on the customer's copy. */}
+              <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 5, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                Prints as <strong style={{ color: "var(--text-secondary)" }}>{warranty}</strong>
+                {issued ? " · from the technician's warranty" : ""}
+                {job.completionType && job.completionType !== "Normal" ? ` · ${outcomeTag(job.completionType)} because the job ended as ${job.completionType}` : ""}
+              </p>
             </div>
           </div>
         </div>

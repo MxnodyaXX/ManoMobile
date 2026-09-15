@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Play, AlertCircle, Wrench } from "lucide-react";
+import { X, Play, AlertCircle, Wrench, CheckCircle } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import { useTechnicians, useDefaultTechnician } from "@/lib/repair/technicians";
 
@@ -25,7 +25,13 @@ const ff = "'Plus Jakarta Sans', sans-serif";
  */
 export default function PickTechnicianModal({ job, onPick, onClose, busy = false, error = null }: {
   job: RepairJob;
-  onPick: (technicianName: string) => void;
+  /**
+   * `andComplete` is the second button: the repair is already done — a
+   * five-minute job the counter is writing up after the fact — so start it
+   * and go straight to the completion form rather than parking it under
+   * In progress for the one click it takes to open Finish.
+   */
+  onPick: (technicianName: string, andComplete: boolean) => void;
   onClose: () => void;
   busy?: boolean;
   error?: string | null;
@@ -87,9 +93,10 @@ export default function PickTechnicianModal({ job, onPick, onClose, busy = false
             </select>
           )}
           <p style={{ fontSize: 11.5, color: "var(--text-muted)", lineHeight: 1.55 }}>
-            The job goes onto their bench and starts now. It shows in <strong>their</strong> In progress —
-            and in their Finished when it is done — and their rate fills in the charge. You are recorded
-            as the one who started it.
+            The job goes onto <strong>their</strong> bench under their name, and their rate fills in the
+            charge. <strong>Start</strong> puts it in their In progress; <strong>Complete now</strong> opens
+            the finish form straight away, for a repair that is already done. You are recorded as the one
+            who pressed it either way.
           </p>
 
           {error && (
@@ -105,15 +112,27 @@ export default function PickTechnicianModal({ job, onPick, onClose, busy = false
             Cancel
           </button>
           <button
-            onClick={() => picked && onPick(picked)}
+            onClick={() => picked && onPick(picked, false)}
             disabled={busy || !picked}
+            style={{
+              display: "flex", alignItems: "center", gap: 7, padding: "9px 16px", borderRadius: 8,
+              border: `1px solid ${TA}66`, background: `${TA}14`, color: TA, fontSize: 13, fontWeight: 700, fontFamily: ff,
+              cursor: busy || !picked ? "not-allowed" : "pointer", opacity: busy || !picked ? 0.55 : 1,
+            }}
+          >
+            <Play size={13} /> {busy ? "Starting…" : "Start"}
+          </button>
+          <button
+            onClick={() => picked && onPick(picked, true)}
+            disabled={busy || !picked}
+            title="Start it and open the finish form now — for a repair that is already done"
             style={{
               display: "flex", alignItems: "center", gap: 7, padding: "9px 18px", borderRadius: 8, border: "none",
               background: TA, color: "#04231a", fontSize: 13, fontWeight: 700, fontFamily: ff,
               cursor: busy || !picked ? "not-allowed" : "pointer", opacity: busy || !picked ? 0.55 : 1,
             }}
           >
-            <Play size={13} /> {busy ? "Starting…" : "Start the job"}
+            <CheckCircle size={13} /> Complete now
           </button>
         </div>
       </div>

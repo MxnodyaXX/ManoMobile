@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo, useId } from "react";
+import { useState, useRef, useEffect, useMemo, useId, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, Plus, Check, X } from "lucide-react";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -43,6 +44,41 @@ export default function Combobox({
   const [active, setActive] = useState(-1);
   const wrapRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  /**
+   * Where the list goes, in page coordinates.
+   *
+   * The list is rendered into document.body rather than under the input. Under
+   * the input it was position: absolute, and any ancestor with overflow: hidden
+   * — the job editor's sections have it for their rounded corners — clipped it
+   * to that box, so the brand list opened as a strip cut off at both ends with
+   * the next section's heading showing through. A portal cannot be clipped by
+   * an ancestor's overflow, and is immune to the same problem from any
+   * container this is dropped into next.
+   *
+   * Below the input by default; above it when there is more room there, so the
+   * list is never pushed off the bottom of a short screen.
+   */
+  const [rect, setRect] = useState<{ top: number; left: number; width: number; up: boolean } | null>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const el = inputRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const below = window.innerHeight - r.bottom;
+      const up = below < 300 && r.top > below;
+      setRect({ top: up ? r.top - 6 : r.bottom + 6, left: r.left, width: r.width, up });
+    };
+    place();
+    // The page can scroll or resize under an open list; it follows the input.
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open]);
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const listId = useId();
 
@@ -82,7 +118,10 @@ export default function Combobox({
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) commitAndClose();
+      const t = e.target as Node;
+      const inWrap = wrapRef.current?.contains(t) ?? false;
+      const inList = listRef.current?.contains(t) ?? false;
+      if (!inWrap && !inList) commitAndClose();
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -184,16 +223,19 @@ export default function Combobox({
         <ChevronDown size={15} style={{ transform: `rotate(${open ? 180 : 0}deg)`, transition: "transform 0.18s" }} />
       </button>
 
-      {open && (
+      {open && rect && typeof document !== "undefined" && createPortal(
         <div
           id={listId}
+          ref={listRef}
           className="combo-pop"
           role="listbox"
           style={{
-            position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 50,
+            position: "fixed", left: rect.left, width: rect.width, zIndex: 1400,
+            ...(rect.up ? { bottom: window.innerHeight - rect.top } : { top: rect.top }),
             background: "var(--bg-card)", border: "1px solid var(--border-active)", borderRadius: 12,
             boxShadow: "0 18px 44px rgba(0,0,0,0.34)", padding: 5,
             maxHeight: 268, overflowY: "auto", overscrollBehavior: "contain",
+            fontFamily: ff,
           }}
         >
           {rowCount === 0 && (
@@ -255,7 +297,8 @@ export default function Combobox({
               <Plus size={14} /> Add &ldquo;{query.trim()}&rdquo; to the list
             </button>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

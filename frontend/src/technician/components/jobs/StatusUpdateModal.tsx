@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  X, AlertTriangle, Play, Pause, CheckCircle,
+  X, AlertTriangle, Play, Pause, CheckCircle, User,
   XCircle, ArrowRight, Shield, CheckSquare, DollarSign, ChevronDown, Wrench, Building2,
 } from "lucide-react";
 import { type RepairJob, type JobStatus, type CompletionType, type EstimateApproval, type ApprovalChannel, useRepair, isInHouseDealer } from "@/cashier/contexts/RepairContext";
@@ -907,6 +907,13 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                     the labour rate pre-filled two rows down comes from this
                     answer — asking for it afterwards would show a figure, let
                     the cashier accept it, and then change it. */}
+                {/* Who is doing it, for whom, and what was wrong — one row.
+                    The last two are on every bench: a technician opening
+                    Finish on a bench of forty phones needs the fault in front
+                    of them to write up what they did. The first is the
+                    whole-shop bench's, where the person pressing is not the
+                    person who did the work. */}
+                <div className={adminBench ? "suj-cols-3" : "suj-cols-2"}>
                 {adminBench && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -930,6 +937,34 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                     </p>
                   </div>
                 )}
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <User size={13} color="var(--text-muted)" />
+                    {sec("Customer")}
+                  </div>
+                  <p style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)", fontFamily: ff }}>
+                    {job.customerName || "—"}
+                  </p>
+                  <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                    {[job.phone, isInHouseDealer(dealers, job) ? null : (job.dealerJobNo ? `Dealer job #${job.dealerJobNo}` : job.dealer)]
+                      .filter(Boolean).join(" · ") || " "}
+                  </p>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <AlertTriangle size={13} color="#fbbf24" />
+                    {sec("Fault reported")}
+                  </div>
+                  <p style={{ fontSize: 13, color: "var(--text-primary)", fontFamily: ff, lineHeight: 1.5 }}>
+                    {job.issue || "—"}
+                  </p>
+                  <p style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                    {[job.brand, job.model].filter(Boolean).join(" ")}{job.imei ? ` · ${job.imei}` : ""}
+                  </p>
+                </div>
+                </div>
 
                 {/* How this job ended — drives the charge, the warranty and the receipt */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

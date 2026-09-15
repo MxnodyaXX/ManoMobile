@@ -156,8 +156,11 @@ const JobIssuePrintable = forwardRef<HTMLDivElement, { data: IssueInvoiceData }>
       );
     }
 
+    // While the designed template is still being fetched, this plain layout is
+    // what is on screen — and it must not be what gets stored for history.
+    // The flag tells usePersistInvoiceDocument to wait for the answer.
     return (
-      <div ref={ref} style={{ background: "#ffffff", padding: "36px 44px", fontFamily: "Arial, Helvetica, sans-serif", color: "#000000" }}>
+      <div ref={ref} data-template-pending={template === undefined ? "1" : undefined} style={{ background: "#ffffff", padding: "36px 44px", fontFamily: "Arial, Helvetica, sans-serif", color: "#000000" }}>
         <h1 style={{ textAlign: "center", fontWeight: 900, textDecoration: "underline", fontSize: 22, margin: 0, letterSpacing: "0.05em" }}>SALES INVOICE</h1>
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 22 }}>
           <table style={{ borderCollapse: "collapse" }}>

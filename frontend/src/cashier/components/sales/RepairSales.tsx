@@ -7,7 +7,7 @@ import {
   Search, ArrowLeft, Printer, ChevronDown,
   Building2, CheckCircle, Clock, Wrench, TrendingUp, AlertCircle,
   CreditCard, X, BookUser, Undo2, RotateCcw,
-  Pencil, Check,
+  Pencil, Check, ShoppingBag,
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import CreditCustomerPicker, { type POSCreditCustomer } from "./CreditCustomerPicker";
@@ -18,9 +18,14 @@ import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 import InvoiceNoBadge from "@/cashier/components/sales/InvoiceNoBadge";
 import { usePersistInvoiceDocument } from "@/lib/sales/invoiceDoc";
 import { useAuth } from "@/lib/auth/AuthContext";
+import { useToast } from "@/lib/ui/toast";
 import { useMyPermissions } from "@/lib/settings/staffRules";
 import { useJobRefunds, refundRepairAdvance } from "@/lib/accounts/cashReturns";
 import { cleanImei, cleanPhone } from "@/lib/ui/identifiers";
+import { warrantyLine } from "@/lib/repair/warrantyLine";
+import { useAccessories } from "@/cashier/contexts/AccessoriesContext";
+import AddProductsModal, { extraLineTotal, type ExtraLine } from "@/cashier/components/sales/AddProductsModal";
+import type { NewSaleItem } from "@/lib/sales/saleItems";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -176,6 +181,9 @@ const inputSt: React.CSSProperties = {
  */
 interface BilledSnapshot {
   repairs: CompletedRepair[];
+  /** Accessories taken away with the repair, billed on the same invoice. */
+  extras: ExtraLine[];
+  extrasTotal: number;
   totalAdvance: number;
   effectiveReceived: number;
   finalDue: number;
@@ -300,7 +308,7 @@ function CreditRecordConfirmModal({ dealer, dueAmount, busy, onConfirm, onSkip, 
 
 // ─── Invoice View ─────────────────────────────────────────────────────────────
 
-function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountReceivedNow, dueAmount, totalAdvance, invoiceDiscount = 0, creditRecordMade, repairs, onBack }: {
+function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountReceivedNow, dueAmount, totalAdvance, invoiceDiscount = 0, creditRecordMade, repairs, extras = [], onBack }: {
   invoiceNo: string;
   createdAt: string;
   dealer: string;
@@ -313,16 +321,20 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
   invoiceDiscount?: number;
   creditRecordMade: boolean;
   repairs: CompletedRepair[];
+  /** Products sold on the same invoice, printed in their own section. */
+  extras?: ExtraLine[];
   onBack: () => void;
 }) {
   const { dealers } = useRepair();
   const invoiceRef = useRef<HTMLDivElement>(null);
   // Cash Returns subtract, so the printed TOTAL is what the dealer actually
   // owes rather than the gross of repairs done in both directions.
-  const lineTotals  = repairs.reduce(
+  const repairTotals = repairs.reduce(
     (s, r) => s + ((r.cashReturnAmount ?? 0) > 0 ? -(r.cashReturnAmount ?? 0) : r.unitPrice - r.discount),
     0,
   );
+  const extrasTotal = extras.reduce((s, l) => s + extraLineTotal(l), 0);
+  const lineTotals  = repairTotals + extrasTotal;
   const grandTotal  = Math.max(0, lineTotals - invoiceDiscount);
   const paidAmount  = totalAdvance + amountReceivedNow;
   const paymentType = isCredit ? "CREDIT" : "CASH / FULL";
@@ -330,6 +342,46 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
   const isManoMobile = isInHouseDealer(dealers, dealer);
   const dealerRecord = findDealer(dealers, dealer);
   const today = new Date().toISOString().slice(0, 10);
+  /**
+   * The products, as a printed section.
+   *
+   * Shared by both layouts. Rendered after the repair lines with its own
+   * heading, so the two kinds of charge are read apart: the customer can see
+   * what the repair cost and what the glass cost without doing arithmetic on
+   * a total.
+   */
+  const productsBlock = extras.length === 0 ? null : (
+    <div style={{ padding: "0 44px 20px", fontFamily: "Arial, Helvetica, sans-serif", color: "#000" }}>
+      <p style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.06em", margin: "14px 0 6px", borderBottom: "2px solid #000", paddingBottom: 4 }}>
+        ADDITIONAL PRODUCTS
+      </p>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+        <thead>
+          <tr>
+            {["Item", "Qty", "Unit Price", "Discount", "Line Total"].map((h, i) => (
+              <th key={h} style={{ textAlign: i === 0 ? "left" : "right", padding: "5px 6px", borderBottom: "1px solid #999", fontSize: 10.5, fontWeight: 700 }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {extras.map(l => (
+            <tr key={l.productId}>
+              <td style={{ padding: "5px 6px", borderBottom: "1px solid #e0e0e0" }}>{l.name}<span style={{ color: "#777" }}> · {l.code}</span></td>
+              <td style={{ padding: "5px 6px", borderBottom: "1px solid #e0e0e0", textAlign: "right" }}>{l.qty}</td>
+              <td style={{ padding: "5px 6px", borderBottom: "1px solid #e0e0e0", textAlign: "right" }}>{l.unitPrice.toLocaleString()}</td>
+              <td style={{ padding: "5px 6px", borderBottom: "1px solid #e0e0e0", textAlign: "right" }}>{l.discount > 0 ? l.discount.toLocaleString() : "—"}</td>
+              <td style={{ padding: "5px 6px", borderBottom: "1px solid #e0e0e0", textAlign: "right", fontWeight: 700 }}>{extraLineTotal(l).toLocaleString()}</td>
+            </tr>
+          ))}
+          <tr>
+            <td colSpan={4} style={{ padding: "6px 6px 0", textAlign: "right", fontWeight: 700 }}>Products</td>
+            <td style={{ padding: "6px 6px 0", textAlign: "right", fontWeight: 700 }}>Rs. {extrasTotal.toLocaleString()}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+
   const mapToJob = (r: CompletedRepair): RepairJob => ({
     id: r.id,
     customerName: customer.name || r.customerName,
@@ -438,6 +490,26 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
                 <JobIssuePrintable data={mapToIssueData(r)} />
               </div>
             ))}
+            {/* The job receipt template is one device per page and knows
+                nothing about a cover. So the products and the combined total
+                follow it, on the same sheet, under the same number — one
+                invoice, two sections, the way the customer paid. */}
+            {productsBlock && (
+              <div style={{ borderTop: "2px dashed #bbb" }}>
+                {productsBlock}
+                <div style={{ padding: "0 44px 24px", fontFamily: "Arial, Helvetica, sans-serif", color: "#000", display: "flex", justifyContent: "flex-end" }}>
+                  <div style={{ width: 300, display: "flex", flexDirection: "column", gap: 3, fontSize: 11 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#555" }}>Repair charges</span><span style={{ fontWeight: 600 }}>Rs. {repairTotals.toLocaleString()}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#555" }}>Additional products</span><span style={{ fontWeight: 600 }}>Rs. {extrasTotal.toLocaleString()}</span></div>
+                    {invoiceDiscount > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#555" }}>Invoice discount</span><span style={{ fontWeight: 600 }}>− Rs. {invoiceDiscount.toLocaleString()}</span></div>}
+                    <div style={{ borderTop: "2px solid #000", paddingTop: 5, display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700 }}><span>INVOICE TOTAL</span><span>Rs. {grandTotal.toLocaleString()}</span></div>
+                    {totalAdvance > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#555" }}>Advance (previously paid)</span><span style={{ fontWeight: 600 }}>Rs. {totalAdvance.toLocaleString()}</span></div>}
+                    {amountReceivedNow > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#555" }}>Received now</span><span style={{ fontWeight: 600 }}>Rs. {amountReceivedNow.toLocaleString()}</span></div>}
+                    <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #e0e0e0", paddingTop: 3, fontWeight: 700 }}><span>{dueAmount > 0 ? "Balance due" : "Balance"}</span><span>Rs. {dueAmount.toLocaleString()}</span></div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
         <div ref={invoiceRef} style={{ background: "#ffffff", padding: "36px 44px", fontFamily: "Arial, Helvetica, sans-serif", color: "#000000" }}>
@@ -525,8 +597,25 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
             </tbody>
           </table>
 
+          {/* Repair lines above, products below, each summed to its own
+              figure before the two meet in the total. The block carries its
+              own side padding, so it is pulled back to the table edge here. */}
+          {productsBlock && <div style={{ margin: "0 -44px" }}>{productsBlock}</div>}
+
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
             <div style={{ width: 280, display: "flex", flexDirection: "column", gap: 3 }}>
+              {extras.length > 0 && (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                    <span style={{ color: "#555" }}>Repair charges</span>
+                    <span style={{ fontWeight: 600 }}>Rs. {repairTotals.toLocaleString()}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                    <span style={{ color: "#555" }}>Additional products</span>
+                    <span style={{ fontWeight: 600 }}>Rs. {extrasTotal.toLocaleString()}</span>
+                  </div>
+                </>
+              )}
               {/* Named on the invoice rather than folded into the total, so the
                   customer can see the concession they were given. */}
               {invoiceDiscount > 0 && (
@@ -629,6 +718,7 @@ export default function RepairSales({ initialDealer, initialJobId }: {
   const [refundDone, setRefundDone]     = useState<string | null>(null);
   // Whose till the invoice came off, for the sales ledger.
   const { profile } = useAuth();
+  const toast = useToast();
   const { updateJob, jobs, dealers } = useRepair();
   const [view,           setView]           = useState<"search" | "invoice">("search");
   const [showIssuedMsg,  setShowIssuedMsg]  = useState(false);
@@ -746,6 +836,19 @@ export default function RepairSales({ initialDealer, initialJobId }: {
    */
   const [invDiscount, setInvDiscount] = useState("");
   const [invDiscountMode, setInvDiscountMode] = useState<"Rs" | "%">("Rs");
+  /**
+   * Products going out with the repair, on the same invoice.
+   *
+   * A customer collecting a phone buys a glass and a cover at the same
+   * counter, and used to walk out with two invoices because they were two
+   * screens. These sit in checkout state — nothing written, no stock moved —
+   * until Complete Sale, when the stock comes off in one transaction with the
+   * accessory counter's own function and the lines go on the invoice.
+   */
+  const [extras, setExtras] = useState<ExtraLine[]>([]);
+  const [addingProducts, setAddingProducts] = useState(false);
+  const { sellStock } = useAccessories();
+  const extrasTotal = extras.reduce((s, l) => s + extraLineTotal(l), 0);
   const [custMatchOpen, setCustMatchOpen] = useState(false);
 
   // A frozen copy of the billing figures at the moment the invoice is
@@ -801,7 +904,7 @@ export default function RepairSales({ initialDealer, initialJobId }: {
         brand: j.brand,
         model: j.model,
         imei: j.imei ?? "",
-        warranty: j.jobWarranty || "NO WARRANTY [NORMAL]",
+        warranty: j.jobWarranty || warrantyLine("NO WARRANTY", j.completionType),
         advance: j.advancePaid,
         unitPrice: j.estimatedCost,
         completionType: j.completionType,
@@ -959,8 +1062,10 @@ export default function RepairSales({ initialDealer, initialJobId }: {
 
   const lineSubtotal  = selectedRepairs.reduce((s, r) => s + lineOf(r), 0);
   const lineDiscounts = selectedRepairs.reduce((s, r) => s + r.discount, 0);
-  // What the lines come to before anything is taken off the bill as a whole.
-  const afterLines    = lineSubtotal - lineDiscounts;
+  // What the lines come to before anything is taken off the bill as a whole —
+  // the repairs and the products both, since a whole-invoice discount is a
+  // discount on the whole invoice.
+  const afterLines    = lineSubtotal - lineDiscounts + extrasTotal;
 
   // Clamped to the bill: a percentage cannot exceed 100 and an amount cannot
   // exceed what is left, or the invoice ends up owing the customer money.
@@ -1186,6 +1291,7 @@ export default function RepairSales({ initialDealer, initialJobId }: {
     setSelectedCreditCustomer(null); setShowCreditConfirm(false); setCreditRecordMade(false);
     setInvoiceSnapshot(null); setView("search");
     setInvoiceNo(null);
+    setExtras([]);
   };
 
   const handleDealerChange = (val: string) => {
@@ -1199,6 +1305,7 @@ export default function RepairSales({ initialDealer, initialJobId }: {
     setSelectedCreditCustomer(null); setShowCreditConfirm(false); setCreditRecordMade(false);
     setInvoiceSnapshot(null);
     setInvoiceNo(null);
+    setExtras([]);
 
     // Outside dealer: default to billing it to them — that's who actually
     // gets invoiced for a device they sent in, so ticking it every time was
@@ -1237,7 +1344,10 @@ export default function RepairSales({ initialDealer, initialJobId }: {
         date: new Date().toISOString().slice(0, 10),
         customer: snap.customerName || snap.repairs[0]?.customerName || "Walk-in",
         category: "Repair",
-        items: snap.repairs.map(r => `${r.brand} ${r.model}`).join(", ") || "Repair Invoice",
+        items: [
+          ...snap.repairs.map(r => `${r.brand} ${r.model}`),
+          ...snap.extras.map(l => (l.qty > 1 ? `${l.name} ×${l.qty}` : l.name)),
+        ].join(", ") || "Repair Invoice",
         total: snap.grandTotal,
         subtotal: snap.grandTotal + snap.totalDiscount,
         discountAmount: snap.totalDiscount,
@@ -1265,6 +1375,35 @@ export default function RepairSales({ initialDealer, initialJobId }: {
         dealerId: snap.dealerId,
         creditAccountId: snap.creditAccountId,
         jobIds: snap.repairs.map(r => r.id),
+        // The terse list void_sale() restocks from — accessories only, the
+        // same shape the accessory counter writes.
+        lineItems: snap.extras.length
+          ? snap.extras.map(l => ({ type: "accessory" as const, id: l.productId, qty: l.qty }))
+          : undefined,
+        // The invoice's own lines, as printed. One per repair, one per product.
+        saleItems: [
+          ...snap.repairs.map<NewSaleItem>(r => {
+            const back = r.cashReturnAmount ?? 0;
+            return {
+              kind: "repair_service",
+              referenceId: r.id,
+              description: `${r.brand} ${r.model}${back > 0 ? " — Cash Return" : ""}`.trim(),
+              qty: 1,
+              unitPrice: back > 0 ? -back : r.unitPrice,
+              discount: back > 0 ? 0 : r.discount,
+              lineTotal: back > 0 ? -back : r.unitPrice - r.discount,
+            };
+          }),
+          ...snap.extras.map<NewSaleItem>(l => ({
+            kind: "accessory",
+            referenceId: l.productId,
+            description: l.name,
+            qty: l.qty,
+            unitPrice: l.unitPrice,
+            discount: l.discount,
+            lineTotal: extraLineTotal(l),
+          })),
+        ],
       },
     );
   };
@@ -1272,6 +1411,8 @@ export default function RepairSales({ initialDealer, initialJobId }: {
   /** Everything the invoice was billed from, frozen before the jobs move. */
   const takeSnapshot = (): BilledSnapshot => ({
     repairs: selectedRepairs,
+    extras,
+    extrasTotal,
     totalAdvance,
     effectiveReceived,
     finalDue,
@@ -1375,6 +1516,17 @@ export default function RepairSales({ initialDealer, initialJobId }: {
    * carried a charge with no bill behind it.
    */
   const commitSale = async (opts?: { markCredit?: boolean }) => {
+    /**
+     * Products come off the shelf first, before an invoice number is drawn
+     * or a job is handed over. It is the one step that can legitimately
+     * refuse — somebody sold the last cover a minute ago — and it refuses
+     * for the whole cart at once, so if it fails nothing else has happened
+     * yet and the cashier is simply told. A stock failure after the jobs
+     * were delivered would be the phone gone and the invoice wrong.
+     */
+    if (extras.length > 0) {
+      await sellStock(extras.map(l => ({ id: l.productId, qty: l.qty })));
+    }
     const no = await fetchNextInvoiceNo();
     setInvoiceNo(no);
     // Taken before markIssued() flips these jobs to "Delivered" — see the
@@ -1411,6 +1563,11 @@ export default function RepairSales({ initialDealer, initialJobId }: {
     setInvoicing(true);
     try {
       await commitSale();
+    } catch (e) {
+      // Almost always the shelf: "Not enough stock for product 12". Nothing
+      // has been written when this fires, so the checkout is exactly as it
+      // was and the cashier can take the line off and go again.
+      toast.dialog("error", "The sale was not completed", e instanceof Error ? e.message : String(e));
     } finally {
       setInvoicing(false);
     }
@@ -1421,6 +1578,9 @@ export default function RepairSales({ initialDealer, initialJobId }: {
   const handleMarkIssued = async () => {
     if (invoicing) return;
     setInvoicing(true);
+    if (extras.length > 0) {
+      await sellStock(extras.map(l => ({ id: l.productId, qty: l.qty })));
+    }
     const no = await fetchNextInvoiceNo();
     setInvoicing(false);
     const snap = takeSnapshot();
@@ -1447,6 +1607,7 @@ export default function RepairSales({ initialDealer, initialJobId }: {
         invoiceDiscount={invoiceSnapshot.invoiceDiscount}
         creditRecordMade={creditRecordMade}
         repairs={invoiceSnapshot.repairs}
+        extras={invoiceSnapshot.extras}
         onBack={() => setView("search")}
       />
     );
@@ -1737,6 +1898,76 @@ export default function RepairSales({ initialDealer, initialJobId }: {
                 })}
               </div>
 
+              {/* ── Products going out with the repair ───────────────────────
+                  On the same bill, under the same number. Asked here, at the
+                  moment the customer is standing at the counter with the phone
+                  in one hand, because that is when they say "and a glass for
+                  it". Nothing moves until Complete Sale. */}
+              {!refundMode && (
+                <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginBottom: 13, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.06em", color: "var(--text-muted)", fontFamily: ff }}>
+                      ADDITIONAL PRODUCTS{extras.length > 0 ? ` · ${extras.reduce((n, l) => n + l.qty, 0)}` : ""}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAddingProducts(true)}
+                      style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, border: "1px solid var(--accent-glow)", background: "var(--accent-dim)", color: "var(--accent)", cursor: "pointer", fontFamily: ff }}
+                    >
+                      <ShoppingBag size={12} /> {extras.length > 0 ? "Add more" : "Add products / accessories"}
+                    </button>
+                  </div>
+
+                  {extras.length === 0 ? (
+                    <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                      Tempered glass, a cover, a charger, a SIM — anything the customer takes away with the phone goes on this invoice.
+                    </p>
+                  ) : extras.map(l => (
+                    <div key={l.productId} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontFamily: ff }}>
+                      <span style={{ flex: 1, minWidth: 0, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`${l.code} · ${l.name}`}>
+                        {l.name}
+                      </span>
+                      {/* Quantity, price and a line discount, editable in place —
+                          the shelf price is a default, and a cashier who has
+                          just agreed Rs. 700 for a Rs. 750 glass should not
+                          have to go and change the catalogue. */}
+                      <input
+                        type="number" min={1} max={l.stock} value={l.qty}
+                        onChange={e => setExtras(prev => prev.map(x => x.productId === l.productId ? { ...x, qty: Math.max(1, Math.min(l.stock, parseInt(e.target.value) || 1)) } : x))}
+                        title="Quantity"
+                        style={{ width: 46, padding: "4px 6px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-primary)", color: "var(--text-primary)", fontSize: 12, textAlign: "center", outline: "none", fontFamily: ff }}
+                      />
+                      <span style={{ color: "var(--text-muted)", fontSize: 11 }}>×</span>
+                      <input
+                        type="number" min={0} value={l.unitPrice}
+                        onChange={e => setExtras(prev => prev.map(x => x.productId === l.productId ? { ...x, unitPrice: Math.max(0, parseFloat(e.target.value) || 0) } : x))}
+                        title="Unit price"
+                        style={{ width: 74, padding: "4px 6px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-primary)", color: "var(--text-primary)", fontSize: 12, textAlign: "right", outline: "none", fontFamily: ff }}
+                      />
+                      {mayDiscount && (
+                        <input
+                          type="number" min={0} max={l.qty * l.unitPrice} value={l.discount || ""} placeholder="− 0"
+                          onChange={e => setExtras(prev => prev.map(x => x.productId === l.productId ? { ...x, discount: Math.max(0, Math.min(x.qty * x.unitPrice, parseFloat(e.target.value) || 0)) } : x))}
+                          title="Discount on this line"
+                          style={{ width: 60, padding: "4px 6px", borderRadius: 6, border: `1px solid ${l.discount > 0 ? "rgba(248,113,113,0.45)" : "var(--border)"}`, background: "var(--bg-primary)", color: l.discount > 0 ? "#f87171" : "var(--text-primary)", fontSize: 12, textAlign: "right", outline: "none", fontFamily: ff }}
+                        />
+                      )}
+                      <span style={{ fontWeight: 600, color: "var(--text-primary)", minWidth: 78, textAlign: "right" }}>
+                        Rs. {extraLineTotal(l).toLocaleString()}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setExtras(prev => prev.filter(x => x.productId !== l.productId))}
+                        title="Remove from this invoice"
+                        style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* A returned job with an advance on it is money going out, so
                   the whole card flips rather than the cashier being sent to a
                   separate refund screen. Same job selection, same card, one
@@ -1811,7 +2042,13 @@ export default function RepairSales({ initialDealer, initialJobId }: {
                         { label: "Less: Cash Returns", value: `(${fmtRs(cashReturnTotal)})`, color: "#60a5fa" },
                       ]
                     : []),
-                  { label: cashReturnTotal > 0 ? "Subtotal after returns" : "Subtotal", value: fmtRs(lineSubtotal), color: "var(--text-primary)" },
+                  { label: cashReturnTotal > 0 ? "Repairs after returns" : "Repair Charges", value: fmtRs(lineSubtotal), color: "var(--text-primary)" },
+                  // Only when there are any: a permanent "Products — 0" row on
+                  // every repair bill would be a line to read past forty times
+                  // a day for the twice it says something.
+                  ...(extras.length > 0
+                    ? [{ label: `Additional Products (${extras.reduce((n, l) => n + l.qty, 0)})`, value: fmtRs(extrasTotal), color: "var(--text-primary)" }]
+                    : []),
                   // Shown apart, not summed, because they answer different
                   // questions later: what was conceded on the work, and what
                   // was conceded on the relationship.
@@ -2316,6 +2553,25 @@ export default function RepairSales({ initialDealer, initialJobId }: {
             </button>
           </div>
         </div>
+      )}
+
+      {addingProducts && (
+        <AddProductsModal
+          existing={extras}
+          onClose={() => setAddingProducts(false)}
+          onAdd={lines => setExtras(prev => {
+            // The same product picked twice is one line with a bigger
+            // quantity, not two lines — that is how it prints, and how the
+            // stock function wants it.
+            const next = [...prev];
+            for (const l of lines) {
+              const i = next.findIndex(x => x.productId === l.productId);
+              if (i >= 0) next[i] = { ...next[i], qty: Math.min(l.stock, next[i].qty + l.qty) };
+              else next.push(l);
+            }
+            return next;
+          })}
+        />
       )}
 
       {/* Credit record confirmation modal */}

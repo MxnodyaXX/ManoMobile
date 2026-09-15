@@ -757,7 +757,7 @@ export default function MyBench() {
           busy={busyId === assigning.id}
           error={assignError}
           onClose={() => { setAssigning(null); setAssignError(null); }}
-          onPick={async name => {
+          onPick={async (name, andComplete) => {
             const job = assigning;
             setBusyId(job.id);
             setAssignError(null);
@@ -777,7 +777,15 @@ export default function MyBench() {
               // would say the same thing again.
               await handle("start", { ...claimed, technician: name });
               setAssigning(null);
-              setNotice(`${job.id} is on ${name}'s bench and in progress.`);
+              if (andComplete) {
+                // Straight into Finish. The job is Issued for the moment it
+                // takes the form to open, which is what the form expects — it
+                // is the same path as pressing Complete on an In progress card.
+                setModal({ kind: "complete", jobId: job.id, next: "Completed" });
+                setNotice(`${job.id} is on ${name}'s bench — finish it in the form.`);
+              } else {
+                setNotice(`${job.id} is on ${name}'s bench and in progress.`);
+              }
             } catch (e) {
               setAssignError(e instanceof Error ? e.message : "That job could not be started.");
             } finally {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useSales } from "@/cashier/contexts/SalesContext";
@@ -19,6 +19,7 @@ import {
 import { useMyPermissions } from "@/lib/settings/staffRules";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import { correctSalePayment } from "@/lib/sales/correctPayment";
+import { fetchSaleItems, type SaleItem } from "@/lib/sales/saleItems";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
@@ -420,6 +421,24 @@ function ReturnModal({ tx, onConfirm, onClose }: {
  */
 function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
   const { doc, loading } = useInvoiceDocument(tx.invoiceNo);
+  /**
+   * The invoice's lines, where it has them — see migration 20260915000052.
+   *
+   * Older sales have only the `items` string and show that. A sale from the
+   * combined repair checkout has one line per repair and one per product, and
+   * showing those apart is the point: "what did the repair cost, what did the
+   * glass cost" is the question this modal gets asked.
+   */
+  const [lines, setLines] = useState<SaleItem[]>([]);
+  useEffect(() => {
+    let live = true;
+    fetchSaleItems(tx.invoiceNo)
+      .then(rows => { if (live) setLines(rows); })
+      .catch(() => { /* the items string below still says what was sold */ });
+    return () => { live = false; };
+  }, [tx.invoiceNo]);
+  const repairLines  = lines.filter(l => l.kind === "repair_service" || l.kind === "repair_part");
+  const productLines = lines.filter(l => l.kind !== "repair_service" && l.kind !== "repair_part");
   const cfg = STATUS_CFG[tx.status];
 
   return createPortal(
@@ -498,10 +517,35 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
                 ))}
               </div>
 
-              <div style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: "10px 14px" }}>
-                <p style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Items</p>
-                <p style={{ fontSize: 13, color: "var(--text-primary)" }}>{tx.items}</p>
-              </div>
+              {lines.length === 0 ? (
+                <div style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: "10px 14px" }}>
+                  <p style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Items</p>
+                  <p style={{ fontSize: 13, color: "var(--text-primary)" }}>{tx.items}</p>
+                </div>
+              ) : (
+                [["Repair charges", repairLines], ["Additional products", productLines]].map(([title, group]) =>
+                  (group as SaleItem[]).length === 0 ? null : (
+                    <div key={title as string} style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: "10px 14px", marginBottom: 10 }}>
+                      <p style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>{title as string}</p>
+                      {(group as SaleItem[]).map(l => (
+                        <div key={l.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5, padding: "3px 0" }}>
+                          <span style={{ color: "var(--text-primary)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {l.description}
+                            {l.qty > 1 && <span style={{ color: "var(--text-muted)" }}> × {l.qty}</span>}
+                            {l.discount > 0 && <span style={{ color: "#f87171" }}> · − {fmtRs(l.discount)}</span>}
+                          </span>
+                          <span style={{ fontWeight: 600, color: l.lineTotal < 0 ? "#60a5fa" : "var(--text-primary)", flexShrink: 0 }}>
+                            {l.lineTotal < 0 ? `(${fmtRs(Math.abs(l.lineTotal))})` : fmtRs(l.lineTotal)}
+                          </span>
+                        </div>
+                      ))}
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700, borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 6 }}>
+                        <span style={{ color: "var(--text-muted)" }}>{title as string}</span>
+                        <span>{fmtRs((group as SaleItem[]).reduce((t, l) => t + l.lineTotal, 0))}</span>
+                      </div>
+                    </div>
+                  ))
+              )}
             </>
           )}
         </div>
