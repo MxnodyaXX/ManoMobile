@@ -16,10 +16,10 @@ const AA = "#a78bfa";
 const ff = "'Plus Jakarta Sans', sans-serif";
 
 /** Must match the staff_role enum in the database — anything else fails on save. */
-const ROLES: StaffRoleName[] = ["Admin", "Cashier", "Technician", "Accounts"];
+const ROLES: StaffRoleName[] = ["Admin", "Cashier", "POS Cashier", "Technician", "Accounts"];
 
 const ROLE_COLORS: Record<StaffRoleName, string> = {
-  Admin: "#a78bfa", Cashier: "#6355ff", Technician: "#34d399", Accounts: "#f59e0b",
+  Admin: "#a78bfa", Cashier: "#6355ff", "POS Cashier": "#8b5cf6", Technician: "#34d399", Accounts: "#f59e0b",
 };
 const STATUS_COLORS: Record<StaffStatusName, { bg: string; text: string; border: string }> = {
   Active:    { bg: "rgba(52,211,153,0.1)",  text: "#34d399", border: "rgba(52,211,153,0.25)"  },

@@ -17,7 +17,7 @@ import { authedFetch } from "@/lib/supabase/client";
  * service-role key can mint, so it goes through /api/staff.
  */
 
-export type StaffRoleName = "Admin" | "Cashier" | "Technician" | "Accounts";
+export type StaffRoleName = "Admin" | "Cashier" | "POS Cashier" | "Technician" | "Accounts";
 export type StaffStatusName = "Active" | "Inactive" | "Suspended";
 
 export interface StaffProfile {

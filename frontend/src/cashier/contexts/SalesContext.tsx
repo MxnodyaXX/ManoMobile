@@ -22,7 +22,7 @@ export interface SaleTx {
   returnedAmount?: number;
   returnReason?: string;
   returnDate?: string;
-  paymentMethod?: "Cash" | "Card" | "Bank Transfer" | "Credit" | "Split";
+  paymentMethod?: "Cash" | "Card" | "Bank Transfer" | "Cheque" | "Credit" | "Split";
   cashAmount?: number;
   cardAmount?: number;
   cardRef?: string;

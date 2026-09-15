@@ -1,4 +1,5 @@
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
+import { SHOP_DETAILS } from "@/lib/shop";
 
 /**
  * Customer SMS wording and rendering.
@@ -14,21 +15,29 @@ import type { RepairJob } from "@/cashier/contexts/RepairContext";
  * template would roughly quadruple the cost of every message that uses it.
  */
 
-/** Shop name in the message body (the Sender ID is configured separately). */
-export const SHOP = "Mano Mobile";
+/**
+ * Shop name and contact in the message body (the Sender ID is configured
+ * separately).
+ *
+ * Read from the one place the shop's identity lives — src/lib/shop.ts — rather
+ * than typed again here. They were typed again here, and drifted: the texts
+ * said 0717537383 while every receipt and label said 0777 53 73 83. A
+ * customer holding both had no way to know which to ring. The phone is
+ * stripped to digits for SMS, where spaces cost characters and read oddly.
+ */
+export const SHOP = SHOP_DETAILS.name;
+export const SHOP_CONTACT = SHOP_DETAILS.phone.replace(/\D/g, "");
 
-/** Printed at the foot of the default templates. */
-export const SHOP_CONTACT = "0717537383";
+export type JobSmsEvent = "created" | "started" | "paused" | "finished" | "collected" | "reminder" | "instant" | "instant_settled";
 
-export type JobSmsEvent = "created" | "started" | "paused" | "finished" | "reminder" | "instant" | "instant_settled";
-
-export const JOB_SMS_EVENTS: JobSmsEvent[] = ["created", "started", "paused", "finished", "reminder", "instant", "instant_settled"];
+export const JOB_SMS_EVENTS: JobSmsEvent[] = ["created", "started", "paused", "finished", "collected", "reminder", "instant", "instant_settled"];
 
 export const JOB_SMS_LABEL: Record<JobSmsEvent, string> = {
   created: "Job Received",
   started: "Repair Started",
   paused: "Repair On Hold",
   finished: "Ready For Collection",
+  collected: "Repair Collected",
   reminder: "Pickup Reminder",
   instant: "Instant Repair Ready",
   instant_settled: "Instant Repair Collected",
@@ -39,6 +48,7 @@ export const JOB_SMS_PURPOSE: Record<JobSmsEvent, string> = {
   started: "repair-started",
   paused: "repair-on-hold",
   finished: "ready-for-collection",
+  collected: "job-collected",
   reminder: "pickup-reminder",
   instant: "instant-repair-ready",
   instant_settled: "instant-repair-collected",
@@ -50,6 +60,7 @@ export const JOB_SMS_TRIGGER: Record<JobSmsEvent, string> = {
   started: "Sent when a technician starts the repair (assigned or self-taken).",
   paused: "Sent when a technician puts the job on hold, including the reason.",
   finished: "Sent when the technician marks the repair finished.",
+  collected: "Sent when the customer collects a repaired device and the job is issued at the counter — the thank-you, with what was paid and anything still owed. Instant jobs have their own version below; a device returned unrepaired gets a call, not this.",
   reminder: "Sent for a Completed job still waiting for pickup — a cashier can send it any time from the Non-Issued list, and it also goes out automatically once a day for jobs that have been waiting 7+ days (repeating weekly until collected).",
   instant: "Sent when an Instant Job is saved but the payment has not been taken — the device is repaired and waiting, so this reads as ready for collection.",
   instant_settled: "Sent when an Instant Job is paid for and handed over in one go, which is the usual case. One message covering the whole visit: repaired, paid, collected.",
@@ -85,6 +96,7 @@ export const JOB_SMS_VARIABLES: Record<JobSmsEvent, string[]> = {
   started: ["customer_name", "device", "job_number", "fault", "technician", "estimated_completion", "shop", "contact"],
   paused: ["customer_name", "device", "job_number", "pause_reason", "technician", "shop", "contact"],
   finished: ["customer_name", "device", "job_number", "fault", "technician", "total", "paid_amount", "due_amount", "track_link", "shop", "contact"],
+  collected: ["customer_name", "device", "job_number", "fault", "technician", "total", "paid_amount", "due_amount", "track_link", "shop", "contact"],
   reminder: ["customer_name", "device", "job_number", "fault", "days_waiting", "total", "due_amount", "track_link", "shop", "contact"],
   instant: ["customer_name", "device", "job_number", "fault", "technician", "technician_charge", "parts_used", "total", "paid_amount", "due_amount", "track_link", "shop", "contact"],
   instant_settled: ["customer_name", "device", "job_number", "fault", "technician", "parts_used", "total", "paid_amount", "due_amount", "track_link", "shop", "contact"],
@@ -161,7 +173,10 @@ function daysSinceCompleted(job: RepairJob): number {
 /** Values for every token, for one job. `baseUrl` is only needed when
  *  rendering outside the browser — see trackLink above. */
 export function smsValues(job: RepairJob, baseUrl?: string): Record<string, string> {
-  const dueAmount = Math.max(0, job.estimatedCost - job.advancePaid);
+  // What is still owed: the price, less what has been paid, less anything
+  // the shop wrote off at handover. Without the last term a customer let
+  // off Rs. 500 got a text saying they still owed it.
+  const dueAmount = Math.max(0, job.estimatedCost - job.advancePaid - (job.writtenOff ?? 0));
   return {
     customer_name: firstName(job.customerName),
     customer_full_name: (job.customerName || "").trim() || "Customer",
@@ -269,6 +284,23 @@ View your invoice and job history - {track_link}
 
 Please bring this job number when collecting.
 Thank you for choosing {shop}.
+
+For any other information contact {contact}.`,
+
+  collected: `Thank you {customer_name}!
+Your {device} has been repaired and handed back to you today.
+
+Job Number - {job_number}
+Fault - {fault}
+Repaired By - {technician}
+
+Total - {total}
+Paid Amount - {paid_amount}
+Due Amount - {due_amount}
+
+View your invoice and job history - {track_link}
+
+Please keep this message as your receipt. Thank you for choosing {shop}.
 
 For any other information contact {contact}.`,
 

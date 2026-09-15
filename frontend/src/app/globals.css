@@ -1,8 +1,17 @@
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500;600&family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
 
-@tailwind base;
-@tailwind components;
+/* Tailwind v4 without its preflight. `@tailwind base` and `components` are
+   v3 directives v4 ignores; what v4 needs for colour, spacing and type
+   utilities to exist at all is the default theme, imported here. Nothing in
+   it changes the app's own look — the theme is variables, and the reset that
+   would is deliberately not loaded (this stylesheet is the reset). */
+@import "tailwindcss/theme.css" layer(theme);
 @tailwind utilities;
+
+/* Tailwind's dark: variant follows the theme class ThemeProvider puts on <html>
+   (see src/lib/ui/theme.tsx), not the OS setting — the same switch the rest of
+   the app answers to. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   --bg-primary:    #080808;
@@ -239,16 +248,18 @@ select option { background: var(--bg-card); color: var(--text-primary); }
 /* ── Responsive grid helpers ──────────────────────────────────────── */
 .resp-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; width: 100%; }
 .resp-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; width: 100%; }
+.resp-grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; width: 100%; }
 .resp-grid-2 { display: grid; grid-template-columns: 1fr 1fr;        gap: 16px; width: 100%; }
 .resp-grid-2-3 { display: grid; grid-template-columns: 1fr 1fr 1fr;  gap: 16px; width: 100%; }
 
 @media (max-width: 1100px) {
   .resp-grid-4   { grid-template-columns: repeat(2, 1fr); }
+  .resp-grid-5   { grid-template-columns: repeat(3, 1fr); }
   .resp-grid-3   { grid-template-columns: repeat(2, 1fr); }
   .resp-grid-2-3 { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 640px) {
-  .resp-grid-4, .resp-grid-3, .resp-grid-2, .resp-grid-2-3 { grid-template-columns: 1fr; gap: 12px; }
+  .resp-grid-4, .resp-grid-5, .resp-grid-3, .resp-grid-2, .resp-grid-2-3 { grid-template-columns: 1fr; gap: 12px; }
 }
 
 /* ── Responsive main content padding ─────────────────────────────── */
@@ -472,4 +483,43 @@ select option { background: var(--bg-card); color: var(--text-primary); }
 @media screen and (max-width: 768px) {
   html, body { overflow-x: clip; }
   img, video, canvas, svg { max-width: 100%; height: auto; }
+}
+
+/* ── The POS screen (src/pos) ─────────────────────────────────────
+ *
+ * Written in Tailwind utilities, which assume the preflight reset this
+ * stylesheet does not load. The few base rules its markup leans on are
+ * restored here, scoped to the shell and wrapped in :where() so they have no
+ * specificity and every utility on the same element wins. */
+.pos-shell { font-family: 'Plus Jakarta Sans', sans-serif; font-variant-numeric: tabular-nums; }
+:where(.pos-shell *, .pos-shell *::before, .pos-shell *::after) { border: 0 solid; }
+:where(.pos-shell button, .pos-shell input) { font: inherit; color: inherit; background: transparent; }
+:where(.pos-shell button) { cursor: pointer; }
+:where(.pos-shell button:disabled) { cursor: not-allowed; }
+:where(.pos-shell input:focus) { outline: none; }
+:where(.pos-shell table) { border-collapse: collapse; }
+:where(.pos-shell ul) { list-style: none; }
+:where(.pos-shell svg) { display: block; }
+:where(.pos-shell input[type='number'])::-webkit-inner-spin-button,
+:where(.pos-shell input[type='number'])::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+:where(.pos-shell input[type='number']) { -moz-appearance: textfield; appearance: textfield; }
+
+/* Thermal-paper palette — fixed regardless of the app theme; a real receipt
+   does not switch to dark mode. */
+.receipt-paper { background: #fffdf7; color: #292524; }
+.receipt-ink-soft { color: #78716c; }
+.receipt-dashed { border-top: 1px dashed #d6d3d1; }
+.receipt-line { border-color: #d6d3d1; }
+.print-only { display: none; }
+
+@keyframes pos-rise-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.animate-rise { animation: pos-rise-in 0.18s ease-out both; }
+
+/* Printing from the POS: only the receipt renders, laid out for an 80mm roll.
+   Scoped to body.pos-print, which the POS page sets while mounted, so no other
+   screen's print goes blank. */
+@media print {
+  body.pos-print * { visibility: hidden; }
+  body.pos-print .print-only, body.pos-print .print-only * { visibility: visible; }
+  body.pos-print .print-only { display: block; position: fixed; inset: 0 auto auto 0; width: 80mm; }
 }

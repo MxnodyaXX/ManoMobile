@@ -4,7 +4,7 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type StaffRole = "Admin" | "Cashier" | "Technician" | "Accounts" | "Procurement";
+export type StaffRole = "Admin" | "Cashier" | "POS Cashier" | "Technician" | "Accounts" | "Procurement";
 export type StaffStatus = "Active" | "Inactive" | "Suspended";
 
 export interface StaffMember {

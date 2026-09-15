@@ -11,7 +11,7 @@ import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/c
  * does not work here. Every roster now comes from the same table.
  */
 
-export type StaffRoleName = "Admin" | "Cashier" | "Technician" | "Accounts";
+export type StaffRoleName = "Admin" | "Cashier" | "POS Cashier" | "Technician" | "Accounts";
 
 export interface StaffMemberLite {
   id: string;

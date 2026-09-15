@@ -18,13 +18,13 @@ interface Body {
   email?: string;
   password?: string;
   fullName?: string;
-  role?: "Admin" | "Cashier" | "Technician" | "Accounts";
+  role?: "Admin" | "Cashier" | "POS Cashier" | "Technician" | "Accounts";
   phone?: string;
   speciality?: string;
   staffId?: string;
 }
 
-const VALID_ROLES = ["Admin", "Cashier", "Technician", "Accounts"];
+const VALID_ROLES = ["Admin", "Cashier", "POS Cashier", "Technician", "Accounts"];
 
 export async function POST(request: Request) {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

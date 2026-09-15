@@ -4,6 +4,7 @@ import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import type { PartRequest, SparePart } from "@/cashier/contexts/PartsContext";
 import type { InsightColumn, InsightRow, InsightSummary, InsightGroup } from "./InsightModal";
 import { labourForJob, describeRate } from "@/lib/repair/labour";
+import type { SaleTx } from "@/cashier/contexts/SalesContext";
 import type { EffectiveRules } from "@/lib/settings/staffRules";
 
 /** Rates keyed by technician name, since that is what a job records. */
@@ -358,15 +359,51 @@ export function profitInsight(
  * a shop owner reading "Rs. 0" needs to know whether that means no sales or no
  * system, and those call for very different actions.
  */
-export function salesInsight(title: string, period: string): InsightSpec {
+/**
+ * Counter sales in the period, optionally one category of them.
+ *
+ * This used to be an empty table with a note that sales were not stored.
+ * They are — every Complete Sale writes a row — so the note was a lie the
+ * dashboard told on every open. Repair-category sales are left out here on
+ * purpose: that money is the repair income next door, and a row that appears
+ * under both headings is counted twice by anyone adding up the screen.
+ */
+export function salesInsight(
+  title: string,
+  period: string,
+  sales: SaleTx[],
+  category?: "Mobile" | "Accessories" | "Others",
+): InsightSpec {
+  const rows = sales
+    .filter(s => s.category !== "Repair" && (!category || s.category === category))
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const total = rows.reduce((t, s) => t + s.total, 0);
   return {
     title,
     subtitle: period,
-    columns: [],
-    rows: [],
-    emptyText:
-      "Counter sales are not recorded in the database yet, so this reads zero regardless of what was sold. "
-      + "Repair income is tracked and appears under Repairs. Once sales are stored, this figure and its breakdown will fill in automatically.",
+    columns: [
+      { key: "invoice", label: "Invoice" },
+      { key: "date", label: "Date" },
+      { key: "customer", label: "Customer" },
+      { key: "category", label: "Category" },
+      { key: "items", label: "Items" },
+      { key: "total", label: "Total", numeric: true },
+    ],
+    rows: rows.map(s => ({
+      id: s.id,
+      dim: s.status === "Returned",
+      cells: {
+        invoice: s.invoiceNo, date: dateOf(s.date), customer: s.customer || "Walk-in",
+        category: s.category, items: s.items, total: rs(s.total),
+      },
+    })),
+    summary: [
+      { label: "Sales", value: String(rows.length), strong: true },
+      { label: "Total", value: rs(total), tone: "good" },
+    ],
+    emptyText: category
+      ? `No ${category.toLowerCase()} sales in this period.`
+      : "No counter sales in this period. Repair income is under Repairs.",
   };
 }
 

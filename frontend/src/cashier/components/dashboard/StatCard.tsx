@@ -1,11 +1,31 @@
 "use client";
 
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+
+/**
+ * This figure against the same figure one period back.
+ *
+ * The card used to print a fixed "vs last month" under a badge fed an empty
+ * string, so every figure on the dashboard wore a red down-arrow with no
+ * number beside it, on the Daily view and the Yearly view alike. Now the
+ * label says what the comparison actually is — yesterday, last week — and
+ * the badge says by how much, or says honestly that there is nothing to
+ * compare against.
+ */
+export interface Compare {
+  current: number;
+  previous: number;
+  /** "vs yesterday", "vs last week", … */
+  label: string;
+}
+
+const previousText = (n: number, isCount: boolean) =>
+  isCount ? String(n) : `Rs. ${Math.round(n).toLocaleString("en-LK")}`;
 
 export default function StatCard({
   title,
   value,
-  change,
+  compare,
   icon: Icon,
   index = 0,
   size = "large",
@@ -14,7 +34,8 @@ export default function StatCard({
 }: {
   title: string;
   value: string;
-  change: string;
+  /** Null hides the badge entirely — "All time" has nothing to be measured against. */
+  compare?: Compare | null;
   icon?: any;
   index?: number;
   size?: "large" | "small";
@@ -22,8 +43,29 @@ export default function StatCard({
   /** Opens the breakdown behind this figure. Omitted, the card is inert. */
   onClick?: () => void;
 }) {
-  const isPositive = change.startsWith("+");
   const isSmall = size === "small";
+
+  /**
+   * What the badge says.
+   *   both zero        "no change", grey — nothing happened either time
+   *   previous zero    "new", green — there was nothing to compare with, and
+   *                    now there is something; a percentage of zero is not
+   *                    a number
+   *   otherwise        the percentage, signed, green up and red down
+   */
+  const badge = (() => {
+    if (!compare) return null;
+    const { current, previous } = compare;
+    if (current === 0 && previous === 0) return { text: "no change", tone: "flat" as const };
+    if (previous === 0) return { text: "new", tone: "up" as const };
+    const pct = ((current - previous) / Math.abs(previous)) * 100;
+    if (Math.abs(pct) < 0.5) return { text: "0%", tone: "flat" as const };
+    return { text: `${pct > 0 ? "+" : "−"}${Math.abs(pct) >= 1000 ? Math.round(Math.abs(pct)).toLocaleString() : Math.abs(pct).toFixed(Math.abs(pct) >= 100 ? 0 : 1)}%`, tone: pct > 0 ? "up" as const : "down" as const };
+  })();
+  const tone = badge?.tone ?? "flat";
+  const toneColor = tone === "up" ? "var(--success)" : tone === "down" ? "var(--danger)" : "var(--text-muted)";
+  const toneBg    = tone === "up" ? "rgba(5,150,105,0.09)" : tone === "down" ? "rgba(220,38,38,0.09)" : "var(--accent-dim)";
+  const toneEdge  = tone === "up" ? "rgba(5,150,105,0.22)" : tone === "down" ? "rgba(220,38,38,0.22)" : "var(--border)";
 
   // A button when it does something, a div when it does not — so the pointer,
   // focus ring and Enter key all follow from the element rather than being
@@ -94,31 +136,27 @@ export default function StatCard({
         {value}
       </p>
 
-      {/* Change badge */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{
-          display: "inline-flex", alignItems: "center", gap: 3,
-          fontSize: isSmall ? 11 : 11.5,
-          fontWeight: 700,
-          color: isPositive ? "var(--success)" : "var(--danger)",
-          background: isPositive ? "rgba(5,150,105,0.09)" : "rgba(220,38,38,0.09)",
-          border: `1px solid ${isPositive ? "rgba(5,150,105,0.22)" : "rgba(220,38,38,0.22)"}`,
-          padding: isSmall ? "2px 7px" : "3px 9px",
-          borderRadius: 100,
-        }}>
-          {isPositive
-            ? <TrendingUp size={isSmall ? 9 : 10} strokeWidth={2.5} />
-            : <TrendingDown size={isSmall ? 9 : 10} strokeWidth={2.5} />
-          }
-          {change}
-        </span>
-        {!isSmall && (
-          <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>vs last month</span>
-        )}
-        {isSmall && (
-          <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>vs last mo.</span>
-        )}
-      </div>
+      {/* Change badge — only where there is a comparison to make */}
+      {badge && compare && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }} title={`${compare.label}: ${previousText(compare.previous, isCount)}`}>
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 3,
+            fontSize: isSmall ? 11 : 11.5,
+            fontWeight: 700,
+            color: toneColor, background: toneBg, border: `1px solid ${toneEdge}`,
+            padding: isSmall ? "2px 7px" : "3px 9px",
+            borderRadius: 100,
+          }}>
+            {tone === "up" ? <TrendingUp size={isSmall ? 9 : 10} strokeWidth={2.5} />
+              : tone === "down" ? <TrendingDown size={isSmall ? 9 : 10} strokeWidth={2.5} />
+              : <Minus size={isSmall ? 9 : 10} strokeWidth={2.5} />}
+            {badge.text}
+          </span>
+          <span style={{ fontSize: isSmall ? 11 : 12, color: "var(--text-muted)", fontWeight: 500 }}>
+            {compare.label}
+          </span>
+        </div>
+      )}
     </Tag>
   );
 }

@@ -28,13 +28,17 @@ export default function ChartCard({
   color = "#e8e8e8",
   data,
   badge,
+  subtitle = "Last 7 months",
 }: {
   title: string;
   index?: number;
   color?: string;
   data?: { name: string; value: number }[];
   badge?: string;
+  /** What the points span — follows the dashboard's filter. */
+  subtitle?: string;
 }) {
+  const empty = !data || data.length === 0 || data.every(d => d.value === 0);
   const gradientId = `grad-${title.replace(/\s+/g, "")}`;
 
   return (
@@ -58,7 +62,7 @@ export default function ChartCard({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <h3 className="heading" style={{ fontSize: 15, color: "var(--text-primary)" }}>{title}</h3>
-          <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 2, fontWeight: 500 }}>Last 7 months</p>
+          <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 2, fontWeight: 500 }}>{subtitle}</p>
         </div>
         {badge && (
           <span style={{
@@ -73,6 +77,11 @@ export default function ChartCard({
         )}
       </div>
 
+      {empty ? (
+        <div style={{ height: 160, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, color: "var(--text-muted)" }}>
+          Nothing recorded in this stretch yet.
+        </div>
+      ) : (
       <ResponsiveContainer width="100%" height={160}>
         <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
           <defs>
@@ -106,6 +115,7 @@ export default function ChartCard({
           />
         </AreaChart>
       </ResponsiveContainer>
+      )}
     </div>
   );
 }

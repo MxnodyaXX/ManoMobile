@@ -17,7 +17,7 @@ import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/c
  */
 
 export type Access = "full" | "view" | "none";
-export type RoleName = "Admin" | "Cashier" | "Technician" | "Accounts" | "Procurement";
+export type RoleName = "Admin" | "Cashier" | "POS Cashier" | "Technician" | "Accounts" | "Procurement";
 
 export type AccessMatrix = Record<string, Partial<Record<RoleName, Access>>>;
 

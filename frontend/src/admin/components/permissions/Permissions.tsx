@@ -10,13 +10,13 @@ import { useModuleAccessMatrix, saveModuleAccess, type Access as StoredAccess } 
 const AA = "#a78bfa";
 const ff = "'Plus Jakarta Sans', sans-serif";
 
-type Role = "Admin" | "Cashier" | "Technician" | "Accounts" | "Procurement";
+type Role = "Admin" | "Cashier" | "POS Cashier" | "Technician" | "Accounts" | "Procurement";
 type Access = "full" | "view" | "none";
 type PermMatrix = Record<string, Record<Role, Access>>;
 
-const ROLES: Role[] = ["Admin", "Cashier", "Technician", "Accounts", "Procurement"];
+const ROLES: Role[] = ["Admin", "Cashier", "POS Cashier", "Technician", "Accounts", "Procurement"];
 const ROLE_COLORS: Record<Role, string> = {
-  Admin: "#a78bfa", Cashier: "#6355ff", Technician: "#34d399", Accounts: "#f59e0b", Procurement: "#60a5fa",
+  Admin: "#a78bfa", Cashier: "#6355ff", "POS Cashier": "#8b5cf6", Technician: "#34d399", Accounts: "#f59e0b", Procurement: "#60a5fa",
 };
 
 const MODULES = [
@@ -40,23 +40,23 @@ const MODULES = [
 ];
 
 const DEFAULT_PERMS: PermMatrix = {
-  "Dashboard":         { Admin:"full", Cashier:"view",  Technician:"view",  Accounts:"view",  Procurement:"view"  },
-  "Sales / POS":       { Admin:"full", Cashier:"full",  Technician:"none",  Accounts:"none",  Procurement:"none"  },
-  "Repairs":           { Admin:"full", Cashier:"full",  Technician:"full",  Accounts:"none",  Procurement:"none"  },
-  "Inventory":         { Admin:"full", Cashier:"full",  Technician:"view",  Accounts:"none",  Procurement:"view"  },
-  "Customers":         { Admin:"full", Cashier:"full",  Technician:"view",  Accounts:"view",  Procurement:"none"  },
-  "Cash Register":     { Admin:"full", Cashier:"full",  Technician:"none",  Accounts:"view",  Procurement:"none"  },
-  "Sales Reports":     { Admin:"full", Cashier:"view",  Technician:"none",  Accounts:"view",  Procurement:"none"  },
-  "Repair Reports":    { Admin:"full", Cashier:"view",  Technician:"view",  Accounts:"view",  Procurement:"none"  },
-  "Financial Reports": { Admin:"full", Cashier:"none",  Technician:"none",  Accounts:"full",  Procurement:"none"  },
-  "General Ledger":    { Admin:"full", Cashier:"none",  Technician:"none",  Accounts:"full",  Procurement:"none"  },
-  "AR / AP":           { Admin:"full", Cashier:"none",  Technician:"none",  Accounts:"full",  Procurement:"none"  },
-  "Staff Management":  { Admin:"full", Cashier:"none",  Technician:"none",  Accounts:"none",  Procurement:"none"  },
-  "Suppliers":         { Admin:"full", Cashier:"none",  Technician:"none",  Accounts:"view",  Procurement:"full"  },
-  "Purchase Orders":   { Admin:"full", Cashier:"none",  Technician:"none",  Accounts:"view",  Procurement:"full"  },
-  "Device Registry":   { Admin:"full", Cashier:"view",  Technician:"view",  Accounts:"none",  Procurement:"none"  },
-  "Notifications":     { Admin:"full", Cashier:"none",  Technician:"none",  Accounts:"none",  Procurement:"none"  },
-  "System Settings":   { Admin:"full", Cashier:"none",  Technician:"none",  Accounts:"none",  Procurement:"none"  },
+  "Dashboard":         { Admin:"full", Cashier:"view", "POS Cashier":"none",  Technician:"view",  Accounts:"view",  Procurement:"view"  },
+  "Sales / POS":       { Admin:"full", Cashier:"full", "POS Cashier":"full",  Technician:"none",  Accounts:"none",  Procurement:"none"  },
+  "Repairs":           { Admin:"full", Cashier:"full", "POS Cashier":"none",  Technician:"full",  Accounts:"none",  Procurement:"none"  },
+  "Inventory":         { Admin:"full", Cashier:"full", "POS Cashier":"view",  Technician:"view",  Accounts:"none",  Procurement:"view"  },
+  "Customers":         { Admin:"full", Cashier:"full", "POS Cashier":"view",  Technician:"view",  Accounts:"view",  Procurement:"none"  },
+  "Cash Register":     { Admin:"full", Cashier:"full", "POS Cashier":"full",  Technician:"none",  Accounts:"view",  Procurement:"none"  },
+  "Sales Reports":     { Admin:"full", Cashier:"view", "POS Cashier":"none",  Technician:"none",  Accounts:"view",  Procurement:"none"  },
+  "Repair Reports":    { Admin:"full", Cashier:"view", "POS Cashier":"none",  Technician:"view",  Accounts:"view",  Procurement:"none"  },
+  "Financial Reports": { Admin:"full", Cashier:"none", "POS Cashier":"none",  Technician:"none",  Accounts:"full",  Procurement:"none"  },
+  "General Ledger":    { Admin:"full", Cashier:"none", "POS Cashier":"none",  Technician:"none",  Accounts:"full",  Procurement:"none"  },
+  "AR / AP":           { Admin:"full", Cashier:"none", "POS Cashier":"none",  Technician:"none",  Accounts:"full",  Procurement:"none"  },
+  "Staff Management":  { Admin:"full", Cashier:"none", "POS Cashier":"none",  Technician:"none",  Accounts:"none",  Procurement:"none"  },
+  "Suppliers":         { Admin:"full", Cashier:"none", "POS Cashier":"none",  Technician:"none",  Accounts:"view",  Procurement:"full"  },
+  "Purchase Orders":   { Admin:"full", Cashier:"none", "POS Cashier":"none",  Technician:"none",  Accounts:"view",  Procurement:"full"  },
+  "Device Registry":   { Admin:"full", Cashier:"view", "POS Cashier":"none",  Technician:"view",  Accounts:"none",  Procurement:"none"  },
+  "Notifications":     { Admin:"full", Cashier:"none", "POS Cashier":"none",  Technician:"none",  Accounts:"none",  Procurement:"none"  },
+  "System Settings":   { Admin:"full", Cashier:"none", "POS Cashier":"none",  Technician:"none",  Accounts:"none",  Procurement:"none"  },
 };
 
 function AccessCell({ value, onChange, locked }: { value: Access; onChange: (v: Access) => void; locked?: boolean }) {

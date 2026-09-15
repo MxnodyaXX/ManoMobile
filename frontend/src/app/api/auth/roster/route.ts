@@ -21,7 +21,7 @@ import { createClient } from "@supabase/supabase-js";
 export interface RosterEntry {
   id: string;
   fullName: string;
-  role: "Admin" | "Cashier" | "Technician" | "Accounts";
+  role: "Admin" | "Cashier" | "POS Cashier" | "Technician" | "Accounts";
   speciality: string | null;
   staffId: string | null;
 }

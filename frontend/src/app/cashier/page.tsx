@@ -13,7 +13,6 @@ import { useTechnicianRates } from "@/lib/settings/staffRules";
 import { labourForJob } from "@/lib/repair/labour";
 import StatGroup from "@/cashier/components/dashboard/StatGroup";
 import InfoCard from "@/cashier/components/dashboard/InfoCard";
-import ChartCard from "@/cashier/components/dashboard/ChartCard";
 import FilterBar from "@/cashier/components/dashboard/FilterBar";
 import RepairManagement, { type RepairSection } from "@/cashier/components/repair/RepairManagement";
 import WarrantyCenter from "@/cashier/components/warranty/WarrantyCenter";
@@ -39,7 +38,6 @@ import { HeldSalesProvider } from "@/cashier/contexts/HeldSalesContext";
 import { AuditProvider } from "@/cashier/contexts/AuditContext";
 import { getDateLabel } from "@/cashier/utils/dataLabel";
 import {
-  REVENUE_CHART_DATA, SALES_CHART_DATA,
   fmtRs, type FilterPeriod,
 } from "@/cashier/data/dashboardData";
 import {
@@ -48,7 +46,16 @@ import {
   Hammer, Box, ClipboardList,
   AlertTriangle, CheckCircle, Clock, ArrowRight,
 } from "lucide-react";
-import { useIssuedFigures, type IssuedFigures } from "@/lib/repair/figures";
+import {
+  useIssuedFigures, seriesShape, recentActivity,
+  revenueByCategorySeries, repairStatusSlices, receivedVsCompletedSeries,
+  type IssuedFigures, type ActivityItem,
+} from "@/lib/repair/figures";
+import { VizStyle } from "@/cashier/components/dashboard/charts/viz";
+import RevenueTrendChart from "@/cashier/components/dashboard/charts/RevenueTrendChart";
+import RepairStatusDonut from "@/cashier/components/dashboard/charts/RepairStatusDonut";
+import ReceivedVsCompletedChart from "@/cashier/components/dashboard/charts/ReceivedVsCompletedChart";
+import TechnicianWorkloadChart from "@/cashier/components/dashboard/charts/TechnicianWorkloadChart";
 import { useMyPermissions } from "@/lib/settings/staffRules";
 import TabTitle from "@/lib/ui/TabTitle";
 
@@ -165,14 +172,75 @@ function PendingAlert({ onView }: { onView: () => void }) {
 }
 
 /* ── Recent-activity feed ── */
-const RECENT_ACTIVITY: { icon: React.ComponentType<{ size?: number; color?: string }>; color: string; text: string; time: string }[] = [];
+/**
+ * The last things that happened, off the jobs and sales already loaded.
+ *
+ * This read an empty constant — the mock feed was stripped and nothing real
+ * put in its place, so the panel was a heading over blank space on every
+ * open. A job booked in, finished or collected, and a sale rung up, are all
+ * timestamped on their own rows; that is the feed.
+ */
+const ACTIVITY_LOOK: Record<ActivityItem["kind"], { icon: React.ComponentType<{ size?: number; color?: string }>; color: string }> = {
+  booked:    { icon: ClipboardList, color: "#60a5fa" },
+  completed: { icon: CheckCircle,   color: "#34d399" },
+  delivered: { icon: ArrowRight,    color: "#a78bfa" },
+  sale:      { icon: ShoppingCart,  color: "#fbbf24" },
+};
 
-function ActivityFeed() {
+const whenText = (iso: string) => {
+  const t = new Date(iso).getTime();
+  const mins = Math.max(0, Math.round((Date.now() - t) / 60_000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hr${hrs === 1 ? "" : "s"} ago`;
+  const days = Math.round(hrs / 24);
+  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+  return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+};
+
+/**
+ * Three on the card, the rest behind a button.
+ *
+ * Eight rows made the panel the tallest thing in its row and pushed the
+ * charts below the fold on a laptop. Three is a glance — what just happened
+ * — and "View all" opens the same list at full length for when a glance is
+ * not enough. `all` is the long list; the card shows its head.
+ */
+const FEED_ON_CARD = 3;
+
+function ActivityFeed({ all }: { all: ActivityItem[] }) {
+  const [open, setOpen] = useState(false);
+  const items = all.slice(0, FEED_ON_CARD);
   return (
     <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px" }}>
-      <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 14 }}>Recent Activity</p>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14 }}>
+        <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>Recent Activity</p>
+        {all.length > FEED_ON_CARD && (
+          <button
+            onClick={() => setOpen(true)}
+            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+          >
+            View all <ArrowRight size={11} />
+          </button>
+        )}
+      </div>
+      {open && (
+        <InsightModal
+          title="Recent Activity"
+          subtitle={`The last ${all.length} things recorded`}
+          columns={[{ key: "when", label: "When" }, { key: "what", label: "What happened" }, { key: "ref", label: "Ref" }]}
+          rows={all.map((a, i) => ({ id: `${a.ref}-${a.kind}-${i}`, cells: { when: whenText(a.at), what: a.text, ref: a.ref } }))}
+          emptyText="Nothing recorded yet."
+          onClose={() => setOpen(false)}
+        />
+      )}
+      {items.length === 0 && (
+        <p style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Nothing recorded yet.</p>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {RECENT_ACTIVITY.map((item, i) => {
+        {items.map((raw, i) => {
+          const item = { ...ACTIVITY_LOOK[raw.kind], text: raw.text, time: whenText(raw.at) };
           const Icon = item.icon;
           return (
             <div key={i} style={{
@@ -200,49 +268,79 @@ function ActivityFeed() {
 }
 
 /* ── Today snapshot strip ── */
+/**
+ * Six small tiles, each a count with the money behind it.
+ *
+ * Four wide tiles carried one number apiece and a lot of white space around
+ * it. Six narrower ones fit the same row and each says two things: how many,
+ * and what that many is worth — because "9 waiting to be collected" and
+ * "Rs. 42,500 walks in when they do" are the same fact, and the second is the
+ * one the owner is actually asking. Every tile still opens the rows behind
+ * it and jumps to the tab that holds them.
+ */
 function TodaySnapshot({ onNavigate }: { onNavigate: (section?: RepairSection) => void }) {
-  // Counted from live repair jobs. Sales figures are absent rather than zero:
-  // there is no sales backend yet, and an invented "Revenue Today" is the most
-  // misleading number a shop dashboard could show.
   const { jobs } = useRepair();
   const today = new Date().toISOString().slice(0, 10);
   const [open, setOpen] = useState<{ spec: InsightSpec; section?: RepairSection } | null>(null);
 
-  // Each tile knows the jobs behind it and where those jobs live, so the count
-  // is never a dead end — you can always get from the number to the rows.
+  const money = (n: number) => `Rs. ${Math.round(n).toLocaleString("en-LK")}`;
+  const owed = (j: RepairJob) => Math.max(0, j.estimatedCost - j.advancePaid);
+  const isOpen = (j: RepairJob) => j.status === "Non-Issued" || j.status === "Issued" || j.status === "Pending";
+  // A job promised for today is not late until tomorrow, so "now" is the
+  // start of today — and it is a date, not Date.now(), so a render is the same
+  // render twice over.
+  const overdue = (j: RepairJob) => isOpen(j) && !!j.estimatedCompletion && j.estimatedCompletion < today;
+
+  const takenIn = jobs.filter(j => (j.createdAt ?? "").slice(0, 10) === today);
+  const queue   = jobs.filter(j => j.status === "Non-Issued");
+  const active  = jobs.filter(j => j.status === "Issued");
+  const hold    = jobs.filter(j => j.status === "Pending");
+  const late    = jobs.filter(overdue);
+  const ready   = jobs.filter(j => j.status === "Completed");
+
   const snaps: {
     label: string; color: string; section: RepairSection;
-    jobs: RepairJob[]; subtitle: string; empty: string;
+    jobs: RepairJob[]; sub: string; subtitle: string; empty: string;
   }[] = [
     {
-      label: "Taken In Today", color: "#4ade80", section: "New",
-      jobs: jobs.filter(j => (j.createdAt ?? "").slice(0, 10) === today),
-      subtitle: "Devices booked in at the counter today",
-      empty: "Nothing has been booked in today yet.",
+      label: "Taken in today", color: "#4ade80", section: "New", jobs: takenIn,
+      sub: takenIn.length ? `${money(takenIn.reduce((t, j) => t + j.estimatedCost, 0))} quoted` : "nothing yet",
+      subtitle: "Devices booked in at the counter today", empty: "Nothing has been booked in today yet.",
     },
     {
-      label: "Jobs In Queue", color: "#fbbf24", section: "Not Started",
-      jobs: jobs.filter(j => j.status === "Non-Issued"),
-      subtitle: "Accepted but not started by a technician",
-      empty: "Nothing is waiting — every job has been started.",
+      label: "In queue", color: "#fbbf24", section: "Not Started", jobs: queue,
+      sub: queue.length ? `${queue.filter(j => !j.technician || j.technician.trim().toLowerCase() === "unassigned").length} unassigned` : "all started",
+      subtitle: "Accepted but not started by a technician", empty: "Nothing is waiting — every job has been started.",
     },
     {
-      label: "In Progress", color: "#60a5fa", section: "Started",
-      jobs: jobs.filter(j => j.status === "Issued"),
-      subtitle: "Currently being worked on",
-      empty: "No repairs are in progress right now.",
+      label: "In progress", color: "#60a5fa", section: "Started", jobs: active,
+      sub: active.length ? `${money(active.reduce((t, j) => t + j.estimatedCost, 0))} on the bench` : "bench is clear",
+      subtitle: "Currently being worked on", empty: "No repairs are in progress right now.",
     },
     {
-      label: "Pending Pickups", color: "#a78bfa", section: "Non-Issued",
-      jobs: jobs.filter(j => j.status === "Completed"),
-      subtitle: "Repaired and waiting for the customer to collect",
-      empty: "Nothing is waiting to be collected.",
+      label: "On hold", color: "#fb923c", section: "Pending", jobs: hold,
+      sub: hold.length ? "waiting on a part, a decision or an agent" : "nothing parked",
+      subtitle: "Started, then paused — with the reason", empty: "Nothing is on hold.",
+    },
+    {
+      // The one tile that is a warning rather than a count: a promise already
+      // broken. Red, and first thing in the morning it is the tile to open.
+      label: "Overdue", color: "#f87171", section: "Not Started", jobs: late,
+      sub: late.length ? "past the date promised" : "everything on time",
+      subtitle: "Open jobs past the completion date the customer was given", empty: "Nothing is overdue.",
+    },
+    {
+      label: "Ready to collect", color: "#a78bfa", section: "Non-Issued", jobs: ready,
+      // What walks in when they walk in. The advance is already in the till,
+      // so this is the balance still owed, not the value of the repairs.
+      sub: ready.length ? `${money(ready.reduce((t, j) => t + owed(j), 0))} to collect` : "nothing waiting",
+      subtitle: "Repaired and waiting for the customer to collect", empty: "Nothing is waiting to be collected.",
     },
   ];
 
   return (
     <>
-      <div className="resp-grid-4">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
         {snaps.map(s => (
           <button
             key={s.label}
@@ -254,12 +352,14 @@ function TodaySnapshot({ onNavigate }: { onNavigate: (section?: RepairSection) =
             className="stat-card-clickable"
             style={{
               background: "var(--bg-card)", border: "1px solid var(--border)",
-              borderRadius: 10, padding: "12px 14px", textAlign: "left",
-              cursor: "pointer", font: "inherit", width: "100%",
+              borderLeft: `3px solid ${s.color}`,
+              borderRadius: 10, padding: "10px 12px", textAlign: "left",
+              cursor: "pointer", font: "inherit", width: "100%", minWidth: 0,
             }}
           >
-            <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 5 }}>{s.label}</p>
-            <p style={{ fontSize: 18, fontWeight: 800, color: s.color, letterSpacing: "-0.02em" }}>{s.jobs.length}</p>
+            <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.label}</p>
+            <p className="stat-number" style={{ fontSize: 20, color: s.jobs.length === 0 && s.label === "Overdue" ? "var(--text-muted)" : s.color }}>{s.jobs.length}</p>
+            <p style={{ fontSize: 10.5, color: "var(--text-secondary)", marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={s.sub}>{s.sub}</p>
           </button>
         ))}
       </div>
@@ -302,19 +402,35 @@ function RepairsStatGroup({ fig, dateLabel, onNavigate }: {
   );
   const profit = fig.repairIncome - partsCost - labourCost;
 
+  // The same three costs for the window before, so the badges compare like
+  // with like — a parts figure against last week's parts figure, not against
+  // nothing.
+  const prev = fig.previous;
+  const prevParts = prev
+    ? partRequests
+        .filter(r => prev.issuedJobIds.includes(r.jobId) && (r.status === "Approved" || r.status === "Issued"))
+        .reduce((sum, r) => sum + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0)
+    : 0;
+  const prevLabour = prev
+    ? prev.issuedJobs.reduce((sum, j) => sum + labourForJob(j, rateFor(j.technician || "")).amount, 0)
+    : 0;
+  const prevProfit = prev ? prev.repairIncome - prevParts - prevLabour : 0;
+  const cmp = (current: number, previous: number) =>
+    prev ? { current, previous, label: fig.compareLabel } : null;
+
   return (
     <>
       <StatGroup index={2} title="Repairs" dateLabel={dateLabel}>
-        <StatCard title="Repair Income" value={fmtRs(fig.repairIncome)} change="" icon={Wrench} size="large"
+        <StatCard title="Repair Income" value={fmtRs(fig.repairIncome)} compare={cmp(fig.repairIncome, prev?.repairIncome ?? 0)} icon={Wrench} size="large"
           onClick={() => setOpen(repairIncomeInsight(fig.issuedJobs, dateLabel))} />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <StatCard title="Parts Cost" value={fmtRs(partsCost)} change="" icon={Box} size="small"
+          <StatCard title="Parts Cost" value={fmtRs(partsCost)} compare={cmp(partsCost, prevParts)} icon={Box} size="small"
             onClick={() => setOpen(partsCostInsight(fig.issuedJobs, partRequests, parts, dateLabel))} />
-          <StatCard title="Labour Cost" value={fmtRs(labourCost)} change="" icon={Hammer} size="small"
+          <StatCard title="Labour Cost" value={fmtRs(labourCost)} compare={cmp(labourCost, prevLabour)} icon={Hammer} size="small"
             onClick={() => setOpen(labourInsight(fig.issuedJobs, rateFor, dateLabel))} />
-          <StatCard title="Profit" value={`${profit < 0 ? "−" : ""}${fmtRs(Math.abs(profit))}`} change="" icon={TrendingUp} size="small"
+          <StatCard title="Profit" value={`${profit < 0 ? "−" : ""}${fmtRs(Math.abs(profit))}`} compare={cmp(profit, prevProfit)} icon={TrendingUp} size="small"
             onClick={() => setOpen(profitInsight(fig.issuedJobs, partRequests, parts, rateFor, dateLabel))} />
-          <StatCard title="Total Jobs" value={String(fig.totalJobs)} change="" icon={ClipboardList} size="small" isCount
+          <StatCard title="Total Jobs" value={String(fig.totalJobs)} compare={cmp(fig.totalJobs, prev?.totalJobs ?? 0)} icon={ClipboardList} size="small" isCount
             onClick={() => setOpen(totalJobsInsight(fig.issuedJobs, dateLabel))} />
         </div>
       </StatGroup>
@@ -363,6 +479,13 @@ export default function CashierPage() {
 
   // Live figures, read from the database rather than the zeroed constants.
   const fig = useIssuedFigures(filter);
+  /**
+   * A card's comparison: this window against the one before it, for whichever
+   * figure the card shows. Null on "All", which has no "before" — the card
+   * then shows no badge rather than a made-up one.
+   */
+  const cmp = (pick: (f: typeof fig) => number) =>
+    fig.previous ? { current: pick(fig), previous: pick(fig.previous as typeof fig), label: fig.compareLabel } : null;
   const isManaged = MANAGED_PAGES.includes(activePage);
 
   return (
@@ -463,26 +586,26 @@ export default function CashierPage() {
                 {/* Stat groups */}
                 <div className="resp-grid-3">
                   <StatGroup index={0} title="Revenue" dateLabel={dateLabel}>
-                    <StatCard title="Total Revenue"   value={fmtRs(fig.repairIncome)}   change=""   icon={DollarSign}  size="large"
+                    <StatCard title="Total Revenue"   value={fmtRs(fig.totalRevenue)}   compare={cmp(f => f.totalRevenue)}   icon={DollarSign}  size="large"
                       onClick={() => setInsight(repairIncomeInsight(fig.issuedJobs, dateLabel))} />
                     <div className="resp-grid-2">
-                      <StatCard title="Sales"         value={fmtRs(fig.salesRevenue)}   change=""   icon={TrendingUp}  size="small"
-                        onClick={() => setInsight(salesInsight("Sales Revenue", dateLabel))} />
-                      <StatCard title="Repairs"       value={fmtRs(fig.repairIncome)}  change=""  icon={Wrench}      size="small"
+                      <StatCard title="Sales"         value={fmtRs(fig.salesRevenue)}   compare={cmp(f => f.salesRevenue)}   icon={TrendingUp}  size="small"
+                        onClick={() => setInsight(salesInsight("Sales Revenue", dateLabel, fig.periodSales))} />
+                      <StatCard title="Repairs"       value={fmtRs(fig.repairIncome)}  compare={cmp(f => f.repairIncome)}  icon={Wrench}      size="small"
                         onClick={() => setInsight(repairIncomeInsight(fig.issuedJobs, dateLabel))} />
                     </div>
                   </StatGroup>
 
                   <StatGroup index={1} title="Sales" dateLabel={dateLabel}>
-                    <StatCard title="Total Sales"     value={fmtRs(fig.salesRevenue)}     change=""     icon={ShoppingCart}   size="large"
-                      onClick={() => setInsight(salesInsight("Total Sales", dateLabel))} />
+                    <StatCard title="Total Sales"     value={fmtRs(fig.salesRevenue)}     compare={cmp(f => f.salesRevenue)}     icon={ShoppingCart}   size="large"
+                      onClick={() => setInsight(salesInsight("Total Sales", dateLabel, fig.periodSales))} />
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                      <StatCard title="Mobile"        value={fmtRs(0)}    change=""    icon={Smartphone}     size="small"
-                        onClick={() => setInsight(salesInsight("Mobile Sales", dateLabel))} />
-                      <StatCard title="Accessory"     value={fmtRs(0)} change="" icon={Package}        size="small"
-                        onClick={() => setInsight(salesInsight("Accessory Sales", dateLabel))} />
-                      <StatCard title="Other"         value={fmtRs(0)}     change=""     icon={MoreHorizontal} size="small"
-                        onClick={() => setInsight(salesInsight("Other Sales", dateLabel))} />
+                      <StatCard title="Mobile"        value={fmtRs(fig.sales.mobile)}      compare={cmp(f => f.sales.mobile)}      icon={Smartphone}     size="small"
+                        onClick={() => setInsight(salesInsight("Mobile Sales", dateLabel, fig.periodSales, "Mobile"))} />
+                      <StatCard title="Accessory"     value={fmtRs(fig.sales.accessories)} compare={cmp(f => f.sales.accessories)} icon={Package}        size="small"
+                        onClick={() => setInsight(salesInsight("Accessory Sales", dateLabel, fig.periodSales, "Accessories"))} />
+                      <StatCard title="Other"         value={fmtRs(fig.sales.others)}      compare={cmp(f => f.sales.others)}      icon={MoreHorizontal} size="small"
+                        onClick={() => setInsight(salesInsight("Other Sales", dateLabel, fig.periodSales, "Others"))} />
                     </div>
                   </StatGroup>
 
@@ -500,13 +623,29 @@ export default function CashierPage() {
                       <QuickAction label="View Reports"     sub="Daily & sales reports"   color="#a78bfa" onClick={() => setActivePage("Reports")} />
                     </div>
                   </div>
-                  <ActivityFeed />
+                  <ActivityFeed all={recentActivity(fig.allJobs, fig.allSales, 60)} />
                 </div>
 
-                {/* Charts */}
-                <div className="resp-grid-2">
-                  <ChartCard title="Revenue Growth"  index={0} color="#e8e8e8" data={REVENUE_CHART_DATA} />
-                  <ChartCard title="Sales Overview"  index={1} color="#a8a8a8" data={SALES_CHART_DATA}   />
+                {/* ── The four charts ──────────────────────────────────────
+                    Money, the state of the bench, the backlog, and who is
+                    carrying it. Four, not a wall: each answers a question the
+                    owner actually asks in the morning, and all four read the
+                    same filter as the figures above them. */}
+                <VizStyle />
+                <div className="resp-grid-2" style={{ alignItems: "start" }}>
+                  <RevenueTrendChart
+                    data={revenueByCategorySeries(fig.allJobs, fig.allSales, filter)}
+                    subtitle={seriesShape(filter).label}
+                  />
+                  <RepairStatusDonut
+                    slices={repairStatusSlices(fig.allJobs)}
+                    onPick={section => goToRepair(section)}
+                  />
+                  <ReceivedVsCompletedChart
+                    data={receivedVsCompletedSeries(fig.allJobs, filter)}
+                    subtitle={seriesShape(filter).label}
+                  />
+                  <TechnicianWorkloadChart jobs={fig.allJobs} />
                 </div>
 
                 {/* Info cards */}

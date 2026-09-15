@@ -5,7 +5,7 @@ import type { Session, User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { claimSeed } from "@/lib/supabase/tabSession";
 
-export type StaffRole = "Admin" | "Cashier" | "Technician" | "Accounts";
+export type StaffRole = "Admin" | "Cashier" | "POS Cashier" | "Technician" | "Accounts";
 
 export interface StaffProfile {
   id: string;

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Wrench, ShoppingCart, Shield, Landmark, ArrowRight, ArrowLeft,
+  Wrench, ShoppingCart, ShoppingBasket, Shield, Landmark, ArrowRight, ArrowLeft,
   Smartphone, Zap, Loader2, AlertCircle, LogIn, Eye, EyeOff,
 } from "lucide-react";
 import { useAuth, type StaffRole } from "@/lib/auth/AuthContext";
@@ -41,6 +41,7 @@ const ROLES: {
   icon: typeof Wrench; color: string; badge: string; path: string;
 }[] = [
   { id: "cashier",    role: "Cashier",    label: "Cashier",    sub: "Sales, repairs,\ninventory & reports", icon: ShoppingCart, color: "#6355ff", badge: "Front Counter", path: "/cashier" },
+  { id: "pos",        role: "POS Cashier", label: "POS Cashier", sub: "Accessory sales\nat the till",          icon: ShoppingBasket, color: "#8b5cf6", badge: "Point of Sale", path: "/pos" },
   { id: "technician", role: "Technician", label: "Technician", sub: "Repair jobs, status\nupdates & parts",   icon: Wrench,       color: "#34d399", badge: "Repair Focus",  path: "/technician" },
   { id: "admin",      role: "Admin",      label: "Admin",      sub: "System config &\naccess control",        icon: Shield,       color: "#a78bfa", badge: "Admin Only",    path: "/admin" },
   { id: "accounts",   role: "Accounts",   label: "Accounts",   sub: "Ledger, AR/AP &\nfinancial reports",     icon: Landmark,     color: "#f59e0b", badge: "Finance",       path: "/accounts" },
@@ -487,7 +488,7 @@ export default function LoginPage() {
   /* ── step 1: which role ──────────────────────────────────────────────── */
 
   return (
-    <Shell>
+    <Shell maxWidth={900}>
       <Brand caption="Select your role to continue" />
 
       {rosterError && <Warning>{rosterError}</Warning>}
@@ -501,7 +502,7 @@ export default function LoginPage() {
         </Warning>
       )}
 
-      <div className="resp-grid-4" style={{ width: "100%" }}>
+      <div className="resp-grid-5" style={{ width: "100%" }}>
         {ROLES.map(r => {
           const Icon = r.icon;
           const count = forRole(r.role).length;

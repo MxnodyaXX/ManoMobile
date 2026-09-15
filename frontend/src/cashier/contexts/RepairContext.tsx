@@ -560,9 +560,20 @@ export function RepairProvider({ children }: { children: ReactNode }) {
           notifyJobEmail("finished", after);
         }
       }
-      // Delivered is the handover: the device has physically gone back, so the
-      // email is a record of collection rather than a notification.
-      else if (changes.status === "Delivered") notifyJobEmail("issued", after);
+      // Delivered is the handover: the device has physically gone back. The
+      // email is the record of collection; the text is the thank-you with the
+      // money on it — which was never sent for an ordinary repair. The
+      // customer heard "ready to collect" and then nothing, and walked out
+      // with nothing on their phone saying what they had paid.
+      //
+      // Not for an Instant job (issueJob sends instant_settled with the parts
+      // list, which says the same thing better), and not for a device handed
+      // back unrepaired — "has been repaired and handed back" would be a lie.
+      else if (changes.status === "Delivered") {
+        notifyJobEmail("issued", after);
+        const unrepaired = after.completionType === "Return" || after.completionType === "Cash Return";
+        if (after.creationType !== "Instant" && !unrepaired) notify("collected", after);
+      }
     }
 
     setJobs(prev => prev.map(j => (j.id === id ? { ...j, ...changes } : j)));
