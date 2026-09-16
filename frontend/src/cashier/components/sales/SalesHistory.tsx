@@ -20,6 +20,7 @@ import { useMyPermissions } from "@/lib/settings/staffRules";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import { correctSalePayment } from "@/lib/sales/correctPayment";
 import { fetchSaleItems, type SaleItem } from "@/lib/sales/saleItems";
+import { useRebuiltInvoice } from "./rebuildInvoice";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
@@ -437,15 +438,28 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
       .catch(() => { /* the items string below still says what was sold */ });
     return () => { live = false; };
   }, [tx.invoiceNo]);
-  const repairLines  = lines.filter(l => l.kind === "repair_service" || l.kind === "repair_part");
-  const productLines = lines.filter(l => l.kind !== "repair_service" && l.kind !== "repair_part");
   const cfg = STATUS_CFG[tx.status];
+
+  /**
+   * No stored page — the sale was marked as issued without a print, or it
+   * predates stored documents. The invoice is rebuilt from the sale record
+   * instead, so a customer asking for a copy a week later still gets one.
+   * The notice above it says which of the two the reader is looking at.
+   */
+  const rebuilt = useRebuiltInvoice(tx, lines);
+  const rebuiltRef = useRef<HTMLDivElement>(null);
+  const printRebuilt = () => {
+    const el = rebuiltRef.current;
+    if (!el) return;
+    printInvoiceDocument({ invoiceNo: tx.invoiceNo, html: el.outerHTML, pageCss: rebuilt.pageCss, createdAt: tx.date });
+  };
+  const canPrint = !!doc || (!loading && !rebuilt.loading);
 
   return createPortal(
     <div style={{ position: "fixed", inset: 0, zIndex: 1010, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)" }} />
       <div style={{
-        position: "relative", zIndex: 1, width: "100%", maxWidth: doc ? 900 : 460,
+        position: "relative", zIndex: 1, width: "100%", maxWidth: 900,
         maxHeight: "calc(100vh - 40px)", display: "flex", flexDirection: "column",
         background: "var(--bg-card)", border: "1px solid var(--border)",
         borderRadius: 16, overflow: "hidden",
@@ -472,8 +486,8 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
           </button>
         </div>
 
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: doc ? 0 : "22px" }}>
-          {loading && (
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 0 }}>
+          {(loading || (!doc && rebuilt.loading)) && (
             <p style={{ fontSize: 12.5, color: "var(--text-muted)", padding: 22, textAlign: "center", fontFamily: ff }}>
               Loading the invoice…
             </p>
@@ -491,61 +505,21 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
             </div>
           )}
 
-          {!loading && !doc && (
+          {!loading && !doc && !rebuilt.loading && (
             <>
-              <div style={{ display: "flex", gap: 9, padding: "11px 13px", borderRadius: 9, marginBottom: 16, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)" }}>
+              <div style={{ display: "flex", gap: 9, padding: "11px 13px", margin: "16px 22px 0", borderRadius: 9, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)" }}>
                 <AlertCircle size={14} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
                 <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.55, fontFamily: ff }}>
-                  No printed invoice was stored for this sale, so there is nothing to reprint.
-                  The figures below are the sale record itself. Sales completed from the Repair,
-                  Mobile and Others screens keep their invoice; older sales and accessory
-                  counter sales do not.
+                  The printed page for this sale was not kept, so this invoice is rebuilt from
+                  the sale record and its jobs as they stand today. It prints in the same layout;
+                  anything changed since the sale shows as it is now.
                 </p>
               </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-                {[
-                  ["Customer",  tx.customer],
-                  ["Category",  tx.category],
-                  ["Total",     fmtRs(tx.total)],
-                  ["Status",    tx.status],
-                ].map(([k, v]) => (
-                  <div key={k} style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: "10px 12px" }}>
-                    <p style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>{k}</p>
-                    <p style={{ fontSize: 13, color: "var(--text-primary)", fontWeight: 600 }}>{v}</p>
-                  </div>
-                ))}
-              </div>
-
-              {lines.length === 0 ? (
-                <div style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: "10px 14px" }}>
-                  <p style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Items</p>
-                  <p style={{ fontSize: 13, color: "var(--text-primary)" }}>{tx.items}</p>
+              <div style={{ background: "#525659", padding: 20, marginTop: 16, display: "flex", justifyContent: "center" }}>
+                <div style={{ background: "#fff", boxShadow: "0 4px 24px rgba(0,0,0,0.35)", maxWidth: "100%", overflowX: "auto" }}>
+                  {rebuilt.render(rebuiltRef)}
                 </div>
-              ) : (
-                [["Repair charges", repairLines], ["Additional products", productLines]].map(([title, group]) =>
-                  (group as SaleItem[]).length === 0 ? null : (
-                    <div key={title as string} style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: "10px 14px", marginBottom: 10 }}>
-                      <p style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>{title as string}</p>
-                      {(group as SaleItem[]).map(l => (
-                        <div key={l.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5, padding: "3px 0" }}>
-                          <span style={{ color: "var(--text-primary)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {l.description}
-                            {l.qty > 1 && <span style={{ color: "var(--text-muted)" }}> × {l.qty}</span>}
-                            {l.discount > 0 && <span style={{ color: "#f87171" }}> · − {fmtRs(l.discount)}</span>}
-                          </span>
-                          <span style={{ fontWeight: 600, color: l.lineTotal < 0 ? "#60a5fa" : "var(--text-primary)", flexShrink: 0 }}>
-                            {l.lineTotal < 0 ? `(${fmtRs(Math.abs(l.lineTotal))})` : fmtRs(l.lineTotal)}
-                          </span>
-                        </div>
-                      ))}
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700, borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 6 }}>
-                        <span style={{ color: "var(--text-muted)" }}>{title as string}</span>
-                        <span>{fmtRs((group as SaleItem[]).reduce((t, l) => t + l.lineTotal, 0))}</span>
-                      </div>
-                    </div>
-                  ))
-              )}
+              </div>
             </>
           )}
         </div>
@@ -559,18 +533,18 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
             Close
           </button>
           <button
-            onClick={() => doc && printInvoiceDocument(doc)}
-            disabled={!doc}
-            title={doc ? undefined : "No invoice was stored for this sale"}
+            onClick={() => (doc ? printInvoiceDocument(doc) : printRebuilt())}
+            disabled={!canPrint}
+            title={doc ? undefined : "Prints the invoice rebuilt from the sale record"}
             style={{
               flex: 1, padding: "10px 0", borderRadius: 9, border: "1px solid var(--accent-glow)",
               background: "var(--accent-dim)", color: "var(--accent)",
-              cursor: doc ? "pointer" : "not-allowed", opacity: doc ? 1 : 0.45,
+              cursor: canPrint ? "pointer" : "not-allowed", opacity: canPrint ? 1 : 0.45,
               fontSize: 13, fontWeight: 600, fontFamily: ff,
               display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
             }}
           >
-            <Printer size={14} /> Reprint Invoice
+            <Printer size={14} /> {doc ? "Reprint Invoice" : "Print Invoice"}
           </button>
         </div>
       </div>

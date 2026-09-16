@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Type, Image as ImageIcon, Barcode as BarcodeIcon, Minus,
+  Type, Image as ImageIcon, Barcode as BarcodeIcon, Minus, Crop,
   Trash2, Copy, ArrowUp, ArrowDown, Upload, ClipboardCopy, X,
 } from "lucide-react";
 import LabelRender from "@/cashier/components/shared/LabelRender";
+import ImageCropModal from "./ImageCropModal";
 import { SHOP_DETAILS } from "@/lib/shop";
 import {
   blankElement, clampElement, copyDesign, LABEL_TOKENS,
@@ -67,6 +68,7 @@ export default function LabelCanvas({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [copyOpen, setCopyOpen] = useState(false);
+  const [cropping, setCropping] = useState(false);
   const boardRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   // Drag state lives in a ref: a pointermove firing 60 times a second must not
@@ -228,6 +230,20 @@ export default function LabelCanvas({
             onChange(copyDesign(src.elements, { w: src.widthMm, h: src.heightMm }, { w: widthMm, h: heightMm }, scaleToFit));
             setSelectedId(null);
             setCopyOpen(false);
+          }}
+        />
+      )}
+
+      {cropping && selected?.type === "image" && (
+        <ImageCropModal
+          src={selected.src}
+          onClose={() => setCropping(false)}
+          onApply={(src, size) => {
+            // The box takes the new shape: a logo cropped from a wide file to a
+            // square one should not sit in a wide box with empty ends.
+            const h = Math.round((selected.w * size.h / size.w) * 2) / 2;
+            update(selected.id, { src, h });
+            setCropping(false);
           }}
         />
       )}
@@ -418,9 +434,14 @@ export default function LabelCanvas({
               {selected.type === "image" && (
                 <>
                   <Field label="Image">
-                    <button onClick={() => fileRef.current?.click()} style={{ ...btn, width: "100%", justifyContent: "center" }}>
-                      <Upload size={13} /> Replace image
-                    </button>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => setCropping(true)} style={{ ...btn, flex: 1, justifyContent: "center" }} title="Cut the image down to the part that matters">
+                        <Crop size={13} /> Crop
+                      </button>
+                      <button onClick={() => fileRef.current?.click()} style={{ ...btn, flex: 1, justifyContent: "center" }}>
+                        <Upload size={13} /> Replace
+                      </button>
+                    </div>
                   </Field>
                   <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5, wordBreak: "break-all" }}>
                     {selected.src.startsWith("data:") ? "Uploaded image" : selected.src}

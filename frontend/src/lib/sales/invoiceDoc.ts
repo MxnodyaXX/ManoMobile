@@ -82,8 +82,14 @@ export function usePersistInvoiceDocument(
   invoiceNo: string | null | undefined,
   ref: RefObject<HTMLElement | null>,
   pageCss?: string,
+  /** Called once the write has settled — for a caller that mounted the
+   *  invoice only to have it stored, and can let go of it afterwards. */
+  onSettled?: (invoiceNo: string) => void,
 ) {
   const saved = useRef<string | null>(null);
+  // The callback is read inside the effect, where a ref may be written; the
+  // effect below re-runs every render, so the latest one is always in place.
+  const settle = useRef(onSettled);
 
   /**
    * After every render, not only when the number changes.
@@ -101,6 +107,7 @@ export function usePersistInvoiceDocument(
    * store the wrong invoice for good, since the table has no update policy.
    */
   useEffect(() => {
+    settle.current = onSettled;
     if (!invoiceNo || saved.current === invoiceNo) return;
     const el = ref.current;
     if (!el || el.dataset.templatePending) return;
@@ -108,7 +115,11 @@ export function usePersistInvoiceDocument(
     saved.current = invoiceNo;
     // outerHTML, matching exactly what every print handler in this app copies —
     // so what is stored is what comes out of the printer, not a near-miss.
-    void saveInvoiceDocument(invoiceNo, el.outerHTML, pageCss);
+    // Settled either way: a refusal is logged inside saveInvoiceDocument, and
+    // holding a hidden invoice mounted forever would not change the outcome.
+    void saveInvoiceDocument(invoiceNo, el.outerHTML, pageCss)
+      .catch(() => {})
+      .then(() => settle.current?.(invoiceNo));
   });
 }
 
