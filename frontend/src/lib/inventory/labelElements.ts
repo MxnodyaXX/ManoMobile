@@ -72,6 +72,10 @@ export interface LabelData {
   customer?: string;
   device?: string;
   imei?: string;
+  /** What the device came in for — RepairJob.issue. On a tag sitting on the
+   *  bench this is the one thing a technician cannot work out by looking at
+   *  the phone, so it earns its place beside the job number. */
+  fault?: string;
   title?: string;
   subtitle?: string;
   date?: string;
@@ -87,6 +91,7 @@ export const LABEL_TOKENS: { token: string; label: string }[] = [
   { token: "{{customer}}",    label: "Customer name" },
   { token: "{{device}}",      label: "Device brand & model" },
   { token: "{{imei}}",        label: "IMEI" },
+  { token: "{{fault}}",       label: "Reported fault" },
   { token: "{{date}}",        label: "Today's date" },
   { token: "{{shopName}}",    label: "Shop name" },
   { token: "{{shopPhone}}",   label: "Shop phone" },
@@ -106,6 +111,7 @@ export function resolveTokens(text: string, data: LabelData): string {
     customer: data.customer,
     device: data.device,
     imei: data.imei,
+    fault: data.fault,
     title: data.title,
     subtitle: data.subtitle,
     date: data.date,

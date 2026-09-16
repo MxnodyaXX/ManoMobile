@@ -2203,6 +2203,8 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
           code={autoPrintJob.id}
           title={`${autoPrintJob.brand} ${autoPrintJob.model}`.trim()}
           subtitle={autoPrintJob.customerName}
+          fault={autoPrintJob.issue}
+          imei={autoPrintJob.imei}
           onClose={() => setAutoPrintJob(null)}
         />
       )}

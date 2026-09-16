@@ -2985,6 +2985,8 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
           code={labelJob.id}
           title={`${labelJob.brand} ${labelJob.model}`.trim()}
           subtitle={labelJob.customerName}
+          fault={labelJob.issue}
+          imei={labelJob.imei}
           onClose={() => setLabelJob(null)}
         />
       )}

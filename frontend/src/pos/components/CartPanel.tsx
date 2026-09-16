@@ -39,8 +39,9 @@ export function CartPanel({ cart, billNo, heldCount, onOpenHeld, onPickParty, on
 
   return (
     <aside className="flex h-full w-full max-w-md flex-col border-l border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 pb-3 pt-4">
+      {/* Header — fixed. Everything above the line stays put; only the lines
+          of the sale scroll. */}
+      <div className="flex shrink-0 items-center justify-between px-5 pb-3 pt-4">
         <div>
           <h2 className="text-sm font-bold text-slate-900 dark:text-white">Current Sale</h2>
           <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
@@ -74,7 +75,7 @@ export function CartPanel({ cart, billNo, heldCount, onOpenHeld, onPickParty, on
         </div>
       </div>
 
-      <div className="px-5 pb-4">
+      <div className="shrink-0 px-5 pb-4">
         <span
           className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-2.5 py-1 font-mono text-xs font-extrabold tracking-wide text-white dark:bg-violet-500"
           title="The number this sale will take when it is completed"
@@ -84,11 +85,13 @@ export function CartPanel({ cart, billNo, heldCount, onOpenHeld, onPickParty, on
         </span>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5">
+      {/* Who is being billed — fixed, because the balance they already owe is
+          part of the figure at the bottom and should not scroll away from it. */}
+      <div className="shrink-0 px-5 pb-4">
         <PartySection party={cart.party} onPick={onPickParty} onRemove={() => cart.setParty(null)} />
+      </div>
 
-        <div className="my-4 border-t border-slate-100 dark:border-slate-800" />
-
+      <div className="min-h-0 flex-1 overflow-y-auto border-t border-slate-100 px-5 dark:border-slate-800">
         {isEmpty ? (
           <div className="flex flex-col items-center gap-2 py-14 text-center text-slate-300 dark:text-slate-700">
             <ShoppingBag size={30} strokeWidth={1.5} />
@@ -97,11 +100,12 @@ export function CartPanel({ cart, billNo, heldCount, onOpenHeld, onPickParty, on
           </div>
         ) : (
           <table className="w-full text-[13px]">
-            <thead>
+            {/* The column heads stay with the list as it scrolls. */}
+            <thead className="sticky top-0 z-10 bg-white dark:bg-slate-950">
               <tr className="text-left text-[10.5px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                <th className="pb-2 font-semibold">Item</th>
-                <th className="w-24 pb-2 text-center font-semibold">Qty</th>
-                <th className="pb-2 text-right font-semibold">Total</th>
+                <th className="pb-2 pt-3 font-semibold">Item</th>
+                <th className="w-24 pb-2 pt-3 text-center font-semibold">Qty</th>
+                <th className="pb-2 pt-3 text-right font-semibold">Total</th>
               </tr>
             </thead>
             <tbody>
@@ -158,75 +162,76 @@ export function CartPanel({ cart, billNo, heldCount, onOpenHeld, onPickParty, on
             </tbody>
           </table>
         )}
+      </div>
 
-        {/* Totals */}
-        <div className="mt-4 flex flex-col gap-2 border-t border-slate-100 pb-4 pt-4 dark:border-slate-800">
-          <TotalRow label="Subtotal" value={formatCurrency(cart.subtotal)} />
-          <EditableRow label="Discount" value={cart.discountAmount} onChange={cart.setDiscountAmount} />
-          <EditableRow label="Write-off" value={cart.writeOffAmount} onChange={cart.setWriteOffAmount} />
+      {/* Totals — pinned above the buttons, so the figure being charged is on
+          screen whatever the list is doing. */}
+      <div className="flex shrink-0 flex-col gap-2 border-t border-slate-200 px-5 pb-4 pt-4 dark:border-slate-800">
+        <TotalRow label="Subtotal" value={formatCurrency(cart.subtotal)} />
+        <EditableRow label="Discount" value={cart.discountAmount} onChange={cart.setDiscountAmount} />
+        <EditableRow label="Write-off" value={cart.writeOffAmount} onChange={cart.setWriteOffAmount} />
 
-          <div className="my-1 border-t border-dashed border-slate-200 dark:border-slate-700" />
+        <div className="my-1 border-t border-dashed border-slate-200 dark:border-slate-700" />
 
-          <TotalRow label="Total" value={formatCurrency(cart.total)} strong />
+        <TotalRow label="Total" value={formatCurrency(cart.total)} strong />
 
-          <div className="flex items-center justify-between gap-2">
-            <label htmlFor="paid-amount" className="text-sm text-slate-500 dark:text-slate-400">
-              Paid
-            </label>
-            <div className="flex items-center gap-1.5">
-              {!cart.paidIsAuto && (
-                <button
-                  type="button"
-                  onClick={cart.resetPaidToFull}
-                  className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
-                >
-                  Full
-                </button>
-              )}
-              <input
-                id="paid-amount"
-                type="number"
-                min={0}
-                value={cart.paidAmount === 0 ? "" : cart.paidAmount}
-                placeholder="0.00"
-                onChange={e => cart.setPaidAmount(Number(e.target.value))}
-                className="w-24 rounded-md border border-slate-200 px-2 py-1 text-right font-mono text-sm text-slate-800 focus:border-violet-400 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-              />
-            </div>
+        <div className="flex items-center justify-between gap-2">
+          <label htmlFor="paid-amount" className="text-sm text-slate-500 dark:text-slate-400">
+            Paid
+          </label>
+          <div className="flex items-center gap-1.5">
+            {!cart.paidIsAuto && (
+              <button
+                type="button"
+                onClick={cart.resetPaidToFull}
+                className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
+              >
+                Full
+              </button>
+            )}
+            <input
+              id="paid-amount"
+              type="number"
+              min={0}
+              value={cart.paidAmount === 0 ? "" : cart.paidAmount}
+              placeholder="0.00"
+              onChange={e => cart.setPaidAmount(Number(e.target.value))}
+              className="w-24 rounded-md border border-slate-200 px-2 py-1 text-right font-mono text-sm text-slate-800 focus:border-violet-400 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            />
           </div>
+        </div>
 
-          {previousBalance > 0 && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-amber-600 dark:text-amber-400">Previous balance</span>
-              <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">
-                {formatCurrency(previousBalance)}
-              </span>
-            </div>
-          )}
-
-          <div className="my-1 border-t border-dashed border-slate-200 dark:border-slate-700" />
-
-          <div className="flex items-baseline justify-between">
-            <span className="text-sm font-bold text-slate-700 dark:text-slate-200">
-              {grandDue < 0 ? "Change" : "Due"}
-            </span>
-            <span
-              className={`font-mono text-xl font-extrabold ${
-                grandDue > 0
-                  ? "text-rose-600 dark:text-rose-400"
-                  : grandDue < 0
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-slate-900 dark:text-white"
-              }`}
-            >
-              {formatCurrency(Math.abs(grandDue))}
+        {previousBalance > 0 && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-amber-600 dark:text-amber-400">Previous balance</span>
+            <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">
+              {formatCurrency(previousBalance)}
             </span>
           </div>
+        )}
+
+        <div className="my-1 border-t border-dashed border-slate-200 dark:border-slate-700" />
+
+        <div className="flex items-baseline justify-between">
+          <span className="text-sm font-bold text-slate-700 dark:text-slate-200">
+            {grandDue < 0 ? "Change" : "Due"}
+          </span>
+          <span
+            className={`font-mono text-xl font-extrabold ${
+              grandDue > 0
+                ? "text-rose-600 dark:text-rose-400"
+                : grandDue < 0
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-slate-900 dark:text-white"
+            }`}
+          >
+            {formatCurrency(Math.abs(grandDue))}
+          </span>
         </div>
       </div>
 
       {/* Actions */}
-      <div className="border-t border-slate-200 px-5 pb-5 pt-4 dark:border-slate-800">
+      <div className="shrink-0 border-t border-slate-200 px-5 pb-5 pt-4 dark:border-slate-800">
         <div className="grid grid-cols-3 gap-2">
           <button
             type="button"

@@ -46,6 +46,11 @@ interface BarcodeLabelModalProps {
   /** The originating dealer's own job number, for a repair tag on a device
    *  that came from another shop — blank for Mano Mobile's own jobs. */
   dealerJobNo?: string;
+  /** What the device came in for. Printed on the job tag and available to a
+   *  label design as {{fault}}. */
+  fault?: string;
+  /** The device's IMEI, for the {{imei}} token on a label design. */
+  imei?: string;
   /** True when this job's dealer is someone other than Mano Mobile itself —
    *  picks the OUTSIDE_DEALER_TEMPLATE_NAME design instead of the normal
    *  default "repair" template, when one exists. Only meaningful for
@@ -86,7 +91,7 @@ interface BarcodeLabelModalProps {
  * until it fits. Runs for both axes since a narrower label (38mm) can
  * overflow sideways even when a wider one (50mm) had enough slack.
  */
-export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, outsideDealer = false, silent = false, ask = false, onClose }: BarcodeLabelModalProps) {
+export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, outsideDealer = false, silent = false, ask = false, onClose }: BarcodeLabelModalProps) {
   const { barcodeSettings: s } = useInventory();
   const labelRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -278,6 +283,8 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
           dealerJobNo: dealerJobNo ?? "",
           customer: subtitle ?? "",
           device: title ?? "",
+          imei: imei ?? "",
+          fault: fault ?? "",
           title: title ?? "",
           subtitle: subtitle ?? "",
           date: new Date().toLocaleDateString("en-GB"),
@@ -323,6 +330,16 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
                     )}
                   </div>
                 </div>
+
+                {/* What it came in for. One line, clipped — a tag is read at
+                    arm's length, and the full complaint is on the job anyway.
+                    The auto-fit below gives it the room by shortening the
+                    bars, never the text. */}
+                {fault && fault.trim() !== "" && (
+                  <div style={{ fontSize: 7, fontWeight: 700, color: "#000", fontFamily: ff, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {fault.trim()}
+                  </div>
+                )}
 
                 <div ref={barcodeWrapRef} style={{ display: "flex", justifyContent: "center", width: "100%" }}>
                   <Barcode

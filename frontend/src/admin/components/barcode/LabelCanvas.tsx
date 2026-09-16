@@ -31,6 +31,7 @@ const SAMPLE: LabelData = {
   customer: "Wijaya Kumara",
   device: "Xiaomi Redmi 9C",
   imei: "356938035643809",
+  fault: "Screen cracked, no display",
   date: new Date().toLocaleDateString("en-GB"),
   shopName: SHOP_DETAILS.name,
   shopPhone: SHOP_DETAILS.phone,
