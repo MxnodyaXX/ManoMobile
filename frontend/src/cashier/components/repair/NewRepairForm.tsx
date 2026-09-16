@@ -2205,6 +2205,7 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
           subtitle={autoPrintJob.customerName}
           fault={autoPrintJob.issue}
           imei={autoPrintJob.imei}
+          passcode={autoPrintJob.passcodeType !== "None" ? autoPrintJob.devicePasscode : undefined}
           onClose={() => setAutoPrintJob(null)}
         />
       )}

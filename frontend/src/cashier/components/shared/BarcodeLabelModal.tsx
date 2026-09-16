@@ -15,6 +15,11 @@ import { fetchTemplateForLayout, fetchTemplateByName, type BarcodeTemplate } fro
  *  saved name in Admin -> Barcode exactly (case-insensitive). Falls back to
  *  the normal default "repair" template if no template has this name yet. */
 const OUTSIDE_DEALER_TEMPLATE_NAME = "RepairJobTagOutsideDealers";
+/** The template for a device that came in with its unlock code. Tried first,
+ *  before the dealer one: the code is what the technician needs off the tag,
+ *  whoever sent the phone. Same rule — exact saved name, case-insensitive,
+ *  and the normal default applies until somebody creates it. */
+const PASSCODE_TEMPLATE_NAME = "Repair Job Tag With Pass";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 const PX_PER_MM = 96 / 25.4;
@@ -51,6 +56,10 @@ interface BarcodeLabelModalProps {
   fault?: string;
   /** The device's IMEI, for the {{imei}} token on a label design. */
   imei?: string;
+  /** The unlock code the customer left with the device, when they did. A tag
+   *  for such a device uses the PASSCODE_TEMPLATE_NAME design where one
+   *  exists, and the built-in tag prints the code. */
+  passcode?: string;
   /** True when this job's dealer is someone other than Mano Mobile itself —
    *  picks the OUTSIDE_DEALER_TEMPLATE_NAME design instead of the normal
    *  default "repair" template, when one exists. Only meaningful for
@@ -91,7 +100,8 @@ interface BarcodeLabelModalProps {
  * until it fits. Runs for both axes since a narrower label (38mm) can
  * overflow sideways even when a wider one (50mm) had enough slack.
  */
-export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, outsideDealer = false, silent = false, ask = false, onClose }: BarcodeLabelModalProps) {
+export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, passcode, outsideDealer = false, silent = false, ask = false, onClose }: BarcodeLabelModalProps) {
+  const hasPasscode = !!passcode && passcode.trim() !== "";
   const { barcodeSettings: s } = useInventory();
   const labelRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -107,18 +117,22 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
   const [designLoaded, setDesignLoaded] = useState(false);
   useEffect(() => {
     let active = true;
-    // An outside dealer's job tries its own named template first — falling
-    // through to the normal default whenever that template doesn't exist
-    // (not yet created, renamed, or deleted) so nothing breaks either way.
-    const lookup = variant === "repair" && outsideDealer
-      ? fetchTemplateByName(OUTSIDE_DEALER_TEMPLATE_NAME).then(t => t ?? fetchTemplateForLayout(variant))
-      : fetchTemplateForLayout(variant);
+    // A repair tag tries the named templates in order — passcode, then
+    // outside dealer — and falls through to the normal default whenever a
+    // template doesn't exist (not yet created, renamed, or deleted), so
+    // nothing breaks either way.
+    const names = variant === "repair"
+      ? [...(hasPasscode ? [PASSCODE_TEMPLATE_NAME] : []), ...(outsideDealer ? [OUTSIDE_DEALER_TEMPLATE_NAME] : [])]
+      : [];
+    const lookup = names
+      .reduce<Promise<BarcodeTemplate | null>>((p, name) => p.then(t => t ?? fetchTemplateByName(name)), Promise.resolve(null))
+      .then(t => t ?? fetchTemplateForLayout(variant));
     lookup
       .then(t => { if (active && t && t.elements.length > 0) setDesign(t); })
       .catch(() => { /* built-in layout applies */ })
       .finally(() => { if (active) setDesignLoaded(true); });
     return () => { active = false; };
-  }, [variant, outsideDealer]);
+  }, [variant, outsideDealer, hasPasscode]);
 
   /**
    * The repair tag and part label are each designed for their own dedicated
@@ -285,6 +299,7 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
           device: title ?? "",
           imei: imei ?? "",
           fault: fault ?? "",
+          passcode: hasPasscode ? passcode!.trim() : "",
           title: title ?? "",
           subtitle: subtitle ?? "",
           date: new Date().toLocaleDateString("en-GB"),
@@ -335,9 +350,10 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
                     arm's length, and the full complaint is on the job anyway.
                     The auto-fit below gives it the room by shortening the
                     bars, never the text. */}
-                {fault && fault.trim() !== "" && (
-                  <div style={{ fontSize: 7, fontWeight: 700, color: "#000", fontFamily: ff, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {fault.trim()}
+                {(fault?.trim() || hasPasscode) && (
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 6, fontSize: 7, fontWeight: 700, color: "#000", fontFamily: ff, lineHeight: 1.2 }}>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fault?.trim()}</span>
+                    {hasPasscode && <span style={{ whiteSpace: "nowrap", flexShrink: 0 }}>Pass: {passcode!.trim()}</span>}
                   </div>
                 )}
 

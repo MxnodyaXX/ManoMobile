@@ -33,6 +33,7 @@ const SAMPLE: LabelData = {
   device: "Xiaomi Redmi 9C",
   imei: "356938035643809",
   fault: "Screen cracked, no display",
+  passcode: "1234",
   date: new Date().toLocaleDateString("en-GB"),
   shopName: SHOP_DETAILS.name,
   shopPhone: SHOP_DETAILS.phone,

@@ -76,6 +76,9 @@ export interface LabelData {
    *  bench this is the one thing a technician cannot work out by looking at
    *  the phone, so it earns its place beside the job number. */
   fault?: string;
+  /** The unlock code left with the device, when one was. Blank otherwise —
+   *  so a design that prints it prints nothing for a device without one. */
+  passcode?: string;
   title?: string;
   subtitle?: string;
   date?: string;
@@ -92,6 +95,7 @@ export const LABEL_TOKENS: { token: string; label: string }[] = [
   { token: "{{device}}",      label: "Device brand & model" },
   { token: "{{imei}}",        label: "IMEI" },
   { token: "{{fault}}",       label: "Reported fault" },
+  { token: "{{passcode}}",    label: "Device passcode" },
   { token: "{{date}}",        label: "Today's date" },
   { token: "{{shopName}}",    label: "Shop name" },
   { token: "{{shopPhone}}",   label: "Shop phone" },
@@ -112,6 +116,7 @@ export function resolveTokens(text: string, data: LabelData): string {
     device: data.device,
     imei: data.imei,
     fault: data.fault,
+    passcode: data.passcode,
     title: data.title,
     subtitle: data.subtitle,
     date: data.date,

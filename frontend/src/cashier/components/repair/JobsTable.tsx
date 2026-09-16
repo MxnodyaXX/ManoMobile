@@ -1758,6 +1758,53 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                 </div>
               ) : field("Model number", "modelNumber", { mono: true })}
               {field("Reported fault", "issue", { grow: true })}
+              {/* The unlock code, as intake records it: a type, and the code
+                  itself for the types that have one. Added here because a
+                  customer often gives the code after the phone is already on
+                  the shelf, and until now the only way in was a new job. */}
+              {(() => {
+                const type = val("passcodeType") ?? "None";
+                const hasCode = type === "PIN" || type === "Pattern" || type === "Password";
+                const code = String(val("devicePasscode") ?? "");
+                return (
+                  <>
+                    <div>
+                      <label style={lab}>Passcode type</label>
+                      {editing ? (
+                        <select
+                          value={type}
+                          onChange={e => {
+                            const next = e.target.value as RepairJob["passcodeType"];
+                            set("passcodeType", next);
+                            if (!(next === "PIN" || next === "Pattern" || next === "Password")) set("devicePasscode", "");
+                          }}
+                          style={{ ...fieldBox, width: "100%", boxSizing: "border-box", background: "var(--bg-primary)", borderColor: "var(--accent-glow)", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+                        >
+                          {["None", "PIN", "Pattern", "Password", "Provided Separately"].map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      ) : (
+                        <div style={{ ...readSt, color: type === "None" ? "var(--text-muted)" : "var(--text-primary)" }}>{type}</div>
+                      )}
+                    </div>
+                    <div>
+                      <label style={lab}>Device passcode</label>
+                      {editing ? (
+                        <input
+                          value={hasCode ? code : ""}
+                          disabled={!hasCode}
+                          onChange={e => set("devicePasscode", e.target.value)}
+                          placeholder={hasCode ? (type === "Pattern" ? "e.g. 1-2-3-6-9" : type === "PIN" ? "e.g. 1234" : "Password") : "Pick a type first"}
+                          style={{ ...fieldBox, width: "100%", boxSizing: "border-box", background: "var(--bg-primary)", borderColor: "var(--accent-glow)", outline: "none", fontFamily: "monospace", opacity: hasCode ? 1 : 0.5 }}
+                        />
+                      ) : (
+                        <div style={{ ...readSt, fontFamily: "monospace", color: hasCode && code ? "var(--text-primary)" : "var(--text-muted)" }}>
+                          {hasCode && code ? code : "—"}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
             </>)}
 
             {section(<Wallet size={11} strokeWidth={2.4} />, "Charges", "#fbbf24", <>
@@ -2987,6 +3034,7 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
           subtitle={labelJob.customerName}
           fault={labelJob.issue}
           imei={labelJob.imei}
+          passcode={labelJob.passcodeType !== "None" ? labelJob.devicePasscode : undefined}
           onClose={() => setLabelJob(null)}
         />
       )}
