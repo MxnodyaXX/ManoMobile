@@ -10,6 +10,7 @@ const ff = "'Plus Jakarta Sans', sans-serif";
 
 const PAGE_SUBS: Record<AdminPage, string> = {
   "Dashboard":         "System overview and key metrics",
+  "Analytics":         "Every figure the shop can produce, by period",
   "Business Insights": "Revenue, parts cost, technician and customer analytics",
   "Staff Management":"Manage staff accounts and roles",
   "Permissions":     "Role-based access control matrix",

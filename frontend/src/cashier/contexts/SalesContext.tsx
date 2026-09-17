@@ -44,6 +44,12 @@ export interface SaleTx {
   shiftId?: string;
   /** The repair dealer this was billed to, when it was one. */
   dealerId?: number | null;
+  /** When the row was written — the only clock a sale has. sold_on is a day. */
+  createdAt?: string;
+  /** The customer's number as recorded on the sale — how a customer is told apart from another of the same name. */
+  customerPhone?: string | null;
+  /** The repair jobs this invoice covered, when it covered any. */
+  jobIds?: string[];
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────

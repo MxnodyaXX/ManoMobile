@@ -1,11 +1,12 @@
 "use client";
 
 import {
-  Palette, LayoutDashboard, Users, ShieldCheck, Truck, ShoppingCart, Smartphone, Bell, Settings, LogOut, BarChart3 } from "lucide-react";
+  Palette, LayoutDashboard, Users, ShieldCheck, Truck, ShoppingCart, Smartphone, Bell, Settings, LogOut, BarChart3, LineChart } from "lucide-react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 
 export type AdminPage =
   | "Dashboard"
+  | "Analytics"
   | "Business Insights"
   | "Staff Management"
   | "Permissions"
@@ -18,6 +19,7 @@ export type AdminPage =
 
 const NAV: { id: AdminPage; icon: any; label: string }[] = [
   { id: "Dashboard",        icon: LayoutDashboard, label: "Dashboard"         },
+  { id: "Analytics",        icon: LineChart,       label: "Analytics"         },
   { id: "Business Insights",icon: BarChart3,       label: "Business Insights" },
   { id: "Staff Management", icon: Users,           label: "Staff"             },
   { id: "Permissions",      icon: ShieldCheck,     label: "Permissions"       },

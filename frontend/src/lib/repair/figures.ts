@@ -212,7 +212,7 @@ export function seriesShape(period: FigurePeriod): { unit: "day" | "week" | "mon
   }
 }
 
-function bucketsFor(period: FigurePeriod): { from: Date; to: Date; name: string }[] {
+export function bucketsFor(period: FigurePeriod): { from: Date; to: Date; name: string }[] {
   const { unit, count } = seriesShape(period);
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());

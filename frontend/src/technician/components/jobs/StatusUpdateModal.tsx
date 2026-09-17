@@ -291,8 +291,6 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
       };
     });
 
-  const partsCost    = jobPartLines.reduce((sum, l) => sum + l.lineTotal, 0);
-  const unpricedPart = jobPartLines.some(l => !l.priced);
 
   /**
    * What this device cost at an outside workshop, if it went to one.
@@ -330,6 +328,64 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
   // Parts used (prefilled from those same requests) + future faults — both printed on the receipt.
   const installedParts = jobPartLines.map(l => `${l.name}${l.qty > 1 ? ` ×${l.qty}` : ""}`);
   const [partsUsedText, setPartsUsedText] = useState(installedParts.join("\n"));
+  // The catalogue picker beside the free-text box: what is typed to search,
+  // and whether the list is open.
+  const [partQuery, setPartQuery] = useState("");
+  const [partListOpen, setPartListOpen] = useState(false);
+  const partMatches = partQuery.trim()
+    ? catalog.filter(p => `${p.name} ${p.sku} ${p.category}`.toLowerCase().includes(partQuery.trim().toLowerCase())).slice(0, 8)
+    : catalog.slice(0, 8);
+  /**
+   * Add a catalogue part as a line. Picking the same part again bumps its
+   * count ("×2") rather than repeating the line — the receipt reads better
+   * and the analytics count it once per fitting either way.
+   */
+  const addCataloguePart = (name: string) => {
+    setPartsUsedText(text => {
+      const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+      const i = lines.findIndex(l => l === name || l.startsWith(`${name} ×`));
+      if (i >= 0) {
+        const m = /×(\d+)$/.exec(lines[i]);
+        lines[i] = `${name} ×${(m ? Number(m[1]) : 1) + 1}`;
+      } else {
+        lines.push(name);
+      }
+      return lines.join("\n");
+    });
+    setPartQuery("");
+    setPartListOpen(false);
+  };
+
+  /**
+   * The parts named in the box, priced.
+   *
+   * A line is "Name" or "Name ×N". It is matched to the catalogue by name, so
+   * a part picked from the list carries its cost into the job's margin the
+   * same way an approved request does; a part typed that the catalogue does
+   * not have is listed unpriced rather than counted as free. A line that
+   * repeats an approved request (the box is prefilled from those) is skipped,
+   * so nothing is costed twice.
+   */
+  const typedPartLines = partsUsedText.split("\n").map(l => l.trim()).filter(Boolean).flatMap((line, i) => {
+    const m = /^(.*?)(?:\s*×\s*(\d+))?$/.exec(line);
+    const name = (m?.[1] ?? line).trim();
+    const qty = Math.max(1, Number(m?.[2] ?? 1));
+    if (jobPartLines.some(l => l.name.trim().toLowerCase() === name.toLowerCase())) return [];
+    const cat = catalog.find(p => p.name.trim().toLowerCase() === name.toLowerCase());
+    const unitCost = cat?.costPrice ?? 0;
+    return [{ id: `typed-${i}`, name, qty, unitCost, lineTotal: unitCost * qty, priced: !!cat, installed: true, typed: true as const }];
+  });
+  const allPartLines = [...jobPartLines.map(l => ({ ...l, typed: false as const })), ...typedPartLines];
+  const setTypedPartQty = (name: string, qty: number) => {
+    setPartsUsedText(text => text.split("\n").map(l => l.trim()).filter(Boolean)
+      .flatMap(l => {
+        const base = l.replace(/\s*×\s*\d+$/, "").trim();
+        if (base.toLowerCase() !== name.toLowerCase()) return [l];
+        return qty <= 0 ? [] : [qty === 1 ? base : `${base} ×${qty}`];
+      }).join("\n"));
+  };
+  const partsCost    = allPartLines.reduce((sum, l) => sum + l.lineTotal, 0);
+  const unpricedPart = allPartLines.some(l => !l.priced);
   const [futureFaults, setFutureFaults]   = useState("");
   // Charging less than the parts cost is a real loss on the job, and should be
   // a deliberate decision here rather than something discovered in a report at
@@ -1375,16 +1431,58 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                   <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
                   {/* Parts used, with what they cost the shop */}
                   <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                    {fold("Parts used", partsOpen || jobPartLines.length > 0 || agentCost > 0, () => setPartsOpen(v => !v),
-                      jobPartLines.length > 0
-                        ? `${jobPartLines.length} ${jobPartLines.length === 1 ? "part" : "parts"} · Rs. ${partsCost.toLocaleString()}`
+                    {fold("Parts used", partsOpen || allPartLines.length > 0 || agentCost > 0, () => setPartsOpen(v => !v),
+                      allPartLines.length > 0
+                        ? `${allPartLines.length} ${allPartLines.length === 1 ? "part" : "parts"} · Rs. ${partsCost.toLocaleString()}`
                         : "None")}
 
-                    {(partsOpen || jobPartLines.length > 0 || agentCost > 0) && (
+                    {(partsOpen || allPartLines.length > 0 || agentCost > 0) && (
                     <div style={foldBody}>
-                    {(jobPartLines.length > 0 || labourCost > 0 || agentCost > 0) && (
+                    {/* Pick from the catalogue: the name then matches the
+                        stock record and the part's cost follows the job. */}
+                    {catalog.length > 0 && (
+                      <div style={{ position: "relative", marginTop: 2 }}>
+                        <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginBottom: 4 }}>
+                          Add from the parts catalogue
+                        </p>
+                        <input
+                          value={partQuery}
+                          onChange={e => { setPartQuery(e.target.value); setPartListOpen(true); }}
+                          onFocus={() => setPartListOpen(true)}
+                          onBlur={() => window.setTimeout(() => setPartListOpen(false), 150)}
+                          onKeyDown={e => { if (e.key === "Enter" && partMatches[0]) { e.preventDefault(); addCataloguePart(partMatches[0].name); } if (e.key === "Escape") setPartListOpen(false); }}
+                          placeholder="Search parts by name, SKU or category…"
+                          style={inputStyle}
+                        />
+                        {partListOpen && partMatches.length > 0 && (
+                          <div style={{ position: "absolute", left: 0, right: 0, top: "100%", zIndex: 20, marginTop: 4, background: "var(--bg-card)", border: "1px solid var(--border-active)", borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,0.3)", overflow: "hidden", maxHeight: 260, overflowY: "auto" }}>
+                            {partMatches.map(p => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onMouseDown={e => e.preventDefault()}
+                                onClick={() => addCataloguePart(p.name)}
+                                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 11px", border: "none", borderBottom: "1px solid var(--border)", background: "transparent", cursor: "pointer", textAlign: "left", fontFamily: ff }}
+                                onMouseEnter={e => { e.currentTarget.style.background = "var(--bg-secondary)"; }}
+                                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                              >
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</p>
+                                  <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 1 }}>{p.sku} · {p.category}{p.location ? ` · ${p.location}` : ""}</p>
+                                </div>
+                                <span style={{ fontSize: 11, fontWeight: 700, color: p.stock <= 0 ? "#f87171" : p.stock <= p.reorderLevel ? "#fbbf24" : "var(--text-secondary)", whiteSpace: "nowrap" }}>
+                                  {p.stock <= 0 ? "Out of stock" : `${p.stock} in stock`}
+                                </span>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", whiteSpace: "nowrap" }}>Rs. {p.costPrice.toLocaleString()}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {(allPartLines.length > 0 || labourCost > 0 || agentCost > 0) && (
                       <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", fontFamily: ff }}>
-                        {jobPartLines.map(l => (
+                        {allPartLines.map(l => (
                           <div key={l.id} style={{
                             display: "flex", alignItems: "center", gap: 8, padding: "8px 11px",
                             borderBottom: "1px solid var(--border)", fontSize: 12,
@@ -1396,11 +1494,22 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                               <p style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 1 }}>
                                 {l.priced ? `Rs. ${l.unitCost.toLocaleString()} each` : "No catalogue price"}
                                 {!l.installed && " · not marked installed"}
+                                {l.typed && " · from the parts list"}
                               </p>
                             </div>
-                            <span style={{ fontSize: 12.5, fontWeight: 700, color: l.priced ? "var(--text-primary)" : "var(--text-muted)" }}>
+                            {l.typed && (
+                              <div style={{ display: "inline-flex", alignItems: "center", gap: 2, border: "1px solid var(--border)", borderRadius: 7, padding: "0 2px" }}>
+                                <button type="button" onClick={() => setTypedPartQty(l.name, l.qty - 1)} title={l.qty === 1 ? "Remove" : "One fewer"} style={{ width: 22, height: 22, border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>−</button>
+                                <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-primary)", minWidth: 14, textAlign: "center" }}>{l.qty}</span>
+                                <button type="button" onClick={() => setTypedPartQty(l.name, l.qty + 1)} title="One more" style={{ width: 22, height: 22, border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>+</button>
+                              </div>
+                            )}
+                            <span style={{ fontSize: 12.5, fontWeight: 700, color: l.priced ? "var(--text-primary)" : "var(--text-muted)", minWidth: 70, textAlign: "right" }}>
                               {l.priced ? `Rs. ${l.lineTotal.toLocaleString()}` : "—"}
                             </span>
+                            {l.typed && (
+                              <button type="button" onClick={() => setTypedPartQty(l.name, 0)} title="Take this part off the job" aria-label={`Remove ${l.name}`} style={{ width: 22, height: 22, border: "none", background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>×</button>
+                            )}
                           </div>
                         ))}
 
@@ -1440,14 +1549,10 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
 
                     {unpricedPart && (
                       <p style={{ fontSize: 11, color: "#fbbf24", fontFamily: ff, lineHeight: 1.5 }}>
-                        One or more parts are no longer in the catalogue, so their cost is not included in the total above.
+                        One or more parts are not in the catalogue, so their cost is not included in the total above. Pick them from the catalogue to cost them.
                       </p>
                     )}
 
-                    <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, marginTop: 2 }}>
-                      Parts used (one per line) — printed on the receipt
-                    </p>
-                    <textarea placeholder="e.g. iPhone 13 Rear Camera Module" value={partsUsedText} onChange={e => setPartsUsedText(e.target.value)} rows={2} style={inputStyle} />
                     </div>
                     )}
                   </div>

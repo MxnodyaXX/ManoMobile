@@ -233,6 +233,12 @@ function VoidModal({ tx, onConfirm, onClose }: { tx: SaleTx; onConfirm: () => vo
           <p style={{ color: "var(--text-secondary)", marginBottom: 8 }}>This will permanently void:</p>
           <p style={{ color: "var(--text-primary)", fontWeight: 600 }}>{tx.items}</p>
           <p style={{ color: "#f87171", fontWeight: 700, marginTop: 6 }}>{fmtRs(tx.total)}</p>
+          {tx.category === "Repair" && (
+            <p style={{ color: "var(--text-secondary)", marginTop: 10, lineHeight: 1.5 }}>
+              The repair jobs on it go back to <strong style={{ color: "var(--text-primary)" }}>ready to collect</strong>, any money
+              recorded at that handover is taken off them, and any charge it put on account is removed — so they can be issued again properly.
+            </p>
+          )}
         </div>
 
         <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 20 }}>
@@ -638,6 +644,8 @@ export default function SalesHistory() {
         // the status flips — see void_sale() in the migration.
         await voidSale(target.id);
         void reloadAccessories();
+        // A repair invoice's jobs have just moved back to Completed.
+        void refreshJobs();
       } catch (e) {
         toast.dialog("error", "Could not void that sale", e instanceof Error ? e.message : String(e));
       } finally {

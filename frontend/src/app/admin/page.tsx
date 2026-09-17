@@ -7,6 +7,7 @@ import AdminSidebar, { type AdminPage } from "@/admin/components/layout/AdminSid
 import AdminNavbar    from "@/admin/components/layout/AdminNavbar";
 import AdminDashboard from "@/admin/components/dashboard/AdminDashboard";
 import BusinessInsights from "@/admin/components/insights/BusinessInsights";
+import Analytics from "@/admin/components/analytics/Analytics";
 import StaffManagement from "@/admin/components/staff/StaffManagement";
 import Permissions    from "@/admin/components/permissions/Permissions";
 import Suppliers      from "@/admin/components/suppliers/Suppliers";
@@ -124,6 +125,7 @@ function AdminPageInner() {
 
           <main className="resp-main" style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
             {activePage === "Dashboard"        && <AdminDashboard />}
+            {activePage === "Analytics"        && <Analytics />}
             {activePage === "Business Insights"&& <BusinessInsights />}
             {activePage === "Staff Management" && <StaffManagement />}
             {activePage === "Permissions"      && <Permissions />}

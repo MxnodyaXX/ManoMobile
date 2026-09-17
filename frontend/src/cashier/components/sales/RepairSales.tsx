@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import CreditCustomerPicker, { type POSCreditCustomer } from "./CreditCustomerPicker";
 import RepairInvoicePrintable, { repairInvoicePageCss } from "@/cashier/components/sales/RepairInvoicePrintable";
 import { useRepair, findDealer, isInHouseDealer, dealerKey } from "@/cashier/contexts/RepairContext";
+import { useCreditAccounts } from "@/lib/credit/api";
 import type { CompletionType } from "@/cashier/contexts/RepairContext";
 import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 import InvoiceNoBadge from "@/cashier/components/sales/InvoiceNoBadge";
@@ -90,7 +91,15 @@ interface DealerProfile {
   since: string;
   stats: { total: number; completed: number; pending: number; inProgress: number };
   totalEarned: number;
-  outstanding: number;
+  /**
+   * What the dealer owes the shop: the balance on their credit account, from
+   * the ledger. Null for a dealer with no account — nothing has ever been
+   * left unpaid — and for the in-house entry, whose customers each carry
+   * their own account rather than the shop owing itself.
+   */
+  onAccount: number | null;
+  /** Finished work not yet invoiced. Not a debt — it has not been billed. */
+  unbilled: number;
 }
 
 /**
@@ -129,7 +138,7 @@ const ff = "'Plus Jakarta Sans', sans-serif";
 const COMPLETED_REPAIRS: CompletedRepair[] = [];
 
 /** Dealer stats are computed from live jobs; no canned figures. */
-const DEALER_PROFILES: Record<string, Pick<DealerProfile, "stats" | "totalEarned" | "outstanding">> = {};
+const DEALER_PROFILES: Record<string, Pick<DealerProfile, "stats" | "totalEarned" | "onAccount" | "unbilled">> = {};
 
 const fmtDate = (d?: string) => {
   if (!d) return "—";
@@ -427,6 +436,8 @@ export default function RepairSales({ initialDealer, initialJobId }: {
   const { profile } = useAuth();
   const toast = useToast();
   const { updateJob, jobs, dealers } = useRepair();
+  // For the dealer card's balance — what they owe, per the ledger.
+  const { accounts: creditAccounts, reload: reloadCredit } = useCreditAccounts();
   const [view,           setView]           = useState<"search" | "invoice">("search");
   const [showIssuedMsg,  setShowIssuedMsg]  = useState(false);
   /**
@@ -833,7 +844,15 @@ export default function RepairSales({ initialDealer, initialJobId }: {
         inProgress: mine.filter(j => j.status === "Issued").length,
       },
       totalEarned: mine.filter(j => j.status === "Delivered").reduce((s, j) => s + j.estimatedCost, 0),
-      outstanding: mine.filter(j => j.status === "Completed").reduce((s, j) => s + Math.max(0, j.estimatedCost - j.advancePaid), 0),
+      // The ledger's figure, not one worked out from jobs here. This used to
+      // sum the unpaid part of every Completed job — finished work not yet
+      // billed — and call it Outstanding, so a dealer with Rs. 55,000 on
+      // account and nothing on the bench showed "—", and the in-house entry
+      // showed the day's unbilled walk-ins as a debt.
+      onAccount: record && !record.inHouse
+        ? (creditAccounts.find(a => a.holderKind === "Dealer" && a.dealerId === record.id)?.balance ?? 0)
+        : null,
+      unbilled: mine.filter(j => j.status === "Completed").reduce((s, j) => s + Math.max(0, j.estimatedCost - j.advancePaid), 0),
     };
     const figures = mine.length > 0 || !canned ? live : canned;
     return {
@@ -842,7 +861,7 @@ export default function RepairSales({ initialDealer, initialJobId }: {
       since:   record?.joinedAt ? new Date(record.joinedAt).getFullYear().toString() : "—",
       ...figures,
     };
-  }, [selectedDealer, dealers, jobs]);
+  }, [selectedDealer, dealers, jobs, creditAccounts]);
 
   /**
    * Fill the customer fields from the dealer registry, or hand back what was
@@ -1264,6 +1283,8 @@ export default function RepairSales({ initialDealer, initialJobId }: {
     }
     setCreditRecordMade(!!opts?.markCredit);
     recordRepairSale(no, snap);
+    // The dealer card's balance moves with what was just left on account.
+    void reloadCredit();
     setView("invoice");
   };
 
@@ -1315,6 +1336,7 @@ export default function RepairSales({ initialDealer, initialJobId }: {
       addEntry("in", `Cash — Repair Issued ${selectedDealer}`, effectiveReceived);
     }
     recordRepairSale(no, snap);
+    void reloadCredit();
     setArchive({ invoiceNo: no, snap, dealer: selectedDealer, customer: invoiceCustomer });
     setShowIssuedMsg(true);
   };
@@ -2066,12 +2088,22 @@ export default function RepairSales({ initialDealer, initialJobId }: {
                       </div>
                       <span style={{ fontWeight: 700, color: "#4ade80" }}>Rs. {dealerProfile.totalEarned.toLocaleString()}</span>
                     </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--text-muted)" }}>
-                        <AlertCircle size={12} color={dealerProfile.outstanding > 0 ? "#f87171" : "var(--text-muted)"} />Outstanding
+                    {dealerProfile.onAccount !== null && (
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--text-muted)" }} title="The balance on this dealer's credit account">
+                          <AlertCircle size={12} color={dealerProfile.onAccount > 0 ? "#f87171" : "var(--text-muted)"} />Outstanding on account
+                        </div>
+                        <span style={{ fontWeight: 700, color: dealerProfile.onAccount > 0 ? "#f87171" : "var(--text-muted)" }}>
+                          {dealerProfile.onAccount > 0 ? `Rs. ${dealerProfile.onAccount.toLocaleString()}` : "—"}
+                        </span>
                       </div>
-                      <span style={{ fontWeight: 700, color: dealerProfile.outstanding > 0 ? "#f87171" : "var(--text-muted)" }}>
-                        {dealerProfile.outstanding > 0 ? `Rs. ${dealerProfile.outstanding.toLocaleString()}` : "—"}
+                    )}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--text-muted)" }} title="Finished repairs that have not been invoiced yet">
+                        <Clock size={12} color={dealerProfile.unbilled > 0 ? "#fbbf24" : "var(--text-muted)"} />Finished, not yet billed
+                      </div>
+                      <span style={{ fontWeight: 700, color: dealerProfile.unbilled > 0 ? "#fbbf24" : "var(--text-muted)" }}>
+                        {dealerProfile.unbilled > 0 ? `Rs. ${dealerProfile.unbilled.toLocaleString()}` : "—"}
                       </span>
                     </div>
                   </div>

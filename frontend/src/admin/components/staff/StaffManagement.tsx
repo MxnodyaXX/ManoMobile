@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Search, Edit2, X, UserCheck, UserX, AlertCircle, KeyRound } from "lucide-react";
+import { Plus, Search, Edit2, X, UserCheck, UserX, AlertCircle, KeyRound, Users, BarChart3 } from "lucide-react";
+import StaffInsights from "./StaffInsights";
 import StaffPermissionsEditor from "@/admin/components/permissions/StaffPermissionsEditor";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import {
@@ -345,6 +346,8 @@ export default function StaffManagement() {
   const isMobile = useIsMobile();
   const [query, setQuery] = useState("");
   const [roleFilter, setRole] = useState<StaffRoleName | "All">("All");
+  // The directory is the accounts; Insights is what those accounts have done.
+  const [tab, setTab] = useState<"directory" | "insights">("directory");
   const [modal, setModal] = useState<"add" | StaffProfile | null>(null);
   const [pwTarget, setPwTarget] = useState<StaffProfile | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -393,7 +396,34 @@ export default function StaffManagement() {
         </div>
       )}
 
+      {/* Tabs */}
+      <div className="fade-up" style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--border)" }}>
+        {([
+          { id: "directory", label: "Staff Directory", icon: Users },
+          { id: "insights",  label: "Staff Insights",  icon: BarChart3 },
+        ] as const).map(t => {
+          const on = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              style={{
+                display: "flex", alignItems: "center", gap: 7, padding: "10px 14px", marginBottom: -1,
+                border: "none", borderBottom: `2px solid ${on ? AA : "transparent"}`, background: "transparent",
+                color: on ? "var(--text-primary)" : "var(--text-muted)", fontSize: 13, fontWeight: on ? 700 : 500,
+                cursor: "pointer", fontFamily: ff,
+              }}
+            >
+              <t.icon size={14} color={on ? AA : "currentColor"} /> {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === "insights" && <StaffInsights staff={staff} />}
+
       {/* Filters */}
+      {tab === "directory" && <>
       <div className="fade-up" style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 14px", borderRadius: 10, background: "var(--bg-card)", border: "1px solid var(--border)", height: 38, flex: isMobile ? undefined : 1, minWidth: 200 }}>
           <Search size={13} color="var(--text-muted)" />
@@ -495,6 +525,8 @@ export default function StaffManagement() {
           </tbody>
         </table>
       </div>
+
+      </>}
 
       {pwTarget && <PasswordModal staff={pwTarget} onClose={() => setPwTarget(null)} />}
       {modal === "add" && <StaffModal onSaved={reload} onClose={() => setModal(null)} />}

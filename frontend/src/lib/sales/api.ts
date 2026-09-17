@@ -73,6 +73,9 @@ const toSale = (r: Row): SaleTx => ({
   cashier: (r.cashier as string | null) ?? undefined,
   shiftId: (r.shift_id as string | null) ?? undefined,
   dealerId: (r.dealer_id as number | null) ?? null,
+  createdAt: (r.created_at as string | null) ?? undefined,
+  customerPhone: (r.customer_phone as string | null) ?? null,
+  jobIds: (r.job_ids as string[] | null) ?? [],
 });
 
 function explain(message: string, code?: string): string {

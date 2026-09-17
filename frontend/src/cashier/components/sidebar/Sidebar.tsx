@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { sidebarData } from "@/cashier/data/sidebarData";
 import { roleMenus } from "@/cashier/data/sidebarRoles";
-import { motion } from "framer-motion";
-import { ChevronLeft, ChevronRight, LogOut, Wrench } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ChevronDown, ChevronLeft, ChevronRight, LogOut, Store, Wrench } from "lucide-react";
 import { useTechnicians } from "@/lib/repair/technicians";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useMyModuleAccess } from "@/lib/settings/moduleAccess";
@@ -59,6 +59,10 @@ interface SidebarProps {
 
 export default function Sidebar({ activePage, onNavigate, isOpen = false, onClose }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
+  // The bench menu's open/closed state. Starts open: a shop that has this
+  // reaches for it all day, and a menu that has to be opened first is a
+  // click that adds up.
+  const [benchOpen, setBenchOpen] = useState(true);
   const isMobile = useIsMobile();
   const userRole = "admin";
   // What the signed-in person may actually open. Permissive until it loads and
@@ -250,57 +254,103 @@ export default function Sidebar({ activePage, onNavigate, isOpen = false, onClos
               </button>
             );
           })}
-        </nav>
 
-        {/* Work the bench — the counter doing the technician's job for them.
-            Under the nav rather than in it: it is not a page of this shell,
-            it opens the other one. */}
-        {benches.length > 0 && (
-          <div style={{ padding: "0 12px 4px" }}>
-            {(!collapsed || isMobile) && (
-              <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", padding: "8px 10px 4px" }}>
-                Work the bench
-              </p>
-            )}
-            <button
-              onClick={openAdminBench}
-              title={`Open the whole shop's bench in a new tab and work it as ${profile?.fullName || "yourself"}`}
-              style={{
-                width: "100%", display: "flex", alignItems: "center", gap: 10,
-                padding: collapsed && !isMobile ? "9px 0" : "9px 10px",
-                justifyContent: collapsed && !isMobile ? "center" : "flex-start",
-                borderRadius: 9, border: "1px solid rgba(52,211,153,0.3)", background: "rgba(52,211,153,0.07)",
-                color: "var(--text-primary)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", textAlign: "left",
-                fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 2,
-              }}
-            >
-              <Wrench size={15} color="#34d399" style={{ flexShrink: 0 }} />
-              {(!collapsed || isMobile) && <span>Whole shop</span>}
-            </button>
-            {benches.map(t => (
-              <button
-                key={t.name}
-                onClick={() => openBench(t.name)}
-                title={`Open ${t.name}'s bench in a new tab and work it as ${profile?.fullName || "yourself"}`}
-                style={{
-                  width: "100%", display: "flex", alignItems: "center", gap: 10,
-                  padding: collapsed && !isMobile ? "9px 0" : "9px 10px",
-                  justifyContent: collapsed && !isMobile ? "center" : "flex-start",
-                  borderRadius: 9, border: "1px solid transparent", background: "transparent",
-                  color: "var(--text-secondary)", fontSize: 12.5, cursor: "pointer", textAlign: "left",
-                  fontFamily: "'Plus Jakarta Sans', sans-serif",
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-card)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-primary)"; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-secondary)"; }}
-              >
-                <Wrench size={15} color="#34d399" style={{ flexShrink: 0 }} />
-                {(!collapsed || isMobile) && (
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
+          {/* Work the bench — the counter doing the technician's job for them.
+              A menu item like the others, with the benches as its sub-items:
+              the whole shop first, then one per technician. Each opens the
+              technician shell in a new tab, so the till stays where it is and
+              the bench opens already signed in as this cashier. Only an Admin
+              Cashier sees it — see the gate on the technician page. */}
+          {benches.length > 0 && (() => {
+            const iconOnly = collapsed && !isMobile;
+            const subItems = [
+              { key: "__all", label: "Whole shop", icon: Store, open: openAdminBench, hint: `Every job in the shop on one bench, worked as ${profile?.fullName || "yourself"}` },
+              ...benches.map(t => ({ key: t.name, label: t.name, icon: Wrench, open: () => openBench(t.name), hint: `${t.name}'s bench, worked as ${profile?.fullName || "yourself"}` })),
+            ];
+            return (
+              <div>
+                <button
+                  onClick={() => {
+                    // Icon-only mode has nowhere to unfold into; opening the
+                    // menu opens the sidebar with it.
+                    if (iconOnly) { setCollapsed(false); setBenchOpen(true); return; }
+                    setBenchOpen(o => !o);
+                  }}
+                  aria-expanded={benchOpen}
+                  title="Work a technician's bench from the counter"
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12,
+                    padding: iconOnly ? "12px 0" : "13px 12px",
+                    borderRadius: 10, cursor: "pointer", border: "none",
+                    background: "transparent", color: "var(--text-secondary)",
+                    transition: "all 0.18s ease", width: "100%",
+                    justifyContent: iconOnly ? "center" : "flex-start",
+                    outline: "none", minHeight: 48,
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = "var(--border)";
+                    (e.currentTarget as HTMLButtonElement).style.color = "var(--text-primary)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                    (e.currentTarget as HTMLButtonElement).style.color = "var(--text-secondary)";
+                  }}
+                >
+                  <Wrench size={isMobile ? 20 : 18} strokeWidth={1.8} color="#34d399" style={{ flexShrink: 0 }} />
+                  {!iconOnly && (
+                    <>
+                      <span style={{ fontSize: isMobile ? 14 : 13.5, whiteSpace: "nowrap", letterSpacing: "-0.01em", flex: 1, textAlign: "left" }}>
+                        Work the bench
+                      </span>
+                      <ChevronDown
+                        size={14}
+                        style={{ flexShrink: 0, transition: "transform 0.2s", transform: benchOpen ? "rotate(0deg)" : "rotate(-90deg)", opacity: 0.7 }}
+                      />
+                    </>
+                  )}
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {benchOpen && !iconOnly && (
+                    <motion.div
+                      key="bench-sub"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                      style={{ overflow: "hidden" }}
+                    >
+                      {/* Indented under the parent's icon, with a hairline
+                          down the left so the group reads as one thing. */}
+                      <div style={{ margin: "2px 0 4px 21px", paddingLeft: 12, borderLeft: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 2 }}>
+                        {subItems.map(({ key, label, icon: SubIcon, open, hint }) => (
+                          <button
+                            key={key}
+                            onClick={open}
+                            title={`${hint} — opens in a new tab`}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 9,
+                              padding: "8px 10px", borderRadius: 8, border: "none",
+                              background: "transparent", color: "var(--text-secondary)",
+                              fontSize: isMobile ? 13.5 : 12.5, cursor: "pointer", textAlign: "left", width: "100%",
+                              fontFamily: "'Plus Jakarta Sans', sans-serif", minHeight: 36,
+                              fontWeight: key === "__all" ? 600 : 400,
+                            }}
+                            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "var(--border)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-primary)"; }}
+                            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-secondary)"; }}
+                          >
+                            <SubIcon size={14} color={key === "__all" ? "#34d399" : "var(--text-muted)"} style={{ flexShrink: 0 }} />
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            );
+          })()}
+        </nav>
 
         {/* Who is signed in, and the way out */}
         {profile && (
