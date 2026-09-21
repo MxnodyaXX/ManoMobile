@@ -7,6 +7,23 @@ import { claimSeed } from "@/lib/supabase/tabSession";
 
 export type StaffRole = "Admin" | "Cashier" | "POS Cashier" | "Technician" | "Accounts";
 
+/**
+ * Races a promise against a timeout instead of letting a stalled call (a
+ * flaky connection, a stuck supabase-js internal refresh) hang the sign-in
+ * button forever with no feedback and no way to retry.
+ */
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
 export interface StaffProfile {
   id: string;
   staffId: string | null;
@@ -86,12 +103,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
     };
 
-    supabase.auth.getUser().then(async ({ data }: { data: { user: User | null } }) => {
-      if (!active) return;
-      setUser(data.user ?? null);
-      await loadProfile(data.user ?? null);
-      if (active) setLoading(false);
-    });
+    withTimeout<Awaited<ReturnType<typeof supabase.auth.getUser>>>(supabase.auth.getUser(), 15000, "timed out")
+      .then(async ({ data }) => {
+        if (!active) return;
+        setUser(data.user ?? null);
+        await loadProfile(data.user ?? null);
+      })
+      .catch(() => {
+        // A stalled initial session check must not leave the app stuck on a
+        // splash screen forever — fall through as signed-out; RequireSignIn
+        // sends them to sign in, and a real session (if any) still lands
+        // moments later via onAuthStateChange below.
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
 
     // Within this tab only. Sessions are per-tab now, so signing in as the
     // technician next door no longer reaches in here and changes who the till
@@ -111,7 +137,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn: AuthValue["signIn"] = async (email, password) => {
     if (!isSupabaseConfigured()) return { error: "Supabase is not configured — see docs/BACKEND-SETUP.md" };
     const supabase = getSupabaseBrowserClient();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    let error: { message: string } | null;
+    try {
+      ({ error } = await withTimeout<Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>>(
+        supabase.auth.signInWithPassword({ email, password }),
+        15000,
+        "Signing in is taking too long. Check your connection and try again.",
+      ));
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Could not sign in." };
+    }
     if (error) return { error: error.message };
 
     // A deliberate sign-in is what a new tab should inherit, so this tab takes
@@ -121,9 +156,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     claimSeed();
 
     // Stamp the sign-in so Admin Control's "Last Login" column means something.
-    const { data } = await supabase.auth.getUser();
-    if (data.user) {
-      await supabase.from("profiles").update({ last_login: new Date().toISOString() }).eq("id", data.user.id);
+    // Best-effort: a stall here must not leave the sign-in itself hanging.
+    try {
+      const { data } = await withTimeout<Awaited<ReturnType<typeof supabase.auth.getUser>>>(supabase.auth.getUser(), 8000, "timed out");
+      if (data.user) {
+        await withTimeout(
+          supabase.from("profiles").update({ last_login: new Date().toISOString() }).eq("id", data.user.id),
+          8000,
+          "timed out",
+        );
+      }
+    } catch {
+      // Non-critical — the session is already established below.
     }
     return { error: null };
   };
@@ -131,14 +175,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInAsProfile: AuthValue["signInAsProfile"] = async (profileId, password) => {
     let payload: { ok?: boolean; error?: string; role?: StaffRole; session?: { access_token: string; refresh_token: string } };
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId, password }),
-      });
+      const res = await withTimeout(
+        fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ profileId, password }),
+        }),
+        15000,
+        "The server is taking too long to respond. Check your connection and try again.",
+      );
       payload = await res.json();
-    } catch {
-      return { error: "Could not reach the server. Check your connection and try again.", role: null };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Could not reach the server. Check your connection and try again.", role: null };
     }
 
     if (!payload.ok || !payload.session) {
@@ -146,16 +194,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const supabase = getSupabaseBrowserClient();
-    const { error } = await supabase.auth.setSession(payload.session);
+    let error: { message: string } | null;
+    try {
+      ({ error } = await withTimeout<Awaited<ReturnType<typeof supabase.auth.setSession>>>(
+        supabase.auth.setSession(payload.session),
+        15000,
+        "Signed in, but confirming your session is taking too long. Try again.",
+      ));
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Could not confirm the session.", role: null };
+    }
     if (error) return { error: error.message, role: null };
     claimSeed();
 
-    // Read it straight back before the caller navigates: a screen that renders
-    // before the session has landed sees nobody signed in and bounces to the
-    // login screen, which looks exactly like a wrong password.
-    const { data: check } = await supabase.auth.getUser();
-    if (!check.user) return { error: "Signed in, but the session did not stick. Check that this browser allows site data, and try again.", role: null };
-
+    // setSession() above already waits for the SIGNED_IN notification to reach
+    // every onAuthStateChange listener — including this file's, which sets
+    // `user`/`profile` — so state is current by the time it resolves. An extra
+    // getUser() round trip here used to "confirm" that, but it is one more
+    // supabase-js call that can stall for no benefit: setSession() succeeding
+    // (no error, above) is already the confirmation.
     return { error: null, role: payload.role ?? null };
   };
 
