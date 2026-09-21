@@ -13,7 +13,7 @@ import { createPortal } from "react-dom";
 import CreditCustomerPicker, { type POSCreditCustomer } from "./CreditCustomerPicker";
 import RepairInvoicePrintable, { repairInvoicePageCss } from "@/cashier/components/sales/RepairInvoicePrintable";
 import { useRepair, findDealer, isInHouseDealer, dealerKey } from "@/cashier/contexts/RepairContext";
-import { useCreditAccounts } from "@/lib/credit/api";
+import { useCreditAccounts, reconcileJobDiscount } from "@/lib/credit/api";
 import type { CompletionType } from "@/cashier/contexts/RepairContext";
 import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 import InvoiceNoBadge from "@/cashier/components/sales/InvoiceNoBadge";
@@ -1283,6 +1283,22 @@ export default function RepairSales({ initialDealer, initialJobId }: {
     }
     setCreditRecordMade(!!opts?.markCredit);
     recordRepairSale(no, snap);
+    // markIssued() above may have just opened a credit charge from
+    // estimated_cost − advance, before this discount existed anywhere. Left
+    // alone, a discounted job still shows as a real debt on the customer's
+    // account — see INV-000092/RM-173. Best-effort: the sale itself is
+    // already committed, so a reconciliation hiccup surfaces as a toast, not
+    // a broken checkout.
+    for (const r of snap.repairs) {
+      if (r.discount > 0) {
+        reconcileJobDiscount(r.id, no, r.discount).catch(e => {
+          toast.error(
+            `${r.id}'s discount wasn't reflected on the customer's account`,
+            e instanceof Error ? e.message : String(e),
+          );
+        });
+      }
+    }
     // The dealer card's balance moves with what was just left on account.
     void reloadCredit();
     setView("invoice");

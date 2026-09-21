@@ -275,8 +275,8 @@ export const addCharge = (accountId: string, amount: number, note?: string, invo
  * a job type, a dealer or a price point is the problem. When one is named, a
  * trigger rolls it onto sales.bad_debt — see migration 20260901000016.
  */
-export const writeOff = (accountId: string, amount: number, note?: string, invoiceNo?: string) =>
-  addEntry({ accountId, kind: "Write-off", amount, note, invoiceNo });
+export const writeOff = (accountId: string, amount: number, note?: string, invoiceNo?: string, jobId?: string) =>
+  addEntry({ accountId, kind: "Write-off", amount, note, invoiceNo, jobId });
 
 /**
  * Charge a delivered job's unpaid balance to whoever is collecting.
@@ -292,6 +292,58 @@ export async function postJobToCredit(jobId: string): Promise<string | null> {
     .rpc("post_repair_balance_to_credit", { p_job_id: jobId });
   if (error) throw new Error(explain(error.message, error.code));
   return (data as string | null) ?? null;
+}
+
+/**
+ * Reconcile a checkout discount against a job's handover charge.
+ *
+ * The Delivered trigger posts a credit Charge from `estimated_cost −
+ * advance_paid` the instant a job is marked Delivered — before the cashier
+ * has typed anything into the invoice screen's Discount box. A discount only
+ * ever changes the sale's own total; nothing told the credit ledger the
+ * balance it already charged was never going to be collected. The result was
+ * a customer's account showing a real, collectible debt for money the shop
+ * had already decided to forgive — see INV-000092/RM-173, discovered
+ * 2026-09-21.
+ *
+ * Called once per repair line after the sale is recorded, this looks up
+ * whatever that job is still actually charged for (net of anything already
+ * written off — so a second call, or a job charged less than the discount,
+ * never over-corrects) and writes off the smaller of that and the discount
+ * actually given. A job that was never charged (paid in full, or no credit
+ * account) is a no-op.
+ */
+export async function reconcileJobDiscount(
+  jobId: string,
+  invoiceNo: string,
+  discountAmount: number,
+): Promise<void> {
+  if (!isSupabaseConfigured() || discountAmount <= 0) return;
+  const sb = getSupabaseBrowserClient();
+
+  const { data, error } = await sb
+    .from("credit_entries")
+    .select("account_id, kind, amount, created_at")
+    .eq("job_id", jobId)
+    .in("kind", ["Charge", "Write-off"])
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(explain(error.message, error.code));
+
+  const rows = (data ?? []) as { account_id: string; kind: "Charge" | "Write-off"; amount: number }[];
+  if (rows.length === 0) return; // never charged — nothing to reconcile
+
+  const accountId = rows[0].account_id;
+  const netCharged = rows.reduce((s, r) => s + (r.kind === "Charge" ? r.amount : -r.amount), 0);
+  const toWriteOff = Math.min(discountAmount, netCharged);
+  if (toWriteOff <= 0) return;
+
+  await writeOff(
+    accountId,
+    toWriteOff,
+    `Discounted at checkout on ${invoiceNo} — the handover charge for this balance no longer applies.`,
+    invoiceNo,
+    jobId,
+  );
 }
 
 /* ── hooks ───────────────────────────────────────────────────────────────── */

@@ -143,7 +143,10 @@ export default function RepairInvoicePrintable({
     technician: "—",
     status: "Completed",
     priority: "Normal",
-    estimatedCost: r.unitPrice - r.discount,
+    // The gross price, not the net of discount — JobIssuePrintable computes
+    // its own "Line total" as estimatedCost − discount, so a net figure here
+    // made the discount come off twice (once here, once there).
+    estimatedCost: r.unitPrice,
     advancePaid: r.advance,
     createdAt: today,
     estimatedCompletion: today,
@@ -160,7 +163,16 @@ export default function RepairInvoicePrintable({
   // today (amountReceivedNow) is a whole-invoice figure with no clean per-
   // device split, so it isn't attributed to any single page here.
   const mapToIssueData = (r: InvoiceRepairLine): IssueInvoiceData => {
-    const due = Math.max(0, r.unitPrice - r.discount - r.advance);
+    // amountReceivedNow is what the whole invoice took in today, on top of
+    // any advance — a single figure with no clean per-device split once
+    // there's more than one thing on the bill (see the comment above). When
+    // this job is the only thing on the invoice, though, there is nothing
+    // else it could belong to, so crediting it here is exact, not a guess —
+    // and without it, a job paid in full at pickup with no advance printed
+    // as "Paid Rs. 0 / CREDIT DUE" for the whole price.
+    const receivedHere = repairs.length === 1 && extras.length === 0 ? amountReceivedNow : 0;
+    const paidAmount = r.advance + receivedHere;
+    const due = Math.max(0, r.unitPrice - r.discount - paidAmount);
     return {
       job: mapToJob(r),
       name: customer.name || r.customerName,
@@ -169,7 +181,7 @@ export default function RepairInvoicePrintable({
       email: "",
       imei: r.imei,
       discount: r.discount,
-      paidAmount: r.advance,
+      paidAmount,
       dueAmount: due,
       isCredit: due > 0,
       adminApprover: "",

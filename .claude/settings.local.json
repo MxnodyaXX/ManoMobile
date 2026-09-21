@@ -12,7 +12,8 @@
       "Bash(Out-Null)",
       "Bash(Write-Host \"done\")",
       "Bash(python \"C:\\\\Users\\\\mxnod\\\\.claude\\\\skills\\\\ui-ux-pro-max\\\\scripts\\\\search.py\" \"mobile phone repair shop sales management dashboard professional\" --design-system -p \"ManoMobile\" -f markdown)",
-      "Bash(python \"C:\\\\Users\\\\mxnod\\\\.claude\\\\skills\\\\ui-ux-pro-max\\\\scripts\\\\search.py\" \"admin dashboard management professional dark\" --domain style -n 3)"
+      "Bash(python \"C:\\\\Users\\\\mxnod\\\\.claude\\\\skills\\\\ui-ux-pro-max\\\\scripts\\\\search.py\" \"admin dashboard management professional dark\" --domain style -n 3)",
+      "Bash(xargs grep -l \"Invoice\")"
     ]
   }
 }

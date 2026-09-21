@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import StockReceiving from "./StockReceiving";
 import { useInventory, type Category, type Subcategory } from "@/cashier/contexts/InventoryContext";
+import { useAuth } from "@/lib/auth/AuthContext";
 import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
@@ -584,8 +585,14 @@ function AdminApprovalModal({ request, onEntityAdded, onClose }: {
   onClose: () => void;
 }) {
   const { adminCredentials, brands, categories, addCategory, addSubcategory, addBrand, addSupplier } = useInventory();
+  // A signed-in Admin already proved who they are at login — asking them to
+  // re-type a second, separate admin password here is friction with no
+  // security benefit. Only non-Admin roles (Cashier, Technician, ...) need
+  // to hand this off to someone who can.
+  const { can } = useAuth();
+  const isAdmin = can("Admin");
 
-  const [step, setStep] = useState<"auth" | "add">("auth");
+  const [step, setStep] = useState<"auth" | "add">(isAdmin ? "add" : "auth");
   const [authUser, setAuthUser] = useState("");
   const [authPass, setAuthPass] = useState("");
   const [authError, setAuthError] = useState("");
