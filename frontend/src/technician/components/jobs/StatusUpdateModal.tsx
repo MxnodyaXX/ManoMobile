@@ -178,7 +178,7 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
   // Whose rate and rules the form runs on. Off the admin bench this is simply
   // the technician; on it, the one named above.
   const workerName = adminBench ? (completedBy || job.technician) : technicianName;
-  const { parts: catalog } = useParts();
+  const { parts: catalog, requestPart, markPartInstalled } = useParts();
   const { issueWarranty } = useWarranty();
 
   const [selectedNext, setSelectedNext] = useState<JobStatus | null>(initialNext ?? null);
@@ -373,7 +373,7 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
     if (jobPartLines.some(l => l.name.trim().toLowerCase() === name.toLowerCase())) return [];
     const cat = catalog.find(p => p.name.trim().toLowerCase() === name.toLowerCase());
     const unitCost = cat?.costPrice ?? 0;
-    return [{ id: `typed-${i}`, name, qty, unitCost, lineTotal: unitCost * qty, priced: !!cat, installed: true, typed: true as const }];
+    return [{ id: `typed-${i}`, name, qty, unitCost, lineTotal: unitCost * qty, priced: !!cat, installed: true, typed: true as const, sku: cat?.sku ?? null }];
   });
   const allPartLines = [...jobPartLines.map(l => ({ ...l, typed: false as const })), ...typedPartLines];
   const setTypedPartQty = (name: string, qty: number) => {
@@ -696,9 +696,46 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
       toast.dialog("error", `${job.id} was not updated`, msg, "Try again");
       return;
     }
-    toast.dialog("success", `${job.id} updated`, selectedNext === "Completed"
-      ? `Finished as ${completionType}. The device is ready for collection.`
-      : `Status is now ${selectedNext}.`);
+    /**
+     * Book the picked parts out of stock, against this job.
+     *
+     * Each catalogue part on the list becomes an approved, installed part
+     * request — the same record the parts screens use — so stock comes down
+     * in the same transaction, the job shows what it consumed, and the parts
+     * analytics count it. A part already on the job through a request is not
+     * on this list (see typedPartLines), so nothing is booked out twice.
+     *
+     * Failures are reported, not fatal: the repair happened and the status is
+     * saved; a part that could not be booked out is a stock correction, not
+     * a reason to lose the record of the work.
+     */
+    const failedParts: string[] = [];
+    if (selectedNext === "Completed") {
+      for (const l of typedPartLines) {
+        if (!l.sku) continue;
+        try {
+          const req = await requestPart({
+            jobId: job.id,
+            jobDevice: `${job.brand} ${job.model}`.trim(),
+            technicianName: workerName || job.technician,
+            partName: l.name,
+            partSku: l.sku,
+            quantity: l.qty,
+            note: "Used when finishing the job",
+          }, { autoApprove: true });
+          if (req.status === "Approved") await markPartInstalled(req.id);
+        } catch (e) {
+          failedParts.push(`${l.name} × ${l.qty} — ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    }
+    if (failedParts.length > 0) {
+      toast.dialog("error", `${job.id} finished, but some parts were not taken from stock`, failedParts.join("\n"));
+    } else {
+      toast.dialog("success", `${job.id} updated`, selectedNext === "Completed"
+        ? `Finished as ${completionType}. The device is ready for collection.${typedPartLines.some(l => l.sku) ? " Parts taken from stock." : ""}`
+        : `Status is now ${selectedNext}.`);
+    }
     setConfirmed(true);
     setTimeout(onClose, 1400);
   };
