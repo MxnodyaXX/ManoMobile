@@ -6,7 +6,7 @@ import {
   Smartphone, Package, AlertTriangle, XCircle,
   Plus, Search, Edit2, Trash2, X, Check,
   BarChart3, ArrowUpCircle, ArrowDownCircle, Sliders,
-  ChevronDown, ChevronRight, ShieldAlert, Truck, Tag, CornerDownRight, Wrench, Layers,
+  ChevronDown, ChevronRight, ShieldAlert, Truck, Tag, CornerDownRight, Wrench, Layers, Printer,
 } from "lucide-react";
 import StockReceiving from "./StockReceiving";
 import { useInventory, type Category, type Subcategory } from "@/cashier/contexts/InventoryContext";
@@ -2146,6 +2146,208 @@ function OverviewTab({ devices, accessories }: { devices: DeviceItem[]; accessor
   );
 }
 
+// ─── Bulk Print Labels Modal ──────────────────────────────────────────────────
+//
+// One model can be a dozen identical phones on the shelf, and the single
+// "print label" button on each row means a dozen separate print dialogs for
+// a shipment that just arrived. This prints a whole group — or whichever
+// slice of it is actually still on the shelf — in one pass, using the same
+// BarcodeLabelModal every single-device print already goes through: one
+// unit's label is rendered off-screen and silently printed, then the next,
+// until the list picked here is done.
+
+function BulkPrintLabelsModal({ group, units, onClose }: {
+  group: { name: string; brand: string; modelNumber: string };
+  units: DeviceItem[];
+  onClose: () => void;
+}) {
+  const toast = useToast();
+  const statusColors = {
+    available: { bg: "#dcfce7", color: "#16a34a" },
+    sold:      { bg: "var(--bg-surface)", color: "var(--text-muted)" },
+    reserved:  { bg: "#fef3c7", color: "#b45309" },
+  } as const;
+  // Default to what actually needs a shelf label — a sold or reserved unit
+  // isn't sitting out waiting to be tagged.
+  const [selected, setSelected] = useState<Set<number>>(
+    () => new Set(units.filter(d => d.status === "available").map(d => d.id)),
+  );
+  const [rangeFrom, setRangeFrom] = useState("1");
+  const [rangeTo, setRangeTo] = useState(String(units.length));
+  const [queue, setQueue] = useState<DeviceItem[] | null>(null);
+  const [printedCount, setPrintedCount] = useState(0);
+
+  const toggle = (id: number) => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const applyRange = () => {
+    const from = Math.max(1, parseInt(rangeFrom, 10) || 1);
+    const to = Math.min(units.length, parseInt(rangeTo, 10) || units.length);
+    if (from > to) return;
+    // Replaces the selection with exactly this range — a second range applied
+    // after the first should narrow to the new one, not accumulate.
+    setSelected(new Set(units.slice(from - 1, to).map(d => d.id)));
+  };
+
+  const selectedUnits = units.filter(d => selected.has(d.id));
+  const printing = queue !== null;
+
+  const startPrint = () => {
+    if (selectedUnits.length === 0) return;
+    setPrintedCount(0);
+    setQueue(selectedUnits);
+  };
+
+  const onOnePrinted = () => {
+    setPrintedCount(c => c + 1);
+    setQueue(prev => {
+      const rest = (prev ?? []).slice(1);
+      if (rest.length === 0) {
+        toast.success(`Printed ${(prev ?? []).length === 0 ? 0 : printedCount + 1} label${printedCount + 1 === 1 ? "" : "s"}`);
+        onClose();
+        return null;
+      }
+      return rest;
+    });
+  };
+
+  const current = queue && queue.length > 0 ? queue[0] : null;
+
+  return (
+    <>
+      {createPortal(
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={(e) => { if (e.target === e.currentTarget && !printing) onClose(); }}
+        >
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(480px, calc(100vw - 24px))", maxHeight: "calc(100vh - 40px)", display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
+              <div>
+                <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>Bulk Print Labels</p>
+                <p style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
+                  {group.brand} {group.name}{group.modelNumber ? ` · ${group.modelNumber}` : ""}
+                </p>
+              </div>
+              {!printing && (
+                <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            {printing ? (
+              <div style={{ padding: 28, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+                <Printer size={22} color="var(--accent)" />
+                <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+                  Printing label {printedCount + 1} of {selectedUnits.length}…
+                </p>
+                <p style={{ fontSize: 11.5, color: "var(--text-muted)", textAlign: "center", lineHeight: 1.5 }}>
+                  Each label opens its own print dialog unless your printer is set up for silent printing — keep confirming until the count above finishes.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <button
+                      onClick={() => setSelected(new Set(units.map(d => d.id)))}
+                      style={{ padding: "6px 12px", borderRadius: 8, fontSize: 11.5, fontWeight: 600, border: "1px solid var(--border)", background: "var(--bg-surface)", color: "var(--text-secondary)", cursor: "pointer" }}
+                    >
+                      All in group ({units.length})
+                    </button>
+                    <button
+                      onClick={() => setSelected(new Set())}
+                      style={{ padding: "6px 12px", borderRadius: 8, fontSize: 11.5, fontWeight: 600, border: "1px solid var(--border)", background: "var(--bg-surface)", color: "var(--text-secondary)", cursor: "pointer" }}
+                    >
+                      Select none
+                    </button>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11.5, color: "var(--text-muted)", fontWeight: 600 }}>Range</span>
+                    <input type="number" min={1} max={units.length} value={rangeFrom} onChange={e => setRangeFrom(e.target.value)}
+                      style={{ ...inputStyle, width: 60, padding: "6px 8px" }} />
+                    <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>to</span>
+                    <input type="number" min={1} max={units.length} value={rangeTo} onChange={e => setRangeTo(e.target.value)}
+                      style={{ ...inputStyle, width: 60, padding: "6px 8px" }} />
+                    <button
+                      onClick={applyRange}
+                      style={{ padding: "6px 12px", borderRadius: 8, fontSize: 11.5, fontWeight: 600, border: "1px solid var(--accent)", background: "var(--accent-dim)", color: "var(--accent)", cursor: "pointer" }}
+                    >
+                      Apply range
+                    </button>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 260, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 10, padding: 6 }}>
+                    {units.map((d, i) => {
+                      const sc = statusColors[d.status];
+                      const on = selected.has(d.id);
+                      return (
+                        <label
+                          key={d.id}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 7,
+                            cursor: "pointer", background: on ? "var(--accent-dim)" : "transparent",
+                          }}
+                        >
+                          <input type="checkbox" checked={on} onChange={() => toggle(d.id)} style={{ cursor: "pointer" }} />
+                          <span style={{ fontSize: 10.5, color: "var(--text-muted)", width: 20, flexShrink: 0 }}>{i + 1}</span>
+                          <span style={{ fontSize: 11.5, fontFamily: "monospace", color: "var(--text-primary)", flex: 1 }}>{d.imei}</span>
+                          <span style={{ background: sc.bg, color: sc.color, fontSize: 9.5, fontWeight: 700, padding: "2px 7px", borderRadius: 20, textTransform: "capitalize", flexShrink: 0 }}>
+                            {d.status}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "12px 18px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
+                  <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>{selectedUnits.length} selected</span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={onClose} style={{ padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer" }}>Cancel</button>
+                    <button
+                      onClick={startPrint}
+                      disabled={selectedUnits.length === 0}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                        border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--accent-fg)",
+                        cursor: selectedUnits.length === 0 ? "not-allowed" : "pointer", opacity: selectedUnits.length === 0 ? 0.45 : 1,
+                      }}
+                    >
+                      <Printer size={13} /> Print {selectedUnits.length || ""} Label{selectedUnits.length === 1 ? "" : "s"}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {current && (
+        <BarcodeLabelModal
+          code={current.imei}
+          title={`${current.brand} ${current.name}`.trim()}
+          subtitle={`${current.storage} · ${current.color}`}
+          variant="device"
+          imei={current.imei}
+          price={Rs(current.suggestedPrice)}
+          deviceName={current.name}
+          modelNumber={current.modelNumber}
+          silent
+          onClose={onOnePrinted}
+        />
+      )}
+    </>
+  );
+}
+
 // ─── Mobile Devices Tab ───────────────────────────────────────────────────────
 
 function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevice }: {
@@ -2165,6 +2367,7 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
   const [bulkAddOpen, setBulkAddOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeviceItem | null>(null);
   const [labelDevice, setLabelDevice] = useState<DeviceItem | null>(null);
+  const [bulkPrintGroup, setBulkPrintGroup] = useState<{ name: string; brand: string; modelNumber: string; units: DeviceItem[] } | null>(null);
 
   const { brands: brandList } = useInventory();
   const brands = useMemo(
@@ -2387,8 +2590,19 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
                       </div>
                     </td>
                     <td style={{ ...tdBase, textAlign: "right" }}>
-                      <div style={{ fontSize: 9.5, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Stock Value</div>
-                      <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--accent)" }}>{Rs(stockValue)}</div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10 }}>
+                        <button
+                          onClick={e => { e.stopPropagation(); setBulkPrintGroup({ name: g.name, brand: g.brand, modelNumber: g.modelNumber, units: g.units }); }}
+                          title="Print labels for this model"
+                          style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-secondary)", cursor: "pointer", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", flexShrink: 0 }}
+                        >
+                          <Printer size={12} /> Bulk Print
+                        </button>
+                        <div>
+                          <div style={{ fontSize: 9.5, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Stock Value</div>
+                          <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--accent)" }}>{Rs(stockValue)}</div>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -2494,6 +2708,13 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
           deviceName={labelDevice.name}
           modelNumber={labelDevice.modelNumber}
           onClose={() => setLabelDevice(null)}
+        />
+      )}
+      {bulkPrintGroup && (
+        <BulkPrintLabelsModal
+          group={bulkPrintGroup}
+          units={bulkPrintGroup.units}
+          onClose={() => setBulkPrintGroup(null)}
         />
       )}
     </div>
