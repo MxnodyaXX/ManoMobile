@@ -43,9 +43,12 @@ interface BarcodeLabelModalProps {
    * across the top, barcode in the middle, shop details along the bottom.
    * "part" prints a repair-parts bin/stock label: part name, barcode (SKU),
    * category — fixed to the 38x25mm parts-label roll, same idea as "repair"
-   * being pinned to 50x25mm. "simple" (default) is the stock inventory label.
+   * being pinned to 50x25mm. "simple" (default), "device" and "accessory"
+   * all share the same built-in title/barcode/subtitle layout — they only
+   * differ in which saved BarcodeTemplate (Admin -> Barcode) they look up,
+   * so a phone label and an accessory label can be designed independently.
    */
-  variant?: "simple" | "repair" | "part";
+  variant?: "simple" | "repair" | "part" | "device" | "accessory";
   /** Job number for the repair tag — printed large, top-left. */
   jobId?: string;
   /** The originating dealer's own job number, for a repair tag on a device
@@ -54,8 +57,18 @@ interface BarcodeLabelModalProps {
   /** What the device came in for. Printed on the job tag and available to a
    *  label design as {{fault}}. */
   fault?: string;
-  /** The device's IMEI, for the {{imei}} token on a label design. */
+  /** The device's IMEI, for the {{imei}} token on a label design. Also feeds
+   *  {{imeiShort}} (its last 6 digits) — computed here, not passed in. */
   imei?: string;
+  /** Selling price, already formatted (e.g. "Rs. 45,000"), for the {{price}}
+   *  token on a device label design. */
+  price?: string;
+  /** Just the device's own name/model, for {{deviceName}} — distinct from
+   *  `title`, which already carries brand + name together for the built-in
+   *  layout. */
+  deviceName?: string;
+  /** For the {{modelNumber}} token on a device label design. */
+  modelNumber?: string;
   /** The unlock code the customer left with the device, when they did. A tag
    *  for such a device uses the PASSCODE_TEMPLATE_NAME design where one
    *  exists, and the built-in tag prints the code. */
@@ -100,7 +113,7 @@ interface BarcodeLabelModalProps {
  * until it fits. Runs for both axes since a narrower label (38mm) can
  * overflow sideways even when a wider one (50mm) had enough slack.
  */
-export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, passcode, outsideDealer = false, silent = false, ask = false, onClose }: BarcodeLabelModalProps) {
+export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, price, deviceName, modelNumber, passcode, outsideDealer = false, silent = false, ask = false, onClose }: BarcodeLabelModalProps) {
   const hasPasscode = !!passcode && passcode.trim() !== "";
   const { barcodeSettings: s } = useInventory();
   const labelRef = useRef<HTMLDivElement>(null);
@@ -298,6 +311,10 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
           customer: subtitle ?? "",
           device: title ?? "",
           imei: imei ?? "",
+          imeiShort: imei ? imei.slice(-6) : "",
+          price: price ?? "",
+          deviceName: deviceName ?? "",
+          modelNumber: modelNumber ?? "",
           fault: fault ?? "",
           passcode: hasPasscode ? passcode!.trim() : "",
           title: title ?? "",

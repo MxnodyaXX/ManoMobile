@@ -1133,19 +1133,79 @@ const LABEL_PRESETS: { width: number; height: number; label: string }[] = [
  * is what the app loads at startup.
  */
 function BarcodeManager() {
-  // Two different printables share this page: small barcode labels and the
-  // full-page job receipt. Same idea, same canvas building blocks, wildly
-  // different scale — kept as a toggle rather than merged into one picker.
-  const [section, setSection] = useState<"labels" | "receipt" | "issue">("labels");
+  // Barcode labels, plus the two full-page printed documents. Same canvas
+  // building blocks, wildly different scale — kept as a toggle rather than
+  // merged into one picker. "Mobile Devices" and "Accessories" are the same
+  // Barcode Labels gallery-plus-editor again, just pointed at one layout
+  // each (LabelTemplatesPanel's restrictToLayout) so a phone label and an
+  // accessory label can be designed independently without three copies of
+  // this screen.
+  const [section, setSection] = useState<"labels" | "device" | "accessory" | "receipt" | "issue">("labels");
 
-  const { setBarcodeSettings } = useInventory();
   const { templates, loading, error, configured, reload } = useBarcodeTemplates();
+
+  const ff = "'Plus Jakarta Sans', sans-serif";
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+
+      {/* Barcode labels vs. the two printed documents — same canvas idea,
+          differently-sized/shaped printables, so they each get their own
+          section rather than one picker trying to hold all three. */}
+      <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, width: "fit-content", flexWrap: "wrap" }}>
+        {([["labels", "Barcode Labels"], ["device", "Mobile Devices"], ["accessory", "Accessories"], ["receipt", "Job Receipt"], ["issue", "Job Issue Invoice"]] as const).map(([sec, lbl]) => {
+          const active = section === sec;
+          return (
+            <button key={sec} onClick={() => setSection(sec)} style={{ padding: "7px 15px", borderRadius: 7, fontSize: 12.5, cursor: "pointer", fontFamily: ff, background: active ? "var(--bg-secondary)" : "transparent", border: active ? "1px solid var(--border-active)" : "1px solid transparent", color: active ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: active ? 600 : 400 }}>
+              {lbl}
+            </button>
+          );
+        })}
+      </div>
+
+      {section === "receipt" ? (
+        <ReceiptTemplateManager kind="receipt" />
+      ) : section === "issue" ? (
+        <ReceiptTemplateManager kind="issue" />
+      ) : (
+        <LabelTemplatesPanel
+          templates={templates}
+          loading={loading}
+          error={error}
+          configured={configured}
+          reload={reload}
+          restrictToLayout={section === "device" || section === "accessory" ? section : undefined}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Barcode Labels gallery + editor ──────────────────────────────────────────
+// Shared by the "Barcode Labels", "Mobile Devices" and "Accessories" tabs.
+// Unrestricted (Barcode Labels) it shows every saved template and lets the
+// Layout picker choose any of them; restricted to one layout (the two new
+// tabs) the gallery only shows that layout's templates, "New Template"
+// presets it, and the Layout picker is hidden since there's nothing to pick
+// — everything else (Settings/Design, LabelCanvas, save/delete/set-default)
+// is exactly the machinery the "labels" tab already used.
+function LabelTemplatesPanel({ templates, loading, error, configured, reload, restrictToLayout }: {
+  templates: BarcodeTemplate[];
+  loading: boolean;
+  error: string | null;
+  configured: boolean;
+  reload: () => Promise<void>;
+  restrictToLayout?: BarcodeLayout;
+}) {
+  const { setBarcodeSettings } = useInventory();
   const toast = useToast();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<TemplateDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<"settings" | "design">("settings");
+
+  const visibleTemplates = restrictToLayout ? templates.filter(t => t.layout === restrictToLayout) : templates;
 
   const asDraft = (t: BarcodeTemplate): TemplateDraft => ({
     name: t.name, layout: t.layout, format: t.format, width: t.width, height: t.height,
@@ -1157,11 +1217,11 @@ function BarcodeManager() {
   // Land on the default template once the list arrives, so the panel is never
   // blank and the thing being edited is the thing that actually prints.
   useEffect(() => {
-    if (draft || templates.length === 0) return;
-    const first = templates.find(t => t.isDefault) ?? templates[0];
+    if (draft || visibleTemplates.length === 0) return;
+    const first = visibleTemplates.find(t => t.isDefault) ?? visibleTemplates[0];
     setSelectedId(first.id);
     setDraft(asDraft(first));
-  }, [templates, draft]);
+  }, [visibleTemplates, draft]);
 
   const selected = templates.find(t => t.id === selectedId) ?? null;
   const s = draft;
@@ -1181,7 +1241,7 @@ function BarcodeManager() {
     if (dirty && !confirm("Discard unsaved changes to this template?")) return;
     setSelectedId(null);
     setDraft({
-      name: "", layout: "simple", format: "CODE128", width: 2, height: 60, fontSize: 12,
+      name: "", layout: restrictToLayout ?? "simple", format: "CODE128", width: 2, height: 60, fontSize: 12,
       showText: true, prefix: "MM", labelWidthMm: 50, labelHeightMm: 25, labelMarginMm: 3,
       elements: [],
     });
@@ -1255,30 +1315,12 @@ function BarcodeManager() {
   };
 
   const ff = "'Plus Jakarta Sans', sans-serif";
+  const emptyGalleryHint = restrictToLayout
+    ? `No ${LAYOUT_LABELS[restrictToLayout].label.toLowerCase()} templates yet — click New Template to create one.`
+    : "No templates yet — run the migration, or click New Template to create one.";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-
-      {/* Barcode labels vs. the two printed documents — same canvas idea,
-          differently-sized/shaped printables, so they each get their own
-          section rather than one picker trying to hold all three. */}
-      <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, width: "fit-content" }}>
-        {([["labels", "Barcode Labels"], ["receipt", "Job Receipt"], ["issue", "Job Issue Invoice"]] as const).map(([sec, lbl]) => {
-          const active = section === sec;
-          return (
-            <button key={sec} onClick={() => setSection(sec)} style={{ padding: "7px 15px", borderRadius: 7, fontSize: 12.5, cursor: "pointer", fontFamily: ff, background: active ? "var(--bg-secondary)" : "transparent", border: active ? "1px solid var(--border-active)" : "1px solid transparent", color: active ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: active ? 600 : 400 }}>
-              {lbl}
-            </button>
-          );
-        })}
-      </div>
-
-      {section === "receipt" ? (
-        <ReceiptTemplateManager kind="receipt" />
-      ) : section === "issue" ? (
-        <ReceiptTemplateManager kind="issue" />
-      ) : (
-      <>
+    <>
       {(!configured || error) && (
         <div style={{ display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", fontFamily: ff }}>
           <AlertCircle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
@@ -1294,9 +1336,11 @@ function BarcodeManager() {
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
         <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
           <BarcodeIcon size={15} color="var(--accent)" />
-          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>Label Templates</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>
+            {restrictToLayout ? LAYOUT_LABELS[restrictToLayout].label + " Templates" : "Label Templates"}
+          </span>
           <span style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff }}>
-            {templates.length} saved
+            {visibleTemplates.length} saved
           </span>
           <button onClick={startNew} style={{ ...btnAccent, marginLeft: "auto" }}><Plus size={13} /> New Template</button>
         </div>
@@ -1304,11 +1348,11 @@ function BarcodeManager() {
         <div style={{ padding: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
           {loading ? (
             <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff, padding: "6px 2px" }}>Loading templates…</p>
-          ) : templates.length === 0 ? (
+          ) : visibleTemplates.length === 0 ? (
             <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff, padding: "6px 2px" }}>
-              No templates yet — run the migration, or click New Template to create one.
+              {emptyGalleryHint}
             </p>
-          ) : templates.map(t => {
+          ) : visibleTemplates.map(t => {
             const active = t.id === selectedId;
             return (
               <button
@@ -1386,6 +1430,7 @@ function BarcodeManager() {
                   heightMm={s.labelHeightMm}
                   format={s.format}
                   barWidth={s.width}
+                  layout={s.layout}
                   // Only templates that actually have something to copy, and
                   // never this one — copying a label onto itself is a no-op
                   // that still looks like it did something.
@@ -1416,6 +1461,11 @@ function BarcodeManager() {
                   <input type="text" value={s.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Product 50×25" style={inputStyle} />
                 </div>
 
+                {/* On a dedicated Mobile Devices / Accessories tab the layout
+                    is already unambiguous — picking it again from a list of
+                    five would just be a second, redundant place to get it
+                    wrong, so it's preset and this picker is hidden. */}
+                {!restrictToLayout && (
                 <div>
                   <label style={labelStyle}>Layout</label>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1433,6 +1483,7 @@ function BarcodeManager() {
                     })}
                   </div>
                 </div>
+                )}
 
                 <div>
                   <label style={labelStyle}>Format</label>
@@ -1560,9 +1611,7 @@ function BarcodeManager() {
           </div>
         </>
       )}
-      </>
-      )}
-    </div>
+    </>
   );
 }
 

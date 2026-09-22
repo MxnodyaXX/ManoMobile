@@ -10,7 +10,7 @@ import LabelRender from "@/cashier/components/shared/LabelRender";
 import ImageCropModal from "./ImageCropModal";
 import { SHOP_DETAILS } from "@/lib/shop";
 import {
-  blankElement, clampElement, copyDesign, LABEL_TOKENS,
+  blankElement, clampElement, copyDesign, tokensForLayout, LABEL_TOKENS,
   type LabelElement, type LabelElementType, type LabelData,
 } from "@/lib/inventory/labelElements";
 import { FONT_OPTIONS, DEFAULT_FONT_FAMILY } from "@/lib/fonts";
@@ -61,11 +61,17 @@ interface LabelCanvasProps {
   barWidth: number;
   /** Templates that already have a design, for "Copy design from". */
   sources?: DesignSource[];
+  /** Which BarcodeLayout this design is for — narrows "Insert a field" to
+   *  tokens that mean something here (a phone label doesn't need {{fault}}
+   *  or {{passcode}}, those are for a repair job tag). Unset shows every
+   *  token, same as before this existed. */
+  layout?: string;
 }
 
 export default function LabelCanvas({
-  elements, onChange, widthMm, heightMm, format, barWidth, sources = [],
+  elements, onChange, widthMm, heightMm, format, barWidth, sources = [], layout,
 }: LabelCanvasProps) {
+  const insertableTokens = layout ? tokensForLayout(layout) : LABEL_TOKENS;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [copyOpen, setCopyOpen] = useState(false);
@@ -384,7 +390,7 @@ export default function LabelCanvas({
                   </Field>
                   <Field label="Insert a field">
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                      {LABEL_TOKENS.map(t => (
+                      {insertableTokens.map(t => (
                         <button
                           key={t.token}
                           title={t.label}

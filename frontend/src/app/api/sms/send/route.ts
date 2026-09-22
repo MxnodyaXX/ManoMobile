@@ -17,6 +17,9 @@ interface SendBody {
   to?: string;
   message?: string;
   jobId?: string;
+  /** Credit account this SMS is about, e.g. a credit-reminder. Backward
+   *  compatible: existing callers passing jobId (or neither) are unaffected. */
+  accountId?: string;
   purpose?: string;
 }
 
@@ -82,6 +85,7 @@ export async function POST(request: Request) {
     sms_count: result.smsCount ?? null,
     error: result.error ?? null,
     job_id: body.jobId ?? null,
+    account_id: body.accountId ?? null,
     purpose: body.purpose ?? null,
     sent_by: user.id,
     sent_by_name: (profile as { full_name?: string } | null)?.full_name ?? user.email ?? null,

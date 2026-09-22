@@ -1,17 +1,23 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Search, CreditCard, AlertCircle, CheckCircle,
   X, DollarSign, Wallet, Store,
-  History, Plus, Sparkles, Loader2, Undo2, RotateCcw, FileText, ChevronDown,
+  History, Plus, Sparkles, Loader2, Undo2, RotateCcw, FileText, ChevronDown, MessageSquare,
 } from "lucide-react";
 import {
   useCreditAccounts, useCreditEntries, openCreditAccount, recordPayment, writeOff,
   groupCreditEntries, STATUS_COLOURS, isOverLimit,
-  type CreditAccount, type CreditStatus, type HolderKind,
+  type CreditAccount, type CreditStatus, type HolderKind, type CreditEntryGroup,
 } from "@/lib/credit/api";
+import { sendSms } from "@/lib/sms/client";
+import {
+  renderCreditReminder, CREDIT_REMINDER_PURPOSE,
+  renderCreditAccountOpened, renderCreditPaymentRecorded,
+  CREDIT_OPENED_PURPOSE, CREDIT_PAYMENT_PURPOSE,
+} from "@/lib/sms/creditReminders";
 import InvoiceDetail from "@/cashier/components/sales/InvoiceDetail";
 import { useInvoiceCategories } from "@/lib/sales/api";
 import type { TxCategory } from "@/cashier/contexts/SalesContext";
@@ -30,11 +36,12 @@ const SOURCE_LABEL: Record<TxCategory, string> = {
   Others: "Other Sales",
 };
 import { useMyPermissions } from "@/lib/settings/staffRules";
-import { useRepair } from "@/cashier/contexts/RepairContext";
+import { useRepair, type RepairJob } from "@/cashier/contexts/RepairContext";
 import { useToast } from "@/lib/ui/toast";
 import { recordDealerCashReturn } from "@/lib/accounts/cashReturns";
 import { useTableSort, SortHeader } from "@/lib/ui/useTableSort";
 import { cleanPhone, phoneIssue, FieldWarning } from "@/lib/ui/identifiers";
+import RecordCreditModal from "./RecordCreditModal";
 
 /**
  * Credit accounts — who owes the shop money.
@@ -111,6 +118,32 @@ const TONE = {
   accent:  { fg: "var(--accent)",  bg: "var(--accent-dim)",      border: "var(--accent-glow)"    },
   muted:   { fg: "var(--text-muted)", bg: "var(--bg-secondary)", border: "var(--border)"         },
 } as const;
+
+/**
+ * Colour, icon and sign for each kind of ledger entry group, in the same
+ * pill idiom as everything else in this file. Module scope because it is
+ * fixed data, not something that changes with an account or a render.
+ */
+const GROUP_TONE: Record<string, { color: string; tint: string; edge: string; icon: typeof Wallet; sign: string }> = {
+  "Charge":    { color: "var(--danger)",  tint: "rgba(248,113,113,0.10)", edge: "rgba(248,113,113,0.30)", icon: CreditCard, sign: "+" },
+  "Payment":   { color: "var(--success)", tint: "rgba(52,211,153,0.10)",  edge: "rgba(52,211,153,0.30)",  icon: Wallet,     sign: "−" },
+  "Write-off": { color: "var(--warning)", tint: "rgba(251,191,36,0.10)",  edge: "rgba(251,191,36,0.30)",  icon: Undo2,      sign: "−" },
+  // Deliberately not green. A refund reduces the balance the same way a
+  // payment does, but nothing was collected — reading it as takings is the
+  // mistake this whole distinction exists to prevent, and colour is the
+  // first thing anybody reads on this list.
+  "Refund":    { color: "var(--accent)",  tint: "rgba(96,165,250,0.10)",  edge: "rgba(96,165,250,0.30)",  icon: RotateCcw,  sign: "−" },
+};
+
+/** "Repairs", "Accessories"… or nothing when there is no invoice to label. */
+function sourceOfGroup(categories: Record<string, TxCategory>, invoiceNo: string | null, jobIds: string[]): string | null {
+  const c = invoiceNo ? categories[invoiceNo] : undefined;
+  if (c) return SOURCE_LABEL[c];
+  // A charge that names repair jobs came from a repair, whether or not the
+  // sales ledger has a row for it — invoices raised before the ledger existed
+  // still deserve the right label.
+  return jobIds.length > 0 ? SOURCE_LABEL.Repair : null;
+}
 
 /** A soft pill button, the shape used for every tinted control in the app. */
 const pill = (t: { fg: string; bg: string; border: string }, wide = false): React.CSSProperties => ({
@@ -328,6 +361,15 @@ function RecordPaymentModal({ account, onClose, onDone }: {
     setBusy(true); setError(null);
     try {
       await recordPayment(account.id, amt, method, note);
+      // Best-effort: the payment is already recorded, so a failed text
+      // should not read as a failed payment.
+      if (account.phone) {
+        void sendSms({
+          to: account.phone,
+          message: renderCreditPaymentRecorded({ name: account.name }, amt, newBal),
+          accountId: account.id, purpose: CREDIT_PAYMENT_PURPOSE,
+        }).catch(() => {});
+      }
       toast.success(`${rs(amt)} recorded against ${account.name}`);
       onDone();
     } catch (e) {
@@ -494,109 +536,36 @@ function WriteOffModal({ account, onClose, onDone }: {
   );
 }
 
-// ─── History ──────────────────────────────────────────────────────────────────
+// ─── Ledger entries ───────────────────────────────────────────────────────────
 
 /**
- * One account's ledger, as a list.
- *
- * It was a modal. It is a list because it is now opened from inside the
- * accounts table — expanding a row shows the history under it, so the balance
- * on the row and the entries that add up to it are on screen together. A modal
- * covered the very table somebody was comparing it against.
+ * One account's ledger, as a list of the invoices/events that made it up —
+ * the presentation half of a ledger tab. The caller (Credit Account Detail)
+ * decides which slice of the account's groups this is showing: charges and
+ * refunds for "Invoices", payments and write-offs for "Settlements", or
+ * everything for "Full History". This component just renders whatever
+ * groups it's handed, with the same expand-to-jobs and "show N older"
+ * pattern regardless of which tab it's in.
  */
-function CreditHistoryList({ account }: { account: CreditAccount }) {
-  const { entries, loading, error } = useCreditEntries(account.id);
-  const { jobs } = useRepair();
+function CreditGroupList({ groups, allCount, jobs, categories, onViewInvoice, emptyMessage }: {
+  groups: CreditEntryGroup[];
+  /** Total groups on the account across every tab, to tell "nothing of this
+   *  kind" apart from "nothing on this account at all". */
+  allCount: number;
+  jobs: RepairJob[];
+  categories: Record<string, TxCategory>;
+  onViewInvoice: (invoiceNo: string) => void;
+  emptyMessage: string;
+}) {
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [showInvoice, setShowInvoice] = useState<string | null>(null);
-  /**
-   * An account with fourteen invoices on it is the normal case, not the edge
-   * one, and dumping all fourteen into the table pushes every other account
-   * off the screen — including the one it was opened to compare against.
-   *
-   * So the panel is bounded, and asks what you are looking for first. Both
-   * controls default to everything, newest first, and neither hides anything
-   * permanently.
-   */
-  const [kind, setKind] = useState<"All" | "Charge" | "Payment">("All");
   const [showAll, setShowAll] = useState(false);
-
-  /**
-   * One row per thing that happened, not per row in the ledger.
-   *
-   * Three phones billed on one invoice are stored as three charges — the
-   * handover trigger fires per job and each job has to stay traceable — but the
-   * customer signed one bill for the total. Grouping by invoice number makes
-   * the history match the paper in their hand; the individual jobs are still
-   * there, one click down.
-   */
-  const allGroups = groupCreditEntries(entries);
-
-  // Refunds sit with charges because they are part of what an invoice came to;
-  // write-offs sit with payments because both are ways a balance stops being
-  // owed. Neither belongs in a bucket of its own on a screen this size.
-  const groups = allGroups.filter(g =>
-    kind === "All" ? true
-    : kind === "Charge" ? g.kind === "Charge" || g.kind === "Refund"
-    : g.kind === "Payment" || g.kind === "Write-off",
-  );
 
   const PREVIEW = 5;
   const shown = showAll ? groups : groups.slice(0, PREVIEW);
   const hidden = groups.length - shown.length;
 
-  const categories = useInvoiceCategories(
-    groups.map(g => g.invoiceNo).filter((n): n is string => !!n),
-  );
-
-  /** "Repairs", "Accessories"… or nothing when there is no invoice to label. */
-  const sourceOf = (invoiceNo: string | null, jobIds: string[]): string | null => {
-    const c = invoiceNo ? categories[invoiceNo] : undefined;
-    if (c) return SOURCE_LABEL[c];
-    // A charge that names repair jobs came from a repair, whether or not the
-    // sales ledger has a row for it — invoices raised before the ledger existed
-    // still deserve the right label.
-    return jobIds.length > 0 ? SOURCE_LABEL.Repair : null;
-  };
-
-  const tone: Record<string, { color: string; tint: string; edge: string; icon: typeof Wallet; sign: string }> = {
-    "Charge":    { color: "var(--danger)",  tint: "rgba(248,113,113,0.10)", edge: "rgba(248,113,113,0.30)", icon: CreditCard, sign: "+" },
-    "Payment":   { color: "var(--success)", tint: "rgba(52,211,153,0.10)",  edge: "rgba(52,211,153,0.30)",  icon: Wallet,     sign: "−" },
-    "Write-off": { color: "var(--warning)", tint: "rgba(251,191,36,0.10)",  edge: "rgba(251,191,36,0.30)",  icon: Undo2,      sign: "−" },
-    // Deliberately not green. A refund reduces the balance the same way a
-    // payment does, but nothing was collected — reading it as takings is the
-    // mistake this whole distinction exists to prevent, and colour is the
-    // first thing anybody reads on this list.
-    "Refund":    { color: "var(--accent)",  tint: "rgba(96,165,250,0.10)",  edge: "rgba(96,165,250,0.30)",  icon: RotateCcw,  sign: "−" },
-  };
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "14px 16px 16px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <p style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: ff }}>
-            Credit history
-          </p>
-          {/* Buttons rather than a dropdown: "what have we charged" and "what
-              has come in" are the two halves people flip between on a screen
-              about money owed, and a flip should be one press. */}
-          <div style={{ display: "flex", gap: 3, padding: 3, borderRadius: 8, background: "var(--bg-card)", border: "1px solid var(--border)" }}>
-            {([["All", `All ${allGroups.length}`], ["Charge", "Charges"], ["Payment", "Payments"]] as const).map(([id, label]) => {
-              const on = kind === id;
-              return (
-                <button key={id} onClick={() => { setKind(id); setShowAll(false); }}
-                  style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11.5, fontWeight: on ? 700 : 500, cursor: "pointer", border: on ? "1px solid var(--accent-glow)" : "1px solid transparent", background: on ? "var(--accent-dim)" : "transparent", color: on ? "var(--accent)" : "var(--text-muted)", fontFamily: ff, whiteSpace: "nowrap" }}>
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff }}>
-          {account.name} · {account.holderKind} · {rs(account.balance)} outstanding
-        </p>
-      </div>
-
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {/* One bound at a time.
 
           The preview is already cut to PREVIEW rows, so it needs no pixel cap
@@ -604,22 +573,20 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
           was clipped and the box scrolled inside itself to reveal it, which
           read as the whole list having been squeezed to fit. The pixel cap
           only earns its place once "show all" lets the list run long: then
-          it scrolls, and the accounts above and below stay where they were. */}
+          it scrolls, and the tabs and header above stay where they were. */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: showAll ? 440 : undefined, overflowY: showAll ? "auto" : undefined, paddingRight: showAll ? 2 : 0 }}>
-        {loading && <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff }}>Loading…</p>}
-        {error && <p style={{ fontSize: 12, color: "var(--danger)", fontFamily: ff, lineHeight: 1.5 }}>{error}</p>}
-        {!loading && !error && groups.length === 0 && (
+        {groups.length === 0 && (
           <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff, padding: "16px 0", textAlign: "center" }}>
-            {allGroups.length === 0 ? "Nothing on this account yet." : "Nothing of that kind on this account."}
+            {allCount === 0 ? "Nothing on this account yet." : emptyMessage}
           </p>
         )}
 
         {shown.map(g => {
-          const t = tone[g.kind];
+          const t = GROUP_TONE[g.kind];
           const Icon = t.icon;
           const multi = g.entries.length > 1;
           const open = expanded === g.key;
-          const source = sourceOf(g.invoiceNo, g.jobIds);
+          const source = sourceOfGroup(categories, g.invoiceNo, g.jobIds);
           // Money leaving the shop: a refund on its own, or an invoice whose
           // Cash Returns exceeded its charges.
           const back = g.kind === "Refund" || g.amount < 0;
@@ -686,7 +653,7 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
                 <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
                   {g.invoiceNo && (
                     <button
-                      onClick={() => setShowInvoice(g.invoiceNo)}
+                      onClick={() => onViewInvoice(g.invoiceNo as string)}
                       title={`View ${g.invoiceNo}`}
                       style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                     >
@@ -783,9 +750,237 @@ function CreditHistoryList({ account }: { account: CreditAccount }) {
           Show {hidden} older {hidden === 1 ? "entry" : "entries"}
         </button>
       )}
+    </div>
+  );
+}
+
+// ─── Credit Account Detail ────────────────────────────────────────────────────
+
+type DetailTab = "invoices" | "settlements" | "history";
+
+/**
+ * The Credit Customer Management screen for one account.
+ *
+ * Everything about this account lives here now: who they are, what they've
+ * been invoiced for, what's actually been settled, and the full timeline —
+ * plus every action that changes the balance. It replaces the row that used
+ * to expand under the table with "Credit history" and an All/Charge/Payment
+ * toggle; that toggle is exactly the Invoices/Settlements split below, just
+ * given its own space instead of squeezed into a filter pill.
+ *
+ * A modal rather than a slide-over, on purpose: every other action on this
+ * screen (Pay, Write Off, Cash Return, Open Account) already uses Modal/
+ * ModalHead, so a management view built out of the same pieces reads as the
+ * same kind of thing rather than introducing a second way of overlaying
+ * content that this file has never used before.
+ */
+function CreditAccountDetail({
+  account, onClose, isAdminCashier,
+  onPay, onNotify, notifyBusy, onWriteOff, onCashReturn,
+  onChanged,
+}: {
+  account: CreditAccount;
+  onClose: () => void;
+  isAdminCashier: boolean;
+  onPay: () => void;
+  onNotify: () => void;
+  notifyBusy: boolean;
+  onWriteOff: () => void;
+  onCashReturn: () => void;
+  /** A charge was recorded from in here — go reload the account list. */
+  onChanged: () => void;
+}) {
+  const { entries, loading, error } = useCreditEntries(account.id);
+  const { jobs } = useRepair();
+  const [tab, setTab] = useState<DetailTab>("invoices");
+  const [showInvoice, setShowInvoice] = useState<string | null>(null);
+  const [showCharge, setShowCharge] = useState(false);
+
+  // One row per thing that happened, not per row in the ledger — see
+  // groupCreditEntries. Charges and Cash Return refunds are what an invoice
+  // came to ("Invoices"); payments and write-offs are how a balance stopped
+  // being owed ("Settlements"). "Full History" is everything, unfiltered.
+  const allGroups = groupCreditEntries(entries);
+  const invoiceGroups = allGroups.filter(g => g.kind === "Charge" || g.kind === "Refund");
+  const settlementGroups = allGroups.filter(g => g.kind === "Payment" || g.kind === "Write-off");
+
+  const categories = useInvoiceCategories(
+    allGroups.map(g => g.invoiceNo).filter((n): n is string => !!n),
+  );
+
+  const sc = statusStyle(account.status);
+  const StatusIcon = sc.icon;
+  const pct = account.totalCharged > 0 ? Math.round((account.totalPaid / account.totalCharged) * 100) : 0;
+  const over = isOverLimit(account) && account.balance > 0;
+
+  const tabs: { id: DetailTab; label: string; count: number }[] = [
+    { id: "invoices",    label: "Invoices",     count: invoiceGroups.length },
+    { id: "settlements", label: "Settlements",  count: settlementGroups.length },
+    { id: "history",     label: "Full History", count: allGroups.length },
+  ];
+  const groupsForTab = tab === "invoices" ? invoiceGroups : tab === "settlements" ? settlementGroups : allGroups;
+  const emptyMessage =
+    tab === "invoices" ? "No invoices or Cash Return refunds on this account."
+    : tab === "settlements" ? "No payments or write-offs on this account."
+    : "Nothing of that kind on this account.";
+
+  return (
+    <Modal onClose={onClose} width={920}>
+      <ModalHead title={account.name} sub={`${account.holderKind} account · ${account.id.slice(0, 8)}`} onClose={onClose} />
+
+      {/* Overview — the facts that used to be split across the table row. */}
+      <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, background: sc.bg, border: `1px solid ${sc.border}`, color: sc.color, fontSize: 11.5, fontWeight: 600, fontFamily: ff }}>
+            <StatusIcon size={10} strokeWidth={2.5} />{account.status}
+          </span>
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8,
+            background: account.holderKind === "Dealer" ? TONE.warning.bg : TONE.accent.bg,
+            border: `1px solid ${account.holderKind === "Dealer" ? TONE.warning.border : TONE.accent.border}`,
+            color: account.holderKind === "Dealer" ? TONE.warning.fg : TONE.accent.fg,
+            fontSize: 11.5, fontWeight: 600, fontFamily: ff,
+          }}>
+            {account.holderKind === "Dealer" ? <Store size={10} /> : <CreditCard size={10} />}{account.holderKind}
+          </span>
+          {account.autoOpened && (
+            <span title="Opened automatically to hold an unpaid handover" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 8, background: TONE.warning.bg, border: `1px solid ${TONE.warning.border}`, color: TONE.warning.fg, fontSize: 11, fontWeight: 600, fontFamily: ff }}>
+              <Sparkles size={10} /> Auto-opened
+            </span>
+          )}
+          {over && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--danger)", fontFamily: ff }}>
+              Over limit by {rs(account.balance - account.creditLimit)}
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
+          {[
+            { label: "Phone",         val: account.phone || "—" },
+            { label: "Email",         val: account.email || "—" },
+            { label: "NIC",           val: account.nic || "—" },
+            { label: "Terms",         val: `${account.termsDays} days` },
+            { label: "First Charge",  val: fmtDate(account.firstChargeOn ?? undefined) },
+          ].map(r => (
+            <div key={r.label}>
+              <p style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", fontFamily: ff, marginBottom: 2 }}>{r.label}</p>
+              <p style={{ fontSize: 12.5, color: "var(--text-primary)", fontFamily: ff }}>{r.val}</p>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+          {[
+            { label: "Charged", val: rs(account.totalCharged), color: "var(--text-primary)" },
+            { label: "Paid",    val: rs(account.totalPaid),    color: "var(--success)" },
+            { label: "Balance", val: account.balance > 0 ? rs(account.balance) : "—", color: account.balance > 0 ? "var(--danger)" : "var(--success)" },
+            { label: "Limit",   val: account.creditLimit > 0 ? rs(account.creditLimit) : "No limit set", color: over ? "var(--danger)" : "var(--text-secondary)" },
+          ].map(s => (
+            <div key={s.label} style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", borderRadius: 9, padding: "9px 12px", textAlign: "center" }}>
+              <p style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase", fontFamily: ff, marginBottom: 4 }}>{s.label}</p>
+              <p style={{ fontSize: 14, fontWeight: 700, color: s.color, fontFamily: ff }}>{s.val}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Tabs — Invoice control, Settlements, Full History. */}
+      <div style={{ display: "flex", gap: 3, padding: "10px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0, flexWrap: "wrap" }}>
+        {tabs.map(t => {
+          const on = tab === t.id;
+          return (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              style={{ padding: "6px 13px", borderRadius: 7, fontSize: 12, fontWeight: on ? 700 : 500, cursor: "pointer", border: on ? "1px solid var(--accent-glow)" : "1px solid transparent", background: on ? "var(--accent-dim)" : "transparent", color: on ? "var(--accent)" : "var(--text-muted)", fontFamily: ff, whiteSpace: "nowrap" }}>
+              {t.label} · {t.count}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Content */}
+      <div style={{ padding: "14px 18px", overflowY: "auto", flex: 1, minHeight: 0 }}>
+        {loading && <p style={{ fontSize: 12.5, color: "var(--text-muted)", fontFamily: ff }}>Loading…</p>}
+        {error && <p style={{ fontSize: 12, color: "var(--danger)", fontFamily: ff, lineHeight: 1.5 }}>{error}</p>}
+        {!loading && !error && (
+          <>
+            {/* Settlement progress — paid vs charged, the same bar the table
+                row shows, given room to carry its own label here. */}
+            {tab === "settlements" && account.totalCharged > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff, marginBottom: 5 }}>
+                  <span>Paid vs charged</span>
+                  <span>{pct}% · {rs(account.totalPaid)} of {rs(account.totalCharged)}</span>
+                </div>
+                <div style={{ width: "100%", height: 6, background: "var(--border)", borderRadius: 4 }}>
+                  <div style={{ width: `${pct}%`, height: "100%", background: "var(--success)", borderRadius: 4, transition: "width 0.3s" }} />
+                </div>
+              </div>
+            )}
+            <CreditGroupList
+              key={tab}
+              groups={groupsForTab}
+              allCount={allGroups.length}
+              jobs={jobs}
+              categories={categories}
+              onViewInvoice={setShowInvoice}
+              emptyMessage={emptyMessage}
+            />
+          </>
+        )}
+      </div>
+
+      {/* Actions — everything that moves this account's balance. */}
+      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, padding: "12px 18px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
+        {isAdminCashier && (
+          <button onClick={() => setShowCharge(true)} title="Put a manual charge on this account" style={{ ...pill(TONE.muted, true), gap: 5 }}>
+            <CreditCard size={11} />Record Charge
+          </button>
+        )}
+        {account.holderKind === "Dealer" && isAdminCashier && (
+          <button onClick={onCashReturn} title="Hand money back to this dealer" style={{ ...pill(TONE.accent, true), gap: 5 }}>
+            <RotateCcw size={11} />Cash return
+          </button>
+        )}
+        {account.balance > 0 && isAdminCashier && (
+          <button onClick={onWriteOff} title="Give up on collecting this balance" style={{ ...pill(TONE.warning, true), gap: 5 }}>
+            <Undo2 size={11} />Write off
+          </button>
+        )}
+        {account.balance > 0 && (
+          <button
+            onClick={onNotify}
+            disabled={!account.phone || notifyBusy}
+            title={!account.phone ? "No phone number on file — cannot text a reminder" : "Send a payment reminder SMS now"}
+            style={{ ...pill(TONE.accent, true), opacity: !account.phone ? 0.45 : 1, cursor: (!account.phone || notifyBusy) ? "not-allowed" : "pointer" }}
+          >
+            <MessageSquare size={11} />{notifyBusy ? "Sending…" : "Notify"}
+          </button>
+        )}
+        {account.balance > 0 && (
+          <button onClick={onPay} style={{ ...pill(TONE.success, true), fontWeight: 700 }}>
+            <DollarSign size={11} strokeWidth={2.4} />Record Payment
+          </button>
+        )}
+      </div>
 
       {showInvoice && <InvoiceDetail invoiceNo={showInvoice} onClose={() => setShowInvoice(null)} />}
-    </div>
+      {showCharge && (
+        <RecordCreditModal
+          target={{
+            name: account.name,
+            phone: account.phone ?? "",
+            nic: account.nic ?? undefined,
+            email: account.email ?? undefined,
+            address: account.address ?? undefined,
+          }}
+          existingAccountId={account.id}
+          priorBalance={account.balance}
+          onClose={() => setShowCharge(false)}
+          onDone={() => { setShowCharge(false); onChanged(); }}
+        />
+      )}
+    </Modal>
   );
 }
 
@@ -821,7 +1016,7 @@ function OpenAccountModal({ onClose, onDone }: { onClose: () => void; onDone: ()
     setBusy(true); setError(null);
     try {
       const dealer = kind === "Dealer" ? availableDealers.find(d => String(d.id) === dealerId) : null;
-      await openCreditAccount({
+      const acct = await openCreditAccount({
         holderKind: kind,
         name: kind === "Dealer" ? (dealer?.name ?? "Dealer") : name,
         phone: kind === "Dealer" ? (dealer?.contact ?? "") : phone,
@@ -831,6 +1026,16 @@ function OpenAccountModal({ onClose, onDone }: { onClose: () => void; onDone: ()
         creditLimit: limitAmt,
         termsDays: parseInt(terms, 10) || 30,
       });
+      // Customers only — a dealer's account is settled through the dealer
+      // relationship, not texted like a consumer credit line (same split the
+      // reminder cron uses).
+      if (kind === "Customer" && acct.phone) {
+        void sendSms({
+          to: acct.phone,
+          message: renderCreditAccountOpened({ name: acct.name, creditLimit: limitAmt }),
+          accountId: acct.id, purpose: CREDIT_OPENED_PURPOSE,
+        }).catch(() => {});
+      }
       toast.success("Credit account opened");
       onDone();
     } catch (e) {
@@ -923,15 +1128,45 @@ export default function CreditCustomers() {
   // much the shop is willing to lose. Taking a payment is not, so it stays open
   // to every cashier.
   const { isAdminCashier } = useMyPermissions();
+  const toast = useToast();
+
+  // Which account is mid-send, so the button can say "Sending…" and not be
+  // pressed twice for the same account while it's in flight — nothing
+  // stops two different accounts being notified at once.
+  const [notifyBusyId, setNotifyBusyId] = useState<string | null>(null);
+
+  /**
+   * Send one credit-reminder SMS right now, independent of the daily cron
+   * (api/cron/credit-reminders) that runs the same message on schedule.
+   * Same shared wording (lib/sms/creditReminders) and same /api/sms/send
+   * route, so a manual send and the automatic one are indistinguishable in
+   * the log except for who's named as the sender.
+   */
+  const notify = async (a: CreditAccount) => {
+    if (!a.phone) { toast.error("No phone number on file for this account."); return; }
+    if (a.balance <= 0) { toast.error("Nothing is owed on this account."); return; }
+    const message = renderCreditReminder(a);
+    if (!message) { toast.error("Could not work out a due date for this account."); return; }
+
+    setNotifyBusyId(a.id);
+    try {
+      const result = await sendSms({ to: a.phone, message, accountId: a.id, purpose: CREDIT_REMINDER_PURPOSE });
+      if (result.ok) toast.success(`Reminder sent to ${a.name}`);
+      else toast.error(result.error ?? "Failed to send the reminder.");
+    } finally {
+      setNotifyBusyId(null);
+    }
+  };
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CreditStatus | "All">("All");
   const [kindFilter, setKindFilter] = useState<HolderKind | "All">("All");
   const [searchFocused, setSearchFocused] = useState(false);
   const [payTarget, setPayTarget] = useState<CreditAccount | null>(null);
-  // Which account's history is open. One at a time: two expanded rows push the
-  // rest of the table off screen and the point is to compare against it.
-  const [openHistory, setOpenHistory] = useState<string | null>(null);
+  // Which account's management view is open. One at a time: the detail view
+  // is a full modal, so there is never a reason for a second one to stack
+  // behind it.
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [offTarget, setOffTarget] = useState<CreditAccount | null>(null);
   const [retTarget, setRetTarget] = useState<CreditAccount | null>(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -973,6 +1208,12 @@ export default function CreditCustomers() {
   ];
 
   const refresh = () => { void reload(); setPayTarget(null); setOffTarget(null); setRetTarget(null); setShowAdd(false); };
+
+  // The account behind the open detail view, read fresh off `accounts` each
+  // render — so a payment recorded from inside it shows up there the moment
+  // reload() resolves, rather than the view holding a stale snapshot from
+  // whenever it was opened.
+  const detailAccount = detailId ? accounts.find(a => a.id === detailId) ?? null : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, flex: 1, minHeight: 0 }}>
@@ -1117,12 +1358,12 @@ export default function CreditCustomers() {
               const StatusIcon = sc.icon;
               const pct = a.totalCharged > 0 ? Math.round((a.totalPaid / a.totalCharged) * 100) : 0;
               const over = isOverLimit(a) && a.balance > 0;
-              const open = openHistory === a.id;
+              const open = detailId === a.id;
               return (
-                <Fragment key={a.id}>
                 <tr
+                  key={a.id}
                   style={{
-                    borderBottom: open || i < rows.length - 1 ? "1px solid var(--border)" : "none",
+                    borderBottom: i < rows.length - 1 ? "1px solid var(--border)" : "none",
                     transition: "background 0.15s",
                     background: open ? "var(--bg-card-hover)" : "transparent",
                   }}
@@ -1192,14 +1433,16 @@ export default function CreditCustomers() {
                   </td>
                   <td style={{ padding: "14px 16px" }}>
                     <div style={{ display: "flex", gap: 6 }}>
+                      {/* Everything else — Notify, Write off, Cash return —
+                          moved into the detail view below. Two actions at a
+                          glance is a table; five was a form pretending to be
+                          one. */}
                       <button
-                        onClick={() => setOpenHistory(open ? null : a.id)}
-                        title={open ? "Hide credit history" : "Show credit history"}
-                        aria-expanded={open}
-                        style={{ ...pill(open ? TONE.accent : TONE.muted, true), gap: 3, padding: "0 9px" }}
+                        onClick={() => setDetailId(a.id)}
+                        title="Open account details"
+                        style={{ ...pill(open ? TONE.accent : TONE.muted, true), gap: 5 }}
                       >
-                        <History size={11} />History
-                        <ChevronDown size={11} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.18s" }} />
+                        <History size={11} />Details
                       </button>
                       {/* The one action a cashier comes here to take, so it
                           keeps a label — but in the accent, like "view details"
@@ -1209,42 +1452,31 @@ export default function CreditCustomers() {
                           <DollarSign size={11} strokeWidth={2.4} />Pay
                         </button>
                       )}
-                      {/* Dealers only. A walk-in's advance is refunded from
-                          the job it was taken on, where the amount is known
-                          and can be capped — not from a balance screen. */}
-                      {/* Words, not just icons. A circular arrow and a bent
-                          arrow next to each other are two ways of undoing
-                          something, and which one hands money back is not
-                          guessable — nor is it a guess anybody should be
-                          making on a screen that moves money. */}
-                      {a.holderKind === "Dealer" && isAdminCashier && (
-                        <button onClick={() => setRetTarget(a)} title="Hand money back to this dealer" style={{ ...pill(TONE.accent, true), gap: 5 }}>
-                          <RotateCcw size={11} />Cash return
-                        </button>
-                      )}
-                      {a.balance > 0 && isAdminCashier && (
-                        <button onClick={() => setOffTarget(a)} title="Give up on collecting this balance" style={{ ...pill(TONE.warning, true), gap: 5 }}>
-                          <Undo2 size={11} />Write off
-                        </button>
-                      )}
                     </div>
                   </td>
                 </tr>
-
-                {open && (
-                  <tr style={{ borderBottom: i < rows.length - 1 ? "1px solid var(--border)" : "none" }}>
-                    <td colSpan={8} style={{ padding: 0, background: "var(--bg-secondary)" }}>
-                      <CreditHistoryList account={a} />
-                    </td>
-                  </tr>
-                )}
-                </Fragment>
               );
             })}
           </tbody>
         </table>
       </div>
 
+      {/* Rendered before Pay/Write off/Cash return so that when one of those
+          is opened from the detail view's own action bar, its portal mounts
+          after — and so stacks above — the detail modal behind it. */}
+      {detailAccount && (
+        <CreditAccountDetail
+          account={detailAccount}
+          onClose={() => setDetailId(null)}
+          isAdminCashier={isAdminCashier}
+          onPay={() => setPayTarget(detailAccount)}
+          onNotify={() => void notify(detailAccount)}
+          notifyBusy={notifyBusyId === detailAccount.id}
+          onWriteOff={() => setOffTarget(detailAccount)}
+          onCashReturn={() => setRetTarget(detailAccount)}
+          onChanged={() => void reload()}
+        />
+      )}
       {payTarget  && <RecordPaymentModal account={payTarget}  onClose={() => setPayTarget(null)}  onDone={refresh} />}
       {offTarget  && <WriteOffModal      account={offTarget}  onClose={() => setOffTarget(null)}  onDone={refresh} />}
       {retTarget  && <CashReturnModal    account={retTarget}  onClose={() => setRetTarget(null)}  onDone={refresh} />}

@@ -1,17 +1,18 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect, useCallback, type Dispatch, type SetStateAction } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
   Smartphone, Package, AlertTriangle, XCircle,
   Plus, Search, Edit2, Trash2, X, Check,
   BarChart3, ArrowUpCircle, ArrowDownCircle, Sliders,
-  ChevronDown, ChevronRight, ShieldAlert, Truck, Tag, CornerDownRight, Wrench,
+  ChevronDown, ChevronRight, ShieldAlert, Truck, Tag, CornerDownRight, Wrench, Layers,
 } from "lucide-react";
 import StockReceiving from "./StockReceiving";
 import { useInventory, type Category, type Subcategory } from "@/cashier/contexts/InventoryContext";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
+import { useDevices, type DeviceRecord } from "@/cashier/contexts/DevicesContext";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import { useToast } from "@/lib/ui/toast";
@@ -20,21 +21,7 @@ import RepairPartsManager from "@/admin/components/inventory/RepairPartsManager"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface DeviceItem {
-  id: number;
-  imei: string;
-  name: string;
-  brand: string;
-  storage: string;
-  color: string;
-  buyingPrice: number;
-  minSellingPrice: number;
-  suggestedPrice: number;
-  supplier: string;
-  addedDate: string;
-  status: "available" | "sold" | "reserved";
-  notes: string;
-}
+type DeviceItem = DeviceRecord;
 
 interface ApprovalRequest {
   entityType: "category" | "subcategory" | "brand" | "supplier";
@@ -47,14 +34,36 @@ interface ApprovalRequest {
 
 type InventoryTab = "Overview" | "Mobile Devices" | "Accessories" | "Repair Parts" | "Stock Receiving";
 
-// ─── Initial Data ─────────────────────────────────────────────────────────────
-
-const INITIAL_DEVICES: DeviceItem[] = [];
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const Rs = (n: number) => `Rs.${n.toLocaleString()}`;
 const marginPct = (buy: number, sell: number) => (buy > 0 ? Math.round(((sell - buy) / buy) * 100) : 0);
+
+// ─── Mobile Devices grouping helpers ───────────────────────────────────────────
+// Several physical units (each its own IMEI) can be the same phone model,
+// bought in one Bulk Add batch or restocked later. These fields are what
+// makes two units "the same model" for display — price/supplier are
+// deliberately excluded so a later restock at a different cost doesn't
+// splinter the group.
+function deviceGroupKey(d: DeviceRecord): string {
+  return [d.brand, d.modelNumber, d.name, d.storage, d.ram, d.color]
+    .map(s => (s ?? "").trim().toLowerCase())
+    .join("|||");
+}
+
+/** Min/max across a group's units for a numeric field — `uniform` is true when every unit agrees. */
+function numRange(units: DeviceRecord[], get: (d: DeviceRecord) => number) {
+  const vals = units.map(get);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  return { uniform: min === max, value: vals[0], min, max };
+}
+
+/** Distinct values across a group's units for a text field — `uniform` is true when every unit agrees. */
+function strUniform(units: DeviceRecord[], get: (d: DeviceRecord) => string) {
+  const distinct = Array.from(new Set(units.map(u => get(u).trim())));
+  return { uniform: distinct.length <= 1, value: distinct[0] ?? "", distinct };
+}
 
 const inputStyle: React.CSSProperties = {
   background: "var(--bg-surface)", border: "1px solid var(--border)",
@@ -260,6 +269,189 @@ function ComboField({ label, value, onChange, options, entityType, onNewRequest,
       {!error && !isActuallyDisabled && options.length === 0 && (
         <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>No {entityLabel.toLowerCase()}s — type a name to add one</div>
       )}
+    </div>
+  );
+}
+
+// ─── Model Number autofill ──────────────────────────────────────────────────
+
+/** The fields a model number carries besides the three per-unit identifiers
+ *  (IMEI, IMEI 2, serial number) — those stay per-unit and are never part of
+ *  this lookup or auto-filled from it. */
+interface ModelSpecs {
+  brand: string;
+  name: string;
+  storage: string;
+  ram: string;
+  color: string;
+  buyingPrice: number;
+  suggestedPrice: number;
+  minSellingPrice: number;
+  supplier: string;
+}
+
+/** True when `a` was added more recently than `b` — by addedDate, tie-broken
+ *  by the higher numeric id as a proxy for insertion order when two devices
+ *  share a date. */
+function isMoreRecentDevice(a: DeviceItem, b: DeviceItem): boolean {
+  if (a.addedDate !== b.addedDate) return a.addedDate > b.addedDate;
+  return a.id > b.id;
+}
+
+/**
+ * Model numbers aren't a reference table like brand/category/supplier — they
+ * are whatever has already been typed into existing devices. This derives a
+ * lookup from model number (trimmed, case-insensitive) to the shared specs of
+ * the most recently added device carrying that model number, so re-stocking
+ * a model you've entered before can fill in brand/name/storage/etc. from
+ * what was saved last time instead of retyping it.
+ *
+ * Devices with a blank model number contribute nothing to the lookup.
+ */
+function useModelSpecs(devices: DeviceItem[]): { options: string[]; specsByKey: Map<string, ModelSpecs> } {
+  return useMemo(() => {
+    const bestByKey = new Map<string, DeviceItem>();
+    for (const d of devices) {
+      const raw = d.modelNumber.trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      const existing = bestByKey.get(key);
+      if (!existing || isMoreRecentDevice(d, existing)) bestByKey.set(key, d);
+    }
+
+    const specsByKey = new Map<string, ModelSpecs>();
+    const options: string[] = [];
+    for (const [key, d] of bestByKey) {
+      options.push(d.modelNumber.trim());
+      specsByKey.set(key, {
+        brand: d.brand, name: d.name, storage: d.storage, ram: d.ram, color: d.color,
+        buyingPrice: d.buyingPrice, suggestedPrice: d.suggestedPrice, minSellingPrice: d.minSellingPrice,
+        supplier: d.supplier,
+      });
+    }
+    options.sort((a, b) => a.localeCompare(b));
+
+    return { options, specsByKey };
+  }, [devices]);
+}
+
+interface ModelNumberFieldProps {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  specsByKey: Map<string, ModelSpecs>;
+  /** Called with the matched model's stored specs when the user picks a
+   *  suggestion, or blurs the field with a value that exactly (case-
+   *  insensitively) matches a known model number. Omit to disable auto-fill
+   *  entirely (e.g. while editing an existing device, where overwriting its
+   *  already-saved fields would be a destructive surprise). */
+  onAutoFill?: (specs: ModelSpecs) => void;
+  disabled?: boolean;
+  error?: string;
+}
+
+/**
+ * A plain-text input with a filtered suggestion dropdown of model numbers
+ * already seen on existing devices — same visual language and portal
+ * positioning as ComboField's dropdown, but without its "is this new?"
+ * approval prompt: a brand-new model number is always valid as typed, so
+ * there is nothing here to gate.
+ */
+function ModelNumberField({ label, value, onChange, options, specsByKey, onAutoFill, disabled, error }: ModelNumberFieldProps) {
+  const [open, setOpen] = useState(false);
+  const [dropPos, setDropPos] = useState({ top: 0, left: 0, width: 0 });
+  const inputRef = useRef<HTMLInputElement>(null);
+  const justSelected = useRef(false);
+
+  const filtered = useMemo(() => {
+    if (!value.trim()) return options;
+    const q = value.toLowerCase();
+    return options.filter(o => o.toLowerCase().includes(q));
+  }, [value, options]);
+
+  function openDrop() {
+    const rect = inputRef.current?.getBoundingClientRect();
+    if (rect) setDropPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    setOpen(true);
+  }
+
+  function tryAutoFill(typed: string) {
+    const specs = specsByKey.get(typed.trim().toLowerCase());
+    if (specs) onAutoFill?.(specs);
+  }
+
+  function handleBlur() {
+    setTimeout(() => {
+      if (justSelected.current) { justSelected.current = false; return; }
+      setOpen(false);
+      tryAutoFill(inputRef.current?.value ?? "");
+    }, 150);
+  }
+
+  function selectOption(opt: string) {
+    justSelected.current = true;
+    onChange(opt);
+    setOpen(false);
+    tryAutoFill(opt);
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      <label style={labelStyle}>{label}</label>
+      <div style={{ position: "relative" }}>
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          onFocus={openDrop}
+          onBlur={handleBlur}
+          disabled={disabled}
+          style={{
+            ...inputStyle, paddingRight: 32,
+            borderColor: error ? "#dc2626" : "var(--border)",
+            opacity: disabled ? 0.45 : 1,
+            cursor: disabled ? "not-allowed" : "text",
+          }}
+        />
+        <ChevronDown size={14} style={{
+          position: "absolute", right: 10, top: "50%",
+          transform: `translateY(-50%) rotate(${open ? 180 : 0}deg)`,
+          color: "var(--text-muted)", pointerEvents: "none", transition: "transform 0.15s",
+        }} />
+      </div>
+
+      {open && filtered.length > 0 && createPortal(
+        <div style={{
+          position: "fixed", top: dropPos.top, left: dropPos.left, width: dropPos.width,
+          zIndex: 1200,
+          background: "var(--bg-card)", border: "1px solid var(--border)",
+          borderRadius: 8, maxHeight: 160, overflowY: "auto",
+          boxShadow: "0 4px 24px rgba(0,0,0,0.25)",
+          fontFamily: "'Plus Jakarta Sans', sans-serif",
+        }}>
+          {filtered.map(opt => (
+            <div
+              key={opt}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => selectOption(opt)}
+              style={{
+                padding: "9px 14px", fontSize: 13, cursor: "pointer",
+                color: opt === value ? "var(--accent)" : "var(--text-primary)",
+                background: opt === value ? "var(--accent-dim)" : "transparent",
+              }}
+              onMouseEnter={e => { if (opt !== value) (e.currentTarget as HTMLDivElement).style.background = "var(--bg-surface)"; }}
+              onMouseLeave={e => { if (opt !== value) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+            >
+              {opt}
+            </div>
+          ))}
+        </div>,
+        document.body
+      )}
+
+      {error && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{error}</div>}
     </div>
   );
 }
@@ -585,14 +777,15 @@ function AdminApprovalModal({ request, onEntityAdded, onClose }: {
   onClose: () => void;
 }) {
   const { adminCredentials, brands, categories, addCategory, addSubcategory, addBrand, addSupplier } = useInventory();
-  // A signed-in Admin already proved who they are at login — asking them to
-  // re-type a second, separate admin password here is friction with no
-  // security benefit. Only non-Admin roles (Cashier, Technician, ...) need
-  // to hand this off to someone who can.
+  // Admin and Cashier are both trusted to add a new brand/category/supplier
+  // on their own login — asking them to re-type a second, separate admin
+  // password here is friction with no security benefit. Only roles that
+  // don't manage inventory (Technician, Accounts, POS Cashier) still hand
+  // this off to someone who can.
   const { can } = useAuth();
-  const isAdmin = can("Admin");
+  const canSkipApproval = can("Admin", "Cashier");
 
-  const [step, setStep] = useState<"auth" | "add">(isAdmin ? "add" : "auth");
+  const [step, setStep] = useState<"auth" | "add">(canSkipApproval ? "add" : "auth");
   const [authUser, setAuthUser] = useState("");
   const [authPass, setAuthPass] = useState("");
   const [authError, setAuthError] = useState("");
@@ -867,15 +1060,21 @@ function DeleteConfirmModal({ name, onConfirm, onClose }: {
 
 // ─── Add / Edit Device Modal ──────────────────────────────────────────────────
 
-function AddEditDeviceModal({ device, onSave, onClose }: {
-  device: DeviceItem | null; onSave: (d: DeviceItem) => void; onClose: () => void;
+function AddEditDeviceModal({ device, devices, onSave, onClose }: {
+  device: DeviceItem | null; devices: DeviceItem[]; onSave: (d: DeviceItem) => Promise<unknown>; onClose: () => void;
 }) {
   const { brands, suppliers } = useInventory();
-  const blank: DeviceItem = { id: 0, imei: "", name: "", brand: "", storage: "", color: "", buyingPrice: 0, minSellingPrice: 0, suggestedPrice: 0, supplier: "", addedDate: new Date().toISOString().slice(0, 10), status: "available", notes: "" };
+  const blank: DeviceItem = {
+    id: 0, imei: "", imei2: "", serialNumber: "", name: "", modelNumber: "", brand: "",
+    storage: "", ram: "", color: "", buyingPrice: 0, minSellingPrice: 0, suggestedPrice: 0,
+    supplier: "", addedDate: new Date().toISOString().slice(0, 10), status: "available", notes: "",
+  };
   const [form, setForm] = useState<DeviceItem>(device ?? blank);
   const [errors, setErrors] = useState<Partial<Record<keyof DeviceItem, string>>>({});
   const [approvalReq, setApprovalReq] = useState<ApprovalRequest | null>(null);
   const [anyMismatch, setAnyMismatch] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const set = (k: keyof DeviceItem, v: string | number) => setForm(f => ({ ...f, [k]: v }));
 
@@ -896,6 +1095,28 @@ function AddEditDeviceModal({ device, onSave, onClose }: {
   function handleEntityAdded(entityType: ApprovalRequest["entityType"], name: string) {
     if (entityType === "brand") setForm(f => ({ ...f, brand: name, supplier: "" }));
     else if (entityType === "supplier") setForm(f => ({ ...f, supplier: name }));
+  }
+
+  // Re-stocking a model that already exists: pick its model number once and
+  // pull the rest of its spec sheet from the most recently added device that
+  // carries it. IMEI / IMEI 2 / serial number are per-unit and never touched
+  // here. Editing an existing device never auto-fills — a model number that
+  // happens to match another device is not license to overwrite fields this
+  // device already has saved.
+  const modelSpecs = useModelSpecs(devices);
+  function applyModelAutoFill(specs: ModelSpecs) {
+    setForm(f => ({
+      ...f,
+      brand: specs.brand,
+      name: specs.name,
+      storage: specs.storage,
+      ram: specs.ram,
+      color: specs.color,
+      buyingPrice: specs.buyingPrice,
+      suggestedPrice: specs.suggestedPrice,
+      minSellingPrice: specs.minSellingPrice,
+      supplier: specs.supplier,
+    }));
   }
 
   function validate() {
@@ -937,9 +1158,12 @@ function AddEditDeviceModal({ device, onSave, onClose }: {
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><X size={18} /></button>
         </div>
         <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
-          {field("IMEI Number", "imei", "text", "15-digit IMEI")}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            {field("Device Name / Model", "name", "text", "e.g. iPhone 15 Pro")}
+            {field("IMEI Number", "imei")}
+            {field("IMEI 2 (optional)", "imei2")}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            {field("Device Name / Model", "name")}
             <ComboField
               label="Brand"
               value={form.brand}
@@ -953,9 +1177,23 @@ function AddEditDeviceModal({ device, onSave, onClose }: {
             />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            {field("Storage", "storage", "text", "e.g. 256GB")}
-            {field("Color", "color", "text", "e.g. Natural Titanium")}
+            {field("Serial Number (optional)", "serialNumber")}
+            <ModelNumberField
+              label="Model Number (optional)"
+              value={form.modelNumber}
+              onChange={v => set("modelNumber", v)}
+              options={modelSpecs.options}
+              specsByKey={modelSpecs.specsByKey}
+              disabled={anyMismatch}
+              error={errors.modelNumber}
+              onAutoFill={device === null ? applyModelAutoFill : undefined}
+            />
           </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            {field("Storage", "storage")}
+            {field("RAM (optional)", "ram")}
+          </div>
+          {field("Color", "color")}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
             {field("Buying Price (Rs.)", "buyingPrice", "number")}
             {field("Min Selling Price (Rs.)", "minSellingPrice", "number")}
@@ -985,14 +1223,453 @@ function AddEditDeviceModal({ device, onSave, onClose }: {
           </div>
           <div>
             <label style={labelStyle}>Notes (optional)</label>
-            <textarea value={form.notes} onChange={e => set("notes", e.target.value)} placeholder="Any notes about this device…" rows={2} disabled={anyMismatch} style={{ ...inputStyle, resize: "vertical", opacity: anyMismatch ? 0.45 : 1 }} />
+            <textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} disabled={anyMismatch} style={{ ...inputStyle, resize: "vertical", opacity: anyMismatch ? 0.45 : 1 }} />
           </div>
         </div>
-        <div style={{ padding: "16px 24px 20px", borderTop: "1px solid var(--border)", display: "flex", gap: 10, justifyContent: "flex-end", position: "sticky", bottom: 0, background: "var(--bg-card)" }}>
-          <button onClick={onClose} style={{ padding: "9px 20px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
-          <button onClick={() => { if (!anyMismatch && validate()) onSave({ ...form, id: form.id || Date.now() }); }} disabled={anyMismatch} style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: anyMismatch ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", opacity: anyMismatch ? 0.5 : 1 }}>
-            {device ? "Save Changes" : "Add Device"}
-          </button>
+        <div style={{ padding: "16px 24px 20px", borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 10, position: "sticky", bottom: 0, background: "var(--bg-card)" }}>
+          {saveError && <div style={{ fontSize: 12, color: "#dc2626" }}>{saveError}</div>}
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <button onClick={onClose} style={{ padding: "9px 20px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
+            <button
+              onClick={async () => {
+                if (anyMismatch || saving || !validate()) return;
+                setSaving(true);
+                setSaveError(null);
+                try {
+                  await onSave({ ...form, id: form.id || 0 });
+                  onClose();
+                } catch (e) {
+                  setSaveError(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              disabled={anyMismatch || saving}
+              style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: anyMismatch || saving ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", opacity: anyMismatch || saving ? 0.5 : 1 }}
+            >
+              {saving ? "Saving…" : device ? "Save Changes" : "Add Device"}
+            </button>
+          </div>
+        </div>
+      </div>
+      {approvalReq && (
+        <AdminApprovalModal
+          request={approvalReq}
+          onEntityAdded={handleEntityAdded}
+          onClose={() => setApprovalReq(null)}
+        />
+      )}
+    </div>,
+    document.body
+  );
+}
+
+// ─── Bulk Add Devices Modal ───────────────────────────────────────────────────
+
+/** Every AddEditDeviceModal field except the three per-unit identifiers. */
+type BulkSharedSpecs = Omit<DeviceItem, "id" | "imei" | "imei2" | "serialNumber">;
+
+interface BulkRow {
+  /** Stable identity for React keys and for matching save results back to a
+   *  row — independent of array position, which shifts as rows are added,
+   *  removed, or dropped after a successful save. */
+  key: number;
+  imei: string;
+  imei2: string;
+  serialNumber: string;
+  error?: string;
+}
+
+const BULK_INITIAL_ROWS = 3;
+
+function makeBulkRow(key: number): BulkRow {
+  return { key, imei: "", imei2: "", serialNumber: "" };
+}
+
+function BulkAddDevicesModal({ devices, saveDevice, onClose }: {
+  devices: DeviceItem[];
+  saveDevice: (d: DeviceItem) => Promise<DeviceItem>;
+  onClose: () => void;
+}) {
+  const { brands, suppliers } = useInventory();
+
+  const blankShared: BulkSharedSpecs = {
+    name: "", modelNumber: "", brand: "", storage: "", ram: "", color: "",
+    buyingPrice: 0, minSellingPrice: 0, suggestedPrice: 0,
+    supplier: "", addedDate: new Date().toISOString().slice(0, 10), status: "available", notes: "",
+  };
+  const [shared, setShared] = useState<BulkSharedSpecs>(blankShared);
+  const [sharedErrors, setSharedErrors] = useState<Partial<Record<keyof BulkSharedSpecs, string>>>({});
+  const [approvalReq, setApprovalReq] = useState<ApprovalRequest | null>(null);
+  const [anyMismatch, setAnyMismatch] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveSummary, setSaveSummary] = useState<string | null>(null);
+
+  const nextKeyRef = useRef(BULK_INITIAL_ROWS);
+  const [rows, setRows] = useState<BulkRow[]>(() => Array.from({ length: BULK_INITIAL_ROWS }, (_, i) => makeBulkRow(i)));
+
+  const setSharedField = (k: keyof BulkSharedSpecs, v: string | number) => setShared(s => ({ ...s, [k]: v }));
+
+  const deviceBrands = useMemo(
+    () => brands.filter(b => b.type === "device" || b.type === "both").map(b => b.name).sort(),
+    [brands]
+  );
+  const selectedBrandObj = useMemo(() => brands.find(b => b.name === shared.brand), [brands, shared.brand]);
+  const deviceSuppliers = useMemo(
+    () => suppliers
+      .filter(s => !selectedBrandObj || s.brandIds.length === 0 || s.brandIds.includes(selectedBrandObj.id))
+      .map(s => s.name).sort(),
+    [suppliers, selectedBrandObj]
+  );
+
+  function handleBrandChange(v: string) { setShared(s => ({ ...s, brand: v, supplier: "" })); }
+
+  function handleEntityAdded(entityType: ApprovalRequest["entityType"], name: string) {
+    if (entityType === "brand") setShared(s => ({ ...s, brand: name, supplier: "" }));
+    else if (entityType === "supplier") setShared(s => ({ ...s, supplier: name }));
+  }
+
+  // The primary use case for this form: re-stocking a model already entered
+  // before. Picking its model number once pulls the rest of the shared specs
+  // from the most recently added device carrying it, feeding every row in
+  // this batch. Per-unit IMEI / IMEI 2 / serial number are untouched.
+  const modelSpecs = useModelSpecs(devices);
+  function applyModelAutoFill(specs: ModelSpecs) {
+    setShared(s => ({
+      ...s,
+      brand: specs.brand,
+      name: specs.name,
+      storage: specs.storage,
+      ram: specs.ram,
+      color: specs.color,
+      buyingPrice: specs.buyingPrice,
+      suggestedPrice: specs.suggestedPrice,
+      minSellingPrice: specs.minSellingPrice,
+      supplier: specs.supplier,
+    }));
+  }
+
+  function validateShared() {
+    const e: typeof sharedErrors = {};
+    if (!shared.name.trim()) e.name = "Device name is required";
+    if (!shared.brand.trim()) e.brand = "Brand is required";
+    if (!shared.supplier.trim()) e.supplier = "Supplier is required";
+    if (shared.buyingPrice <= 0) e.buyingPrice = "Must be greater than 0";
+    if (shared.minSellingPrice < shared.buyingPrice) e.minSellingPrice = "Must be ≥ buying price";
+    setSharedErrors(e);
+    return Object.keys(e).length === 0;
+  }
+
+  const sharedField = (label: string, key: keyof BulkSharedSpecs, type = "text") => (
+    <div>
+      <label style={labelStyle}>{label}</label>
+      <input
+        type={type}
+        value={shared[key] as string | number}
+        onChange={e => setSharedField(key, type === "number" ? Number(e.target.value) : e.target.value)}
+        disabled={anyMismatch}
+        style={{ ...inputStyle, borderColor: sharedErrors[key] ? "#dc2626" : "var(--border)", opacity: anyMismatch ? 0.45 : 1, cursor: anyMismatch ? "not-allowed" : undefined }}
+      />
+      {sharedErrors[key] && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{sharedErrors[key]}</div>}
+    </div>
+  );
+
+  function updateRow(key: number, patch: Partial<Pick<BulkRow, "imei" | "imei2" | "serialNumber">>) {
+    setRows(prev => prev.map(r => (r.key === key ? { ...r, ...patch, error: undefined } : r)));
+  }
+
+  function removeRow(key: number) {
+    setRows(prev => prev.filter(r => r.key !== key));
+  }
+
+  function addRow() {
+    setRows(prev => [...prev, makeBulkRow(nextKeyRef.current++)]);
+  }
+
+  /**
+   * Pasting a multi-line IMEI list (copied from a spreadsheet or a supplier's
+   * packing slip) into any IMEI field spreads one value per row — starting at
+   * the row pasted into and spilling into new rows as needed — instead of
+   * dumping the whole block into a single input. A single-line paste is left
+   * to the browser's normal paste behaviour.
+   */
+  function handleImeiPaste(e: React.ClipboardEvent<HTMLInputElement>, rowKey: number) {
+    const text = e.clipboardData.getData("text");
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length <= 1) return;
+    e.preventDefault();
+    setRows(prev => {
+      const next = [...prev];
+      const startIdx = next.findIndex(r => r.key === rowKey);
+      const base = startIdx === -1 ? next.length : startIdx;
+      for (let i = 0; i < lines.length; i++) {
+        const idx = base + i;
+        if (idx < next.length) next[idx] = { ...next[idx], imei: lines[i], error: undefined };
+        else next.push({ ...makeBulkRow(nextKeyRef.current++), imei: lines[i] });
+      }
+      return next;
+    });
+  }
+
+  /**
+   * Per-row validation plus within-batch duplicate detection (on IMEI, IMEI 2,
+   * and serial number). Fully-empty trailing rows are skipped rather than
+   * flagged. Returns the row list with `error` populated and the subset that
+   * is ready to save.
+   */
+  function validateAndPrepareRows(current: BulkRow[]) {
+    const imeiSeen = new Map<string, number>();
+    const imei2Seen = new Map<string, number>();
+    const serialSeen = new Map<string, number>();
+    const attempted: number[] = [];
+
+    current.forEach((r, i) => {
+      if (!r.imei.trim() && !r.imei2.trim() && !r.serialNumber.trim()) return;
+      attempted.push(i);
+      const imei = r.imei.trim();
+      if (imei) imeiSeen.set(imei, (imeiSeen.get(imei) ?? 0) + 1);
+      const imei2 = r.imei2.trim();
+      if (imei2) imei2Seen.set(imei2, (imei2Seen.get(imei2) ?? 0) + 1);
+      const serial = r.serialNumber.trim();
+      if (serial) serialSeen.set(serial, (serialSeen.get(serial) ?? 0) + 1);
+    });
+
+    const attemptedSet = new Set(attempted);
+    const updated = current.map((r, i) => {
+      if (!attemptedSet.has(i)) return r.error ? { ...r, error: undefined } : r;
+      const imei = r.imei.trim();
+      let error: string | undefined;
+      if (!imei) error = "IMEI is required";
+      else if (!/^\d{15}$/.test(imei)) error = "IMEI must be exactly 15 digits";
+      else if ((imeiSeen.get(imei) ?? 0) > 1) error = "Duplicate IMEI within this batch";
+      if (!error && r.imei2.trim() && (imei2Seen.get(r.imei2.trim()) ?? 0) > 1) error = "Duplicate IMEI 2 within this batch";
+      if (!error && r.serialNumber.trim() && (serialSeen.get(r.serialNumber.trim()) ?? 0) > 1) error = "Duplicate serial number within this batch";
+      return { ...r, error };
+    });
+
+    const toSave = attempted
+      .map(i => ({ row: updated[i], index: i }))
+      .filter(({ row }) => !row.error);
+
+    return { updated, toSave, attempted };
+  }
+
+  async function handleSave() {
+    if (saving || anyMismatch) return;
+    setSaveSummary(null);
+    const sharedOk = validateShared();
+    const { updated, toSave, attempted } = validateAndPrepareRows(rows);
+    setRows(updated);
+    if (!sharedOk) return;
+    if (toSave.length === 0) {
+      if (attempted.length === 0) setSaveSummary("Add at least one row with an IMEI before saving.");
+      return;
+    }
+
+    setSaving(true);
+    const results = await Promise.allSettled(
+      toSave.map(({ row }) =>
+        saveDevice({
+          ...shared,
+          id: 0,
+          imei: row.imei.trim(),
+          imei2: row.imei2.trim(),
+          serialNumber: row.serialNumber.trim(),
+        })
+      )
+    );
+    setSaving(false);
+
+    const attemptedSet = new Set(toSave.map(t => t.index));
+    const failedMessages = new Map<number, string>();
+    let savedCount = 0;
+    results.forEach((res, i) => {
+      const { index } = toSave[i];
+      if (res.status === "fulfilled") savedCount++;
+      else failedMessages.set(index, res.reason instanceof Error ? res.reason.message : String(res.reason));
+    });
+
+    // Every row saved — nothing left to fix, so the batch is done.
+    if (failedMessages.size === 0) {
+      onClose();
+      return;
+    }
+
+    // Drop the rows that saved; keep the failed ones (with their error) and
+    // any untouched blank rows, so the user can fix and retry just the batch
+    // that didn't go through.
+    setRows(prev => prev
+      .map((r, i) => (failedMessages.has(i) ? { ...r, error: failedMessages.get(i) } : r))
+      .filter((r, i) => !attemptedSet.has(i) || failedMessages.has(i)));
+
+    setSaveSummary(
+      savedCount > 0
+        ? `${savedCount} device${savedCount === 1 ? "" : "s"} saved. ${failedMessages.size} row${failedMessages.size === 1 ? "" : "s"} failed — fix the highlighted row${failedMessages.size === 1 ? "" : "s"} below and try again.`
+        : `All ${failedMessages.size} row${failedMessages.size === 1 ? "" : "s"} failed — see the errors below.`
+    );
+  }
+
+  const pendingCount = rows.filter(r => r.imei.trim() || r.imei2.trim() || r.serialNumber.trim()).length;
+
+  return createPortal(
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, width: "100%", maxWidth: 680, maxHeight: "90vh", overflowY: "auto", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+        <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 1 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>Bulk Add Devices</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>Fill in the shared specs once, then list each unit&apos;s IMEI</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><X size={18} /></button>
+        </div>
+
+        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Shared specs</div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <ComboField
+              label="Brand"
+              value={shared.brand}
+              onChange={handleBrandChange}
+              options={deviceBrands}
+              entityType="brand"
+              error={sharedErrors.brand}
+              disabled={anyMismatch}
+              onPromptChange={setAnyMismatch}
+              onNewRequest={v => setApprovalReq({ entityType: "brand", newName: v, suggestedBrandType: "device" })}
+            />
+            {sharedField("Device Name / Model", "name")}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <ModelNumberField
+              label="Model Number (optional)"
+              value={shared.modelNumber}
+              onChange={v => setSharedField("modelNumber", v)}
+              options={modelSpecs.options}
+              specsByKey={modelSpecs.specsByKey}
+              disabled={anyMismatch}
+              error={sharedErrors.modelNumber}
+              onAutoFill={applyModelAutoFill}
+            />
+            {sharedField("Storage", "storage")}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            {sharedField("RAM (optional)", "ram")}
+            {sharedField("Color", "color")}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+            {sharedField("Buying Price (Rs.)", "buyingPrice", "number")}
+            {sharedField("Min Selling Price (Rs.)", "minSellingPrice", "number")}
+            {sharedField("Suggested Price (Rs.)", "suggestedPrice", "number")}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <ComboField
+              label="Supplier"
+              value={shared.supplier}
+              onChange={v => setSharedField("supplier", v)}
+              options={deviceSuppliers}
+              entityType="supplier"
+              error={sharedErrors.supplier}
+              disabled={anyMismatch || !shared.brand}
+              onPromptChange={setAnyMismatch}
+              onNewRequest={v => setApprovalReq({ entityType: "supplier", newName: v, presetBrandName: shared.brand })}
+            />
+            {sharedField("Date Added", "addedDate", "date")}
+          </div>
+          <div>
+            <label style={labelStyle}>Status</label>
+            <select value={shared.status} onChange={e => setSharedField("status", e.target.value)} disabled={anyMismatch} style={{ ...inputStyle, opacity: anyMismatch ? 0.45 : 1, cursor: anyMismatch ? "not-allowed" : undefined }}>
+              <option value="available">Available</option>
+              <option value="reserved">Reserved</option>
+              <option value="sold">Sold</option>
+            </select>
+          </div>
+          <div>
+            <label style={labelStyle}>Notes (optional, applied to every device in this batch)</label>
+            <textarea value={shared.notes} onChange={e => setSharedField("notes", e.target.value)} rows={2} disabled={anyMismatch} style={{ ...inputStyle, resize: "vertical", opacity: anyMismatch ? 0.45 : 1 }} />
+          </div>
+
+          <div style={{ borderTop: "1px solid var(--border)", marginTop: 4, paddingTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Per-unit identifiers</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Tip: paste a multi-line IMEI list into any IMEI field to fill several rows at once</div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 30px", gap: 8 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>IMEI</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>IMEI 2</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Serial Number</span>
+              <span />
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {rows.map(row => (
+                <div key={row.key}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 30px", gap: 8, alignItems: "center" }}>
+                    <input
+                      type="text"
+                      value={row.imei}
+                      onChange={e => updateRow(row.key, { imei: e.target.value })}
+                      onPaste={e => handleImeiPaste(e, row.key)}
+                      disabled={saving}
+                      style={{ ...inputStyle, borderColor: row.error ? "#dc2626" : "var(--border)" }}
+                    />
+                    <input
+                      type="text"
+                      value={row.imei2}
+                      onChange={e => updateRow(row.key, { imei2: e.target.value })}
+                      disabled={saving}
+                      style={inputStyle}
+                    />
+                    <input
+                      type="text"
+                      value={row.serialNumber}
+                      onChange={e => updateRow(row.key, { serialNumber: e.target.value })}
+                      disabled={saving}
+                      style={inputStyle}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeRow(row.key)}
+                      disabled={saving}
+                      title="Remove row"
+                      style={{ background: "none", border: "none", cursor: saving ? "not-allowed" : "pointer", color: "#dc2626", padding: 6, opacity: saving ? 0.4 : 1 }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  {row.error && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{row.error}</div>}
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={addRow}
+              disabled={saving}
+              style={{
+                display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 8,
+                border: "1px dashed var(--border)", background: "transparent", color: "var(--accent)",
+                cursor: saving ? "not-allowed" : "pointer", fontSize: 12.5, fontWeight: 600,
+                fontFamily: "'Plus Jakarta Sans', sans-serif", alignSelf: "flex-start",
+              }}
+            >
+              <Plus size={13} /> Add row
+            </button>
+          </div>
+        </div>
+
+        <div style={{ padding: "16px 24px 20px", borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 10, position: "sticky", bottom: 0, background: "var(--bg-card)" }}>
+          {saveSummary && <div style={{ fontSize: 12, color: "#dc2626", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 8, padding: "8px 12px" }}>{saveSummary}</div>}
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <button onClick={onClose} style={{ padding: "9px 20px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
+            <button
+              onClick={() => { if (!saving) void handleSave(); }}
+              disabled={anyMismatch || saving}
+              style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: anyMismatch || saving ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", opacity: anyMismatch || saving ? 0.5 : 1 }}
+            >
+              {saving ? "Saving…" : `Add ${pendingCount} Device${pendingCount === 1 ? "" : "s"}`}
+            </button>
+          </div>
         </div>
       </div>
       {approvalReq && (
@@ -1471,14 +2148,21 @@ function OverviewTab({ devices, accessories }: { devices: DeviceItem[]; accessor
 
 // ─── Mobile Devices Tab ───────────────────────────────────────────────────────
 
-function MobileDevicesTab({ devices, setDevices }: {
-  devices: DeviceItem[]; setDevices: Dispatch<SetStateAction<DeviceItem[]>>;
+function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevice }: {
+  devices: DeviceItem[];
+  loading: boolean;
+  configured: boolean;
+  saveDevice: (d: DeviceItem) => Promise<DeviceItem>;
+  deleteDevice: (id: number) => Promise<void>;
 }) {
   const isMobile = useIsMobile();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [brandFilter, setBrandFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [editDevice, setEditDevice] = useState<DeviceItem | null | "new">(null);
+  const [bulkAddOpen, setBulkAddOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeviceItem | null>(null);
   const [labelDevice, setLabelDevice] = useState<DeviceItem | null>(null);
 
@@ -1498,14 +2182,80 @@ function MobileDevicesTab({ devices, setDevices }: {
     });
   }, [devices, search, brandFilter, statusFilter]);
 
+  // How many units of each model exist in total (ignoring the active
+  // search/filter) — compared against a group's filtered unit count below to
+  // decide whether that group has units hidden by the current filter, and so
+  // needs to auto-expand rather than bury a match inside a collapsed group.
+  const totalCountsByKey = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const d of devices) {
+      const k = deviceGroupKey(d);
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  }, [devices]);
+
+  // Grouped from the *filtered* list, so a group's unit count always reflects
+  // only what currently matches search/filters, and a model with zero
+  // matching units simply doesn't appear.
+  const groups = useMemo(() => {
+    const map = new Map<string, DeviceItem[]>();
+    for (const d of filtered) {
+      const k = deviceGroupKey(d);
+      const arr = map.get(k);
+      if (arr) arr.push(d); else map.set(k, [d]);
+    }
+    return Array.from(map.entries()).map(([key, units]) => {
+      const first = units[0];
+      return {
+        key,
+        units,
+        name: first.name,
+        modelNumber: first.modelNumber,
+        brand: first.brand,
+        storage: first.storage,
+        ram: first.ram,
+        color: first.color,
+        totalCount: totalCountsByKey.get(key) ?? units.length,
+      };
+    });
+  }, [filtered, totalCountsByKey]);
+
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  function toggleGroup(key: string) {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+  // A group is open if the user opened it manually, or if the active filter
+  // has hidden at least one of its units — a search/filter match must never
+  // be left buried inside a collapsed group.
+  function isGroupOpen(g: { key: string; units: DeviceItem[]; totalCount: number }) {
+    return expandedGroups.has(g.key) || g.units.length < g.totalCount;
+  }
+  const allOpen = groups.length > 0 && groups.every(isGroupOpen);
+  function toggleAllGroups() {
+    setExpandedGroups(allOpen ? new Set() : new Set(groups.map(g => g.key)));
+  }
+
   const available = devices.filter(d => d.status === "available").length;
   const sold = devices.filter(d => d.status === "sold").length;
   const reserved = devices.filter(d => d.status === "reserved").length;
   const stockVal = devices.filter(d => d.status === "available").reduce((s, d) => s + d.buyingPrice, 0);
 
-  function handleSave(d: DeviceItem) {
-    setDevices(prev => prev.find(x => x.id === d.id) ? prev.map(x => x.id === d.id ? d : x) : [...prev, d]);
-    setEditDevice(null);
+  async function handleDelete() {
+    if (!deleteTarget || busy) return;
+    setBusy(true);
+    try {
+      await deleteDevice(deleteTarget.id);
+      setDeleteTarget(null);
+    } catch (e) {
+      toast.dialog("error", "Could not remove device", e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   const statusColors = {
@@ -1542,6 +2292,14 @@ function MobileDevicesTab({ devices, setDevices }: {
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ ...selectStyle, flex: isMobile ? 1 : undefined }}>
             {["All", "Available", "Reserved", "Sold"].map(s => <option key={s}>{s}</option>)}
           </select>
+          {groups.length > 0 && (
+            <button onClick={toggleAllGroups} style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 12.5, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
+              {allOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}{isMobile ? (allOpen ? "Collapse" : "Expand") : (allOpen ? "Collapse all" : "Expand all")}
+            </button>
+          )}
+          <button onClick={() => setBulkAddOpen(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 16px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
+            <Layers size={14} />{isMobile ? "Bulk" : "Bulk Add"}
+          </button>
           <button onClick={() => setEditDevice("new")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 16px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
             <Plus size={14} />{isMobile ? "Add" : "Add Device"}
           </button>
@@ -1553,62 +2311,175 @@ function MobileDevicesTab({ devices, setDevices }: {
           <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
             <thead>
               <tr>
-                {["#", "IMEI", "Device", "Brand", "Storage", "Color", "Buying Price", "Min Selling", "Suggested", "Margin", "Supplier", "Date Added", "Status", ""].map(h => (
+                {[
+                  "#", "Units", "Device", "Model Number", "Brand",
+                  "Storage", "RAM", "Color", "Buying Price", "Min Selling", "Suggested", "Margin",
+                  "Supplier", "Date Added", "Status", "",
+                ].map(h => (
                   <th key={h} style={thStyle}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
-                <tr><td colSpan={14} style={{ ...tdBase, textAlign: "center", padding: 40, color: "var(--text-muted)" }}>No devices match your filters</td></tr>
-              ) : filtered.map((d, i) => {
-                const sc = statusColors[d.status];
-                const m = d.suggestedPrice - d.buyingPrice;
-                const mp = marginPct(d.buyingPrice, d.suggestedPrice);
-                return (
-                  <tr key={d.id} style={{ background: d.status === "sold" ? "var(--bg-surface)" : "transparent", opacity: d.status === "sold" ? 0.7 : 1 }}>
-                    <td style={{ ...tdBase, color: "var(--text-muted)", fontSize: 12 }}>{i + 1}</td>
-                    <td style={{ ...tdBase, fontFamily: "monospace", fontSize: 11.5, letterSpacing: "0.02em" }}>{d.imei}</td>
-                    <td style={{ ...tdBase, fontWeight: 600, whiteSpace: "nowrap" }}>{d.name}</td>
-                    <td style={tdBase}>{d.brand}</td>
-                    <td style={tdBase}>{d.storage}</td>
-                    <td style={tdBase}>{d.color}</td>
-                    <td style={tdBase}>{Rs(d.buyingPrice)}</td>
-                    <td style={tdBase}>{Rs(d.minSellingPrice)}</td>
-                    <td style={{ ...tdBase, fontWeight: 600 }}>{Rs(d.suggestedPrice)}</td>
-                    <td style={{ ...tdBase, color: "#16a34a", fontWeight: 700, whiteSpace: "nowrap" }}>
-                      +{Rs(m)} <span style={{ fontWeight: 400, fontSize: 11, color: "var(--text-muted)" }}>({mp}%)</span>
+              {groups.length === 0 ? (
+                <tr><td colSpan={16} style={{ ...tdBase, textAlign: "center", padding: 40, color: "var(--text-muted)" }}>No devices match your filters</td></tr>
+              ) : groups.flatMap(g => {
+                const open = isGroupOpen(g);
+                const counts = { available: 0, sold: 0, reserved: 0 };
+                for (const u of g.units) counts[u.status]++;
+                const buy = numRange(g.units, u => u.buyingPrice);
+                const minSell = numRange(g.units, u => u.minSellingPrice);
+                const suggested = numRange(g.units, u => u.suggestedPrice);
+                const marginRs = numRange(g.units, u => u.suggestedPrice - u.buyingPrice);
+                const marginPctR = numRange(g.units, u => marginPct(u.buyingPrice, u.suggestedPrice));
+                const marginUniform = marginRs.uniform && marginPctR.uniform;
+                const supplier = strUniform(g.units, u => u.supplier);
+                const stockValue = g.units.filter(u => u.status === "available").reduce((s, u) => s + u.buyingPrice, 0);
+
+                const groupRow = (
+                  <tr
+                    key={`g-${g.key}`}
+                    onClick={() => toggleGroup(g.key)}
+                    style={{
+                      background: open ? "var(--accent-dim)" : "var(--bg-surface)",
+                      boxShadow: open ? "inset 3px 0 0 var(--accent)" : undefined,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <td style={{ ...tdBase, color: "var(--text-muted)" }}>
+                      {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                     </td>
-                    <td style={{ ...tdBase, color: "var(--text-secondary)" }}>{d.supplier}</td>
-                    <td style={{ ...tdBase, color: "var(--text-secondary)", fontSize: 12 }}>{d.addedDate}</td>
                     <td style={tdBase}>
-                      <span style={{ background: sc.bg, color: sc.color, fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, textTransform: "capitalize" }}>{d.status}</span>
+                      <div style={{ fontWeight: 700, fontSize: 12.5 }}>{g.units.length} unit{g.units.length === 1 ? "" : "s"}</div>
+                      {g.units.length < g.totalCount && (
+                        <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 1 }}>of {g.totalCount} total</div>
+                      )}
                     </td>
-                    <td style={{ ...tdBase, width: 96 }}>
-                      <div style={{ display: "flex", gap: 4 }}>
-                        <button onClick={() => setLabelDevice(d)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Print barcode label"><Tag size={14} /></button>
-                        <button onClick={() => setEditDevice(d)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Edit"><Edit2 size={14} /></button>
-                        <button onClick={() => setDeleteTarget(d)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }} title="Delete"><Trash2 size={14} /></button>
+                    <td style={{ ...tdBase, fontWeight: 600, whiteSpace: "nowrap" }}>{g.name}</td>
+                    <td style={{ ...tdBase, color: "var(--text-secondary)", fontSize: 12 }}>{g.modelNumber || "—"}</td>
+                    <td style={tdBase}>{g.brand}</td>
+                    <td style={tdBase}>{g.storage}</td>
+                    <td style={{ ...tdBase, color: "var(--text-secondary)" }}>{g.ram || "—"}</td>
+                    <td style={tdBase}>{g.color}</td>
+                    <td style={tdBase}>{buy.uniform ? Rs(buy.value) : `${Rs(buy.min)} – ${Rs(buy.max)}`}</td>
+                    <td style={tdBase}>{minSell.uniform ? Rs(minSell.value) : `${Rs(minSell.min)} – ${Rs(minSell.max)}`}</td>
+                    <td style={{ ...tdBase, fontWeight: 600 }}>{suggested.uniform ? Rs(suggested.value) : `${Rs(suggested.min)} – ${Rs(suggested.max)}`}</td>
+                    <td style={{ ...tdBase, whiteSpace: "nowrap" }}>
+                      {marginUniform ? (
+                        <span style={{ color: "#16a34a", fontWeight: 700 }}>
+                          +{Rs(marginRs.value)} <span style={{ fontWeight: 400, fontSize: 11, color: "var(--text-muted)" }}>({marginPctR.value}%)</span>
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{marginPctR.min}% – {marginPctR.max}%</span>
+                      )}
+                    </td>
+                    <td style={{ ...tdBase, color: "var(--text-secondary)" }} title={supplier.uniform ? undefined : `Suppliers: ${supplier.distinct.join(", ")}`}>
+                      {supplier.uniform ? (supplier.value || "—") : "Multiple"}
+                    </td>
+                    <td style={{ ...tdBase, color: "var(--text-muted)", fontSize: 12 }}>—</td>
+                    <td style={tdBase}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                        {(["available", "sold", "reserved"] as const).filter(s => counts[s] > 0).map(s => (
+                          <span key={s} style={{ background: statusColors[s].bg, color: statusColors[s].color, fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap" }}>
+                            {counts[s]} {s}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td style={{ ...tdBase, textAlign: "right" }}>
+                      <div style={{ fontSize: 9.5, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Stock Value</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--accent)" }}>{Rs(stockValue)}</div>
+                    </td>
+                  </tr>
+                );
+
+                if (!open) return [groupRow];
+
+                // One card per physical unit, not a full 18-column row repeating
+                // fields the group header above already states — device, brand,
+                // storage, RAM and color are the same for every card here (they're
+                // part of what makes this one group), so each card restates just
+                // enough of them to stand on its own when read in isolation,
+                // alongside what actually varies per unit: IMEI, IMEI 2, serial.
+                const cardsRow = (
+                  <tr key={`g-${g.key}-units`}>
+                    <td colSpan={16} style={{ padding: "12px 16px 16px 44px", background: "var(--bg-primary)" }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                        {g.units.map((d, i) => {
+                          const sc = statusColors[d.status];
+                          return (
+                            <div
+                              key={d.id}
+                              style={{
+                                width: 230, flexShrink: 0, borderRadius: 10,
+                                border: "1px solid var(--border)", background: "var(--bg-card)",
+                                padding: "10px 12px", opacity: d.status === "sold" ? 0.65 : 1,
+                              }}
+                            >
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
+                                <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                                  Device {i + 1}
+                                </span>
+                                <span style={{ background: sc.bg, color: sc.color, fontSize: 9.5, fontWeight: 700, padding: "2px 7px", borderRadius: 20, textTransform: "capitalize" }}>
+                                  {d.status}
+                                </span>
+                              </div>
+
+                              <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 8 }}>
+                                {([
+                                  ["IMEI", d.imei],
+                                  ["IMEI 2", d.imei2 || "—"],
+                                  ["Serial", d.serialNumber || "—"],
+                                ] as const).map(([label, val]) => (
+                                  <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                                    <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>{label}</span>
+                                    <span style={{ fontSize: 11.5, fontFamily: "monospace", color: "var(--text-primary)", textAlign: "right" }}>
+                                      {val}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+
+                              <div style={{ display: "flex", gap: 4, borderTop: "1px solid var(--border)", paddingTop: 7, justifyContent: "flex-end" }}>
+                                <button onClick={() => setLabelDevice(d)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Print barcode label"><Tag size={13} /></button>
+                                <button onClick={() => setEditDevice(d)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Edit"><Edit2 size={13} /></button>
+                                <button onClick={() => setDeleteTarget(d)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }} title="Delete"><Trash2 size={13} /></button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </td>
                   </tr>
                 );
+
+                return [groupRow, cardsRow];
               })}
             </tbody>
           </table>
         </div>
         <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-          {filtered.length} of {devices.length} devices
+          {filtered.length} of {devices.length} devices · {groups.length} model{groups.length === 1 ? "" : "s"}{loading ? " · loading…" : ""}
         </div>
       </div>
 
+      {!configured && (
+        <div style={{ display: "flex", gap: 9, padding: "11px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.4)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          <AlertTriangle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>Connect Supabase to manage devices — nothing here is saved right now.</p>
+        </div>
+      )}
+
       {editDevice !== null && (
-        <AddEditDeviceModal device={editDevice === "new" ? null : editDevice} onSave={handleSave} onClose={() => setEditDevice(null)} />
+        <AddEditDeviceModal device={editDevice === "new" ? null : editDevice} devices={devices} onSave={saveDevice} onClose={() => setEditDevice(null)} />
+      )}
+      {bulkAddOpen && (
+        <BulkAddDevicesModal devices={devices} saveDevice={saveDevice} onClose={() => setBulkAddOpen(false)} />
       )}
       {deleteTarget && (
         <DeleteConfirmModal
           name={`${deleteTarget.name} (${deleteTarget.imei})`}
-          onConfirm={() => { setDevices(prev => prev.filter(x => x.id !== deleteTarget.id)); setDeleteTarget(null); }}
+          onConfirm={() => { if (!busy) void handleDelete(); }}
           onClose={() => setDeleteTarget(null)}
         />
       )}
@@ -1617,6 +2488,11 @@ function MobileDevicesTab({ devices, setDevices }: {
           code={labelDevice.imei}
           title={`${labelDevice.brand} ${labelDevice.name}`.trim()}
           subtitle={`${labelDevice.storage} · ${labelDevice.color}`}
+          variant="device"
+          imei={labelDevice.imei}
+          price={Rs(labelDevice.suggestedPrice)}
+          deviceName={labelDevice.name}
+          modelNumber={labelDevice.modelNumber}
           onClose={() => setLabelDevice(null)}
         />
       )}
@@ -1859,6 +2735,7 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
           code={labelProduct.code}
           title={labelProduct.name}
           subtitle={`${labelProduct.brand} · ${labelProduct.model}`}
+          variant="accessory"
           onClose={() => setLabelProduct(null)}
         />
       )}
@@ -1870,7 +2747,7 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
 
 export default function InventoryManagement() {
   const [tab, setTab] = useState<InventoryTab>("Overview");
-  const [devices, setDevices] = useState<DeviceItem[]>(INITIAL_DEVICES);
+  const { devices, loading: devLoading, configured: devConfigured, saveDevice, deleteDevice } = useDevices();
   const { products: accessories, loading: accLoading, configured: accConfigured, saveProduct, deleteProduct } = useAccessories();
   const isMobile = useIsMobile();
 
@@ -1955,7 +2832,15 @@ export default function InventoryManagement() {
 
       <div className="fade-up fade-up-3" style={{ flex: 1, overflowY: "auto", paddingBottom: 32 }}>
         {tab === "Overview"        && <OverviewTab devices={devices} accessories={accessories} />}
-        {tab === "Mobile Devices"  && <MobileDevicesTab devices={devices} setDevices={setDevices} />}
+        {tab === "Mobile Devices"  && (
+          <MobileDevicesTab
+            devices={devices}
+            loading={devLoading}
+            configured={devConfigured}
+            saveDevice={saveDevice}
+            deleteDevice={deleteDevice}
+          />
+        )}
         {tab === "Accessories"     && <AccessoriesTab accessories={accessories} loading={accLoading} configured={accConfigured} saveProduct={saveProduct} deleteProduct={deleteProduct} />}
         {tab === "Repair Parts"    && <RepairPartsManager />}
         {tab === "Stock Receiving" && <StockReceiving />}

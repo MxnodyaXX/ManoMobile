@@ -9,6 +9,8 @@ import {
 import { useMyPermissions } from "@/lib/settings/staffRules";
 import { useToast } from "@/lib/ui/toast";
 import { cleanPhone, phoneIssue, FieldWarning } from "@/lib/ui/identifiers";
+import { sendSms } from "@/lib/sms/client";
+import { renderCreditAccountOpened, CREDIT_OPENED_PURPOSE } from "@/lib/sms/creditReminders";
 
 /**
  * Choosing who a credit sale goes on.
@@ -64,6 +66,13 @@ function QuickOpenModal({ onClose, onOpened }: {
       const created = await openCreditAccount({
         holderKind: "Customer", name, phone, nic, creditLimit: limitAmt,
       });
+      if (created.phone) {
+        void sendSms({
+          to: created.phone,
+          message: renderCreditAccountOpened({ name: created.name, creditLimit: limitAmt }),
+          accountId: created.id, purpose: CREDIT_OPENED_PURPOSE,
+        }).catch(() => {});
+      }
       toast.success(`Credit account opened for ${created.name}`);
       onOpened(created);
     } catch (e) {

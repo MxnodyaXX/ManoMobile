@@ -72,6 +72,19 @@ export interface LabelData {
   customer?: string;
   device?: string;
   imei?: string;
+  /** Last 6 digits of the IMEI — the full 15 digits rarely fit legibly on a
+   *  small stock label, but the tail is usually enough to match a phone in
+   *  hand against the row on screen. Derived from `imei`, not a separate
+   *  input anywhere the data comes from. */
+  imeiShort?: string;
+  /** Selling price, formatted (e.g. "Rs. 45,000") — not a bare number, so a
+   *  design can drop {{price}} straight into text without its own currency
+   *  formatting. */
+  price?: string;
+  /** Just the device's own name/model (e.g. "Galaxy S21"), as opposed to
+   *  {{device}} which already carries brand + name together. */
+  deviceName?: string;
+  modelNumber?: string;
   /** What the device came in for — RepairJob.issue. On a tag sitting on the
    *  bench this is the one thing a technician cannot work out by looking at
    *  the phone, so it earns its place beside the job number. */
@@ -87,20 +100,43 @@ export interface LabelData {
   shopAddress: string;
 }
 
-export const LABEL_TOKENS: { token: string; label: string }[] = [
-  { token: "{{jobId}}",       label: "Job number" },
-  { token: "{{dealerJobNo}}", label: "Dealer's job number" },
+/**
+ * `layouts` names which label kinds a token means something on — e.g.
+ * {{fault}} and {{passcode}} exist for a repair job tag sitting on a bench,
+ * not a phone sitting in stock. Omitted entirely (undefined) means every
+ * layout: {{code}}/{{date}}/the shop fields resolve the same way regardless
+ * of what's being labelled, so there's nothing layout-specific to restrict.
+ *
+ * Plain strings rather than importing BarcodeLayout from barcodeTemplates.ts:
+ * that file already imports LabelElement from here, and importing back would
+ * make the two files depend on each other.
+ */
+export const LABEL_TOKENS: { token: string; label: string; layouts?: string[] }[] = [
+  { token: "{{jobId}}",       label: "Job number", layouts: ["repair"] },
+  { token: "{{dealerJobNo}}", label: "Dealer's job number", layouts: ["repair"] },
   { token: "{{code}}",        label: "Barcode value" },
-  { token: "{{customer}}",    label: "Customer name" },
-  { token: "{{device}}",      label: "Device brand & model" },
-  { token: "{{imei}}",        label: "IMEI" },
-  { token: "{{fault}}",       label: "Reported fault" },
-  { token: "{{passcode}}",    label: "Device passcode" },
+  { token: "{{customer}}",    label: "Customer name", layouts: ["repair"] },
+  { token: "{{device}}",      label: "Device brand & model", layouts: ["repair", "device"] },
+  { token: "{{imei}}",        label: "IMEI", layouts: ["repair", "device"] },
+  { token: "{{imeiShort}}",   label: "IMEI (last 6 digits)", layouts: ["device"] },
+  { token: "{{price}}",       label: "Selling price", layouts: ["device"] },
+  { token: "{{deviceName}}",  label: "Device name", layouts: ["device"] },
+  { token: "{{modelNumber}}", label: "Model number", layouts: ["device"] },
+  { token: "{{fault}}",       label: "Reported fault", layouts: ["repair"] },
+  { token: "{{passcode}}",    label: "Device passcode", layouts: ["repair"] },
+  { token: "{{title}}",       label: "Item title", layouts: ["device", "accessory", "part", "simple"] },
+  { token: "{{subtitle}}",    label: "Item subtitle", layouts: ["device", "accessory", "part", "simple"] },
   { token: "{{date}}",        label: "Today's date" },
   { token: "{{shopName}}",    label: "Shop name" },
   { token: "{{shopPhone}}",   label: "Shop phone" },
   { token: "{{shopAddress}}", label: "Shop address" },
 ];
+
+/** The tokens that actually mean something for one layout — every layout-less
+ *  (universal) token, plus whichever tagged ones name this layout. */
+export function tokensForLayout(layout: string): { token: string; label: string }[] {
+  return LABEL_TOKENS.filter(t => !t.layouts || t.layouts.includes(layout));
+}
 
 /**
  * Substitute tokens. Unknown tokens are left as written rather than blanked:
@@ -115,6 +151,10 @@ export function resolveTokens(text: string, data: LabelData): string {
     customer: data.customer,
     device: data.device,
     imei: data.imei,
+    imeiShort: data.imeiShort,
+    price: data.price,
+    deviceName: data.deviceName,
+    modelNumber: data.modelNumber,
     fault: data.fault,
     passcode: data.passcode,
     title: data.title,

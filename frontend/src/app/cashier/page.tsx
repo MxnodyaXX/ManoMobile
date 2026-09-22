@@ -28,6 +28,7 @@ import AuditLog from "@/cashier/components/audit/AuditLog";
 import JobScanFab from "@/cashier/components/shared/JobScanFab";
 import { InventoryProvider } from "@/cashier/contexts/InventoryContext";
 import { AccessoriesProvider } from "@/cashier/contexts/AccessoriesContext";
+import { DevicesProvider } from "@/cashier/contexts/DevicesContext";
 import { PartsProvider, useParts } from "@/cashier/contexts/PartsContext";
 import { CashRegisterProvider } from "@/cashier/contexts/CashRegisterContext";
 import { RepairProvider } from "@/cashier/contexts/RepairContext";
@@ -498,6 +499,7 @@ export default function CashierPage() {
     <HeldSalesProvider>
     <InventoryProvider>
     <AccessoriesProvider>
+    <DevicesProvider>
     <PartsProvider>
       <TabTitle role="Cashier" />
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
@@ -671,6 +673,7 @@ export default function CashierPage() {
         />
       )}
     </PartsProvider>
+    </DevicesProvider>
     </AccessoriesProvider>
     </InventoryProvider>
     </HeldSalesProvider>

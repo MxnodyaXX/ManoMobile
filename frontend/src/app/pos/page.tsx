@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { ShoppingBasket } from "lucide-react";
 import { AccessoriesProvider } from "@/cashier/contexts/AccessoriesContext";
+import { DevicesProvider } from "@/cashier/contexts/DevicesContext";
 import { SalesProvider } from "@/cashier/contexts/SalesContext";
 import { CashRegisterProvider } from "@/cashier/contexts/CashRegisterContext";
 import PosScreen from "@/pos/PosScreen";
@@ -65,11 +66,13 @@ export default function PosPage() {
     <CashRegisterProvider>
     <SalesProvider>
     <AccessoriesProvider>
+    <DevicesProvider>
       <TabTitle role="POS" />
       <PosScreen
         cashierName={(profile?.fullName || profile?.email || "Cashier").trim()}
         onLogout={() => { void signOut().then(() => window.location.assign("/")); }}
       />
+    </DevicesProvider>
     </AccessoriesProvider>
     </SalesProvider>
     </CashRegisterProvider>

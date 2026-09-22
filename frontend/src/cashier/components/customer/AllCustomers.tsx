@@ -4,11 +4,15 @@ import { Fragment, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Search, Plus, UserCheck, UserX, X,
-  Phone, Mail, Hash, Calendar, Wrench, ShoppingBag, Store, User, ChevronRight, Receipt,
+  Phone, Mail, Hash, Calendar, Wrench, ShoppingBag, Store, User, ChevronRight, Receipt, CreditCard, MessageSquare,
 } from "lucide-react";
 import { useRepair, dealerKey, type RepairJob } from "@/cashier/contexts/RepairContext";
 import { useSales } from "@/cashier/contexts/SalesContext";
-import { useCreditAccounts } from "@/lib/credit/api";
+import { useCreditAccounts, type CreditAccount } from "@/lib/credit/api";
+import { useToast } from "@/lib/ui/toast";
+import { sendSms } from "@/lib/sms/client";
+import { renderCreditReminder, CREDIT_REMINDER_PURPOSE } from "@/lib/sms/creditReminders";
+import RecordCreditModal from "./RecordCreditModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,7 +34,7 @@ interface Customer {
   kind: CustomerKind;
   /** On account with the shop, and what they owe. Null for anyone paying as
    *  they go — which is most people, and the reason this screen exists. */
-  credit: { balance: number; onAccount: boolean } | null;
+  credit: { accountId: string; balance: number; onAccount: boolean } | null;
   /**
    * The invoices this customer has been billed on.
    *
@@ -69,13 +73,48 @@ const DAY = 86_400_000;
 const activeSince = (iso: string) =>
   iso && Date.now() - new Date(iso).getTime() < 120 * DAY ? "Active" : "Inactive";
 
+// ─── Record Credit Modal ──────────────────────────────────────────────────────
+//
+// Lives in ./RecordCreditModal now — Credit Customers' account detail view
+// needed the same open-then-charge logic and there was no reason to keep two
+// copies of it in sync.
+
 // ─── Customer Detail Modal ────────────────────────────────────────────────────
 
-function CustomerDetailModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+function CustomerDetailModal({ customer, account, onClose, onRecordCredit }: {
+  customer: Customer;
+  /** The full credit_accounts row behind customer.credit, when there is one —
+   *  needed for firstChargeOn/termsDays, which the trimmed-down
+   *  customer.credit doesn't carry. Null when there's no account, or (should
+   *  never happen) when the account listing hasn't caught up with it yet. */
+  account: CreditAccount | null;
+  onClose: () => void;
+  onRecordCredit: () => void;
+}) {
+  const toast = useToast();
+  const [notifyBusy, setNotifyBusy] = useState(false);
   const sc = customer.status === "Active"
     ? { color: "#4ade80", bg: "rgba(74,222,128,0.08)",  border: "rgba(74,222,128,0.25)",  icon: UserCheck }
     : { color: "#f87171", bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.25)", icon: UserX };
   const StatusIcon = sc.icon;
+
+  // Something owed, a phone to text it to, and enough of the account on hand
+  // to work out a due date — the same three things the cron itself requires.
+  const canNotify = !!account && account.balance > 0 && !!customer.phone;
+
+  const notify = async () => {
+    if (!account || !customer.phone) return;
+    const message = renderCreditReminder(account);
+    if (!message) { toast.error("Could not work out a due date for this account."); return; }
+    setNotifyBusy(true);
+    try {
+      const result = await sendSms({ to: customer.phone, message, accountId: account.id, purpose: CREDIT_REMINDER_PURPOSE });
+      if (result.ok) toast.success(`Reminder sent to ${customer.name}`);
+      else toast.error(result.error ?? "Failed to send the reminder.");
+    } finally {
+      setNotifyBusy(false);
+    }
+  };
 
   return createPortal(
     <div
@@ -137,6 +176,55 @@ function CustomerDetailModal({ customer, onClose }: { customer: Customer; onClos
               );
             })}
           </div>
+
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+            background: "var(--bg-primary)", border: "1px solid var(--border)", borderRadius: 9, padding: "10px 12px",
+          }}>
+            <div>
+              <p style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>
+                Credit Account
+              </p>
+              <p style={{ fontSize: 13, fontWeight: 700, color: customer.credit ? (customer.credit.balance > 0 ? "#fbbf24" : "#4ade80") : "var(--text-muted)" }}>
+                {customer.credit ? `Rs. ${customer.credit.balance.toLocaleString()} owed` : "No account on file"}
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+              {/* Same reminder the daily cron would eventually send on its
+                  own schedule, just sent right now on demand. Disabled
+                  rather than hidden when there's nothing owed or no phone —
+                  the reason is worth reading, not guessing at. */}
+              <button
+                onClick={() => void notify()}
+                disabled={!canNotify || notifyBusy}
+                title={
+                  !account || account.balance <= 0 ? "Nothing owed on this account"
+                  : !customer.phone ? "No phone number on file — cannot text a reminder"
+                  : "Send a payment reminder SMS now"
+                }
+                style={{
+                  display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 8,
+                  fontSize: 11.5, fontWeight: 600, border: "1px solid var(--accent-glow)", background: "var(--accent-dim)",
+                  color: "var(--accent)", cursor: (canNotify && !notifyBusy) ? "pointer" : "not-allowed",
+                  opacity: canNotify ? 1 : 0.45, whiteSpace: "nowrap",
+                }}
+              >
+                <MessageSquare size={12} />
+                {notifyBusy ? "Sending…" : "Notify"}
+              </button>
+              <button
+                onClick={onRecordCredit}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 8,
+                  fontSize: 11.5, fontWeight: 600, border: "1px solid var(--accent)", background: "var(--accent-dim)",
+                  color: "var(--accent)", cursor: "pointer", whiteSpace: "nowrap",
+                }}
+              >
+                <CreditCard size={12} />
+                {customer.credit ? "Record Charge" : "Open Account"}
+              </button>
+            </div>
+          </div>
         </div>
 
         <div style={{ padding: "12px 18px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)", display: "flex", justifyContent: "flex-end" }}>
@@ -162,13 +250,14 @@ export default function AllCustomers({ only }: {
   only?: CustomerKind;
 } = {}) {
   const { jobs, dealers } = useRepair();
-  const { accounts } = useCreditAccounts();
+  const { accounts, reload: reloadAccounts } = useCreditAccounts();
   const { sales } = useSales();
   const [search,        setSearch]        = useState("");
   const [statusFilter,  setStatusFilter]  = useState<CustomerStatus | "All">("All");
   const [kindFilter,    setKindFilter]    = useState<CustomerKind | "All" | "On account">("All");
   const [searchFocused, setSearchFocused] = useState(false);
   const [selected,      setSelected]      = useState<Customer | null>(null);
+  const [recordCreditFor, setRecordCreditFor] = useState<Customer | null>(null);
   /**
    * Whose history is open, by id.
    *
@@ -210,7 +299,7 @@ export default function AllCustomers({ only }: {
         memberSince: days[0] ?? isoDay(d.joinedAt),
         lastActivity: days[days.length - 1] ?? "",
         status: activeSince(days[days.length - 1] ?? ""),
-        credit: acct ? { balance: acct.balance, onAccount: true } : null,
+        credit: acct ? { accountId: acct.id, balance: acct.balance, onAccount: true } : null,
         invoices,
       });
     }
@@ -254,7 +343,7 @@ export default function AllCustomers({ only }: {
         memberSince: days[0] ?? "",
         lastActivity: days[days.length - 1] ?? "",
         status: activeSince(days[days.length - 1] ?? ""),
-        credit: acct ? { balance: acct.balance, onAccount: true } : null,
+        credit: acct ? { accountId: acct.id, balance: acct.balance, onAccount: true } : null,
         invoices: Array.from(new Set(c.jobs.map(j => j.invoiceNo).filter((v): v is string => !!v))),
       });
     }
@@ -293,7 +382,7 @@ export default function AllCustomers({ only }: {
         memberSince: (a.firstChargeOn ?? a.createdAt ?? "").slice(0, 10),
         lastActivity: (a.lastPaymentOn ?? a.firstChargeOn ?? "").slice(0, 10),
         status: activeSince((a.lastPaymentOn ?? a.firstChargeOn ?? "").slice(0, 10)),
-        credit: { balance: a.balance, onAccount: true },
+        credit: { accountId: a.id, balance: a.balance, onAccount: true },
         invoices: [],
       });
     }
@@ -506,7 +595,33 @@ export default function AllCustomers({ only }: {
         </table>
       </div>
 
-      {selected && <CustomerDetailModal customer={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <CustomerDetailModal
+          customer={selected}
+          account={selected.credit ? accounts.find(a => a.id === selected.credit!.accountId) ?? null : null}
+          onClose={() => setSelected(null)}
+          onRecordCredit={() => setRecordCreditFor(selected)}
+        />
+      )}
+      {recordCreditFor && (
+        <RecordCreditModal
+          target={{
+            name: recordCreditFor.name,
+            phone: recordCreditFor.phone,
+            nic: recordCreditFor.nic,
+            email: recordCreditFor.email,
+            address: recordCreditFor.address,
+          }}
+          existingAccountId={recordCreditFor.credit?.accountId ?? null}
+          priorBalance={recordCreditFor.credit?.balance ?? 0}
+          onClose={() => setRecordCreditFor(null)}
+          onDone={() => {
+            setRecordCreditFor(null);
+            setSelected(null);
+            void reloadAccounts();
+          }}
+        />
+      )}
     </div>
   );
 }

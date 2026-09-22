@@ -14,7 +14,7 @@ import { parseElements, type LabelElement } from "@/lib/inventory/labelElements"
  * plus one more branch, instead of another global settings object.
  */
 
-export type BarcodeLayout = "simple" | "repair" | "part";
+export type BarcodeLayout = "simple" | "repair" | "part" | "device" | "accessory";
 
 export interface BarcodeTemplate extends BarcodeSettings {
   id: string;
@@ -27,9 +27,11 @@ export interface BarcodeTemplate extends BarcodeSettings {
 }
 
 export const LAYOUT_LABELS: Record<BarcodeLayout, { label: string; blurb: string }> = {
-  simple: { label: "Product Label", blurb: "Barcode with the code underneath — inventory and accessories." },
-  repair: { label: "Repair Job Tag", blurb: "Job number, customer, barcode and the shop footer." },
-  part:   { label: "Part Label",     blurb: "Spare-part name, SKU and barcode for the parts bin." },
+  simple:    { label: "Product Label",       blurb: "Barcode with the code underneath — inventory and accessories." },
+  repair:    { label: "Repair Job Tag",       blurb: "Job number, customer, barcode and the shop footer." },
+  part:      { label: "Part Label",           blurb: "Spare-part name, SKU and barcode for the parts bin." },
+  device:    { label: "Mobile Device Label",  blurb: "IMEI barcode with brand, model, storage and color — phones." },
+  accessory: { label: "Accessory Label",      blurb: "Product code barcode with name and price — retail accessories." },
 };
 
 interface TemplateRow {
