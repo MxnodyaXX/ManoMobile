@@ -96,6 +96,16 @@ interface BarcodeLabelModalProps {
    * mode titles it as a question and adds "Not now" beside Print.
    */
   ask?: boolean;
+  /**
+   * Silent mode's other ending: instead of printing this one label the
+   * moment it settles, hand back its finished markup (and physical size) and
+   * let the caller print it. For bulk printing several labels as one job
+   * instead of one dialog each — a caller collects several of these, then
+   * calls printLabelsNode(...) itself once every label has reported in.
+   * Ignored unless `silent` is also true; when both are set, this replaces
+   * silent mode's own call to printLabelNode.
+   */
+  onReady?: (html: string, widthMm: number, heightMm: number) => void;
   onClose: () => void;
 }
 
@@ -113,7 +123,7 @@ interface BarcodeLabelModalProps {
  * until it fits. Runs for both axes since a narrower label (38mm) can
  * overflow sideways even when a wider one (50mm) had enough slack.
  */
-export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, price, deviceName, modelNumber, passcode, outsideDealer = false, silent = false, ask = false, onClose }: BarcodeLabelModalProps) {
+export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, price, deviceName, modelNumber, passcode, outsideDealer = false, silent = false, ask = false, onReady, onClose }: BarcodeLabelModalProps) {
   const hasPasscode = !!passcode && passcode.trim() !== "";
   const { barcodeSettings: s } = useInventory();
   const labelRef = useRef<HTMLDivElement>(null);
@@ -277,7 +287,10 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
       if (firedRef.current) return;
       firedRef.current = true;
       if (labelRef.current) {
-        printLabelNode(labelRef.current, design?.labelWidthMm ?? labelW, design?.labelHeightMm ?? labelH);
+        const w = design?.labelWidthMm ?? labelW;
+        const h = design?.labelHeightMm ?? labelH;
+        if (onReady) onReady(labelRef.current.outerHTML, w, h);
+        else printLabelNode(labelRef.current, w, h);
       }
       onClose();
     }, 300);

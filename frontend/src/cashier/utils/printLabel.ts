@@ -32,3 +32,52 @@ export function printLabelNode(node: HTMLElement, widthMm: number, heightMm: num
     document.getElementById("__label_style__")?.remove();
   }, 500);
 }
+
+/**
+ * Prints several labels — all the same physical size — as one print job
+ * instead of one dialog per label. Each label becomes its own page at the
+ * exact label size (`@page` doesn't vary per page, but every label here is
+ * the same size anyway), with a page break forced between them so the
+ * printer advances to the next label the same way it would between two
+ * separate single-label print jobs — there is no gap to add by hand; the
+ * label stock's own die-cut gap is what "next page" already means on a
+ * label printer.
+ *
+ * `htmls` are captured outerHTML strings (see BarcodeLabelModal's `onReady`),
+ * not live nodes — a node captured off-screen from a modal that then
+ * unmounts would already be gone by the time this ran.
+ */
+export function printLabelsNode(htmls: string[], widthMm: number, heightMm: number) {
+  if (htmls.length === 0) return;
+
+  const container = document.createElement("div");
+  container.id = "__labels__";
+  container.innerHTML = htmls
+    .map(h => `<div class="__one_label__">${h}</div>`)
+    .join("");
+  document.body.appendChild(container);
+
+  const st = document.createElement("style");
+  st.id = "__labels_style__";
+  st.textContent = `
+    @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }
+    #__labels__ { display: none; }
+    @media print {
+      body { visibility: hidden; }
+      #__labels__ { display: block !important; visibility: visible; position: fixed; top: 0; left: 0; }
+      #__labels__ * { visibility: visible; }
+      .__one_label__ {
+        width: ${widthMm}mm; height: ${heightMm}mm;
+        overflow: hidden;
+        break-after: page; page-break-after: always;
+      }
+      .__one_label__:last-child { break-after: auto; page-break-after: auto; }
+    }
+  `;
+  document.head.appendChild(st);
+  window.print();
+  setTimeout(() => {
+    document.getElementById("__labels__")?.remove();
+    document.getElementById("__labels_style__")?.remove();
+  }, 500);
+}

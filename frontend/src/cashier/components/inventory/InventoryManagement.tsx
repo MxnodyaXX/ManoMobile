@@ -15,6 +15,7 @@ import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/Access
 import { useDevices, type DeviceRecord } from "@/cashier/contexts/DevicesContext";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
+import { printLabelsNode } from "@/cashier/utils/printLabel";
 import { useToast } from "@/lib/ui/toast";
 import { useTableSort, SortHeader } from "@/lib/ui/useTableSort";
 import RepairPartsManager from "@/admin/components/inventory/RepairPartsManager";
@@ -2174,8 +2175,17 @@ function BulkPrintLabelsModal({ group, units, onClose }: {
   );
   const [rangeFrom, setRangeFrom] = useState("1");
   const [rangeTo, setRangeTo] = useState(String(units.length));
+  // Selected labels render off-screen one at a time — same as a single
+  // print — but instead of each one printing itself, it reports its finished
+  // markup back through onReady and the next one starts. Once the last one
+  // reports in, every collected label goes to printLabelsNode() together:
+  // one print job, one dialog, not N. One at a time rather than all six at
+  // once so six simultaneous template lookups and auto-fit measurements
+  // can't step on each other — a real failure mode the first version of
+  // this hit, where only one of six ever actually reported back.
   const [queue, setQueue] = useState<DeviceItem[] | null>(null);
-  const [printedCount, setPrintedCount] = useState(0);
+  const collectedRef = useRef<{ html: string; w: number; h: number }[]>([]);
+  const [processedCount, setProcessedCount] = useState(0);
 
   const toggle = (id: number) => setSelected(prev => {
     const next = new Set(prev);
@@ -2194,27 +2204,36 @@ function BulkPrintLabelsModal({ group, units, onClose }: {
 
   const selectedUnits = units.filter(d => selected.has(d.id));
   const printing = queue !== null;
+  const current = queue && queue.length > 0 ? queue[0] : null;
 
   const startPrint = () => {
     if (selectedUnits.length === 0) return;
-    setPrintedCount(0);
+    collectedRef.current = [];
+    setProcessedCount(0);
     setQueue(selectedUnits);
   };
 
-  const onOnePrinted = () => {
-    setPrintedCount(c => c + 1);
+  // Fires once the current off-screen label has finished measuring/auto-
+  // fitting itself. Collect its markup, move to the next one in the queue —
+  // or, if that was the last one, print everything collected as one job.
+  const handleReady = (html: string, w: number, h: number) => {
+    collectedRef.current.push({ html, w, h });
+    setProcessedCount(c => c + 1);
     setQueue(prev => {
       const rest = (prev ?? []).slice(1);
-      if (rest.length === 0) {
-        toast.success(`Printed ${(prev ?? []).length === 0 ? 0 : printedCount + 1} label${printedCount + 1 === 1 ? "" : "s"}`);
-        onClose();
-        return null;
+      if (rest.length > 0) return rest;
+
+      const items = collectedRef.current;
+      if (items.length > 0) {
+        // Every label here came from the same group, so they share one
+        // physical size — the first one's is as good as any to print at.
+        printLabelsNode(items.map(i => i.html), items[0].w, items[0].h);
+        toast.success(`Printing ${items.length} label${items.length === 1 ? "" : "s"}`);
       }
-      return rest;
+      onClose();
+      return null;
     });
   };
-
-  const current = queue && queue.length > 0 ? queue[0] : null;
 
   return (
     <>
@@ -2243,10 +2262,10 @@ function BulkPrintLabelsModal({ group, units, onClose }: {
               <div style={{ padding: 28, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
                 <Printer size={22} color="var(--accent)" />
                 <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
-                  Printing label {printedCount + 1} of {selectedUnits.length}…
+                  Preparing label {processedCount + 1} of {selectedUnits.length}…
                 </p>
                 <p style={{ fontSize: 11.5, color: "var(--text-muted)", textAlign: "center", lineHeight: 1.5 }}>
-                  Each label opens its own print dialog unless your printer is set up for silent printing — keep confirming until the count above finishes.
+                  All {selectedUnits.length} labels print together as one job, one page per label, once the last one is ready.
                 </p>
               </div>
             ) : (
@@ -2332,6 +2351,7 @@ function BulkPrintLabelsModal({ group, units, onClose }: {
 
       {current && (
         <BarcodeLabelModal
+          key={current.id}
           code={current.imei}
           title={`${current.brand} ${current.name}`.trim()}
           subtitle={`${current.storage} · ${current.color}`}
@@ -2341,7 +2361,8 @@ function BulkPrintLabelsModal({ group, units, onClose }: {
           deviceName={current.name}
           modelNumber={current.modelNumber}
           silent
-          onClose={onOnePrinted}
+          onReady={handleReady}
+          onClose={() => {}}
         />
       )}
     </>
