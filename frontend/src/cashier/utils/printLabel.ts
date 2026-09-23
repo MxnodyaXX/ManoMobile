@@ -46,6 +46,18 @@ export function printLabelNode(node: HTMLElement, widthMm: number, heightMm: num
  * `htmls` are captured outerHTML strings (see BarcodeLabelModal's `onReady`),
  * not live nodes — a node captured off-screen from a modal that then
  * unmounts would already be gone by the time this ran.
+ *
+ * Deliberately NOT the same `position: fixed` + `visibility: hidden` trick
+ * printLabelNode above uses. That works for one label because there is
+ * nothing to paginate — the label is just pinned to the corner of the one
+ * page. `break-after: page` is a normal-document-flow pagination
+ * instruction; an element taken out of flow with `position: fixed` (or
+ * nested inside one) is invisible to it, so every label rendered on one
+ * page regardless of how many `break-after` rules were on them. Hiding
+ * every other top-level element with `display: none` instead — which drops
+ * them from layout entirely rather than merely hiding them — lets the
+ * labels render as the only (in-flow) content on the page, where
+ * pagination actually applies.
  */
 export function printLabelsNode(htmls: string[], widthMm: number, heightMm: number) {
   if (htmls.length === 0) return;
@@ -63,9 +75,9 @@ export function printLabelsNode(htmls: string[], widthMm: number, heightMm: numb
     @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }
     #__labels__ { display: none; }
     @media print {
-      body { visibility: hidden; }
-      #__labels__ { display: block !important; visibility: visible; position: fixed; top: 0; left: 0; }
-      #__labels__ * { visibility: visible; }
+      body > *:not(#__labels__) { display: none !important; }
+      body { margin: 0; padding: 0; }
+      #__labels__ { display: block !important; margin: 0; padding: 0; }
       .__one_label__ {
         width: ${widthMm}mm; height: ${heightMm}mm;
         overflow: hidden;
