@@ -58,8 +58,12 @@ interface SalesContextValue {
   sales: SaleTx[];
   /** Records the sale. `extras` carries what the printed invoice does not —
    *  which dealer, which credit account, which repair jobs — so the invoice
-   *  number can be traced in both directions. */
-  addSale: (partial: Omit<SaleTx, "id">, extras?: SaleExtras) => void;
+   *  number can be traced in both directions.
+   *
+   *  Returns immediately-visible, but the promise resolves with the stored row
+   *  once it lands (null if it could not be stored — `error` says why), for a
+   *  caller that has to act on the row existing, like posting it to credit. */
+  addSale: (partial: Omit<SaleTx, "id">, extras?: SaleExtras) => Promise<SaleTx | null>;
   updateSale: (id: string, changes: Partial<SaleTx>) => void;
   returnSale: (id: string, amount: number, reason: string) => void;
   /** Voids the sale AND restocks every accessory line it sold, atomically —
@@ -78,7 +82,7 @@ interface SalesContextValue {
 
 const SalesContext = createContext<SalesContextValue>({
   sales: [],
-  addSale: () => {},
+  addSale: async () => null,
   updateSale: () => {},
   returnSale: () => {},
   voidSale: async () => {},
@@ -135,26 +139,26 @@ export function SalesProvider({ children }: { children: ReactNode }) {
   // daily total, without anybody reloading the page to find out.
   useRealtimeTable("sales", reload, { enabled: configured });
 
-  const addSale = (partial: Omit<SaleTx, "id">, extras?: SaleExtras) => {
+  const addSale = async (partial: Omit<SaleTx, "id">, extras?: SaleExtras): Promise<SaleTx | null> => {
     // A temporary id so the row can be rendered now and swapped for the stored
     // one when it lands. Prefixed so anything that leaks it is obvious.
     const tempId = `pending-${partial.invoiceNo}`;
     setSales(prev => [{ id: tempId, ...partial }, ...prev]);
-    if (!configured) return;
+    if (!configured) return null;
 
-    void (async () => {
-      try {
-        const stored = await insertSale(partial, extras);
-        setSales(prev => prev.map(s => (s.id === tempId ? stored : s)));
-        setError(null);
-      } catch (e) {
-        // The row stays on screen — the invoice exists and the customer has it.
-        // The message is what tells somebody the books need fixing.
-        setError(
-          `${partial.invoiceNo} could not be saved: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      }
-    })();
+    try {
+      const stored = await insertSale(partial, extras);
+      setSales(prev => prev.map(s => (s.id === tempId ? stored : s)));
+      setError(null);
+      return stored;
+    } catch (e) {
+      // The row stays on screen — the invoice exists and the customer has it.
+      // The message is what tells somebody the books need fixing.
+      setError(
+        `${partial.invoiceNo} could not be saved: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return null;
+    }
   };
 
   const updateSale = (id: string, changes: Partial<SaleTx>) => {

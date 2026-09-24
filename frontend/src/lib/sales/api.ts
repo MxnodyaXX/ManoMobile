@@ -18,9 +18,10 @@ import type { SaleTx, TxCategory, TxStatus } from "@/cashier/contexts/SalesConte
  */
 
 export interface SaleLineItem {
-  /** Only "accessory" lines are ever restocked on void today — repair and
-   *  device sales have nothing here yet. */
-  type: "accessory";
+  /** "accessory" lines are restocked on void from here. "device" lines are a
+   *  record only — void_sale() returns a device by the invoice number stamped
+   *  on it (migration 20260924000059), not from this list. */
+  type: "accessory" | "device";
   id: number;
   qty: number;
 }

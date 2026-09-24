@@ -107,6 +107,30 @@ export async function saveDevice(device: DeviceRecord): Promise<DeviceRecord> {
   return toDevice(data as DeviceRow);
 }
 
+/**
+ * Sell a mobile sale's stock and take its invoice number, in one transaction —
+ * see sell_mobile_sale() in migration 20260924000059. Every device is marked
+ * sold and every accessory line deducted, or (on any refusal: already sold,
+ * below minimum price, short on stock) nothing moves and no number is burned.
+ */
+export async function sellMobileSale(
+  devices: { id: number; price: number }[],
+  accessories: { id: number; qty: number }[],
+): Promise<string> {
+  const { data, error } = await getSupabaseBrowserClient().rpc("sell_mobile_sale", {
+    p_devices: devices,
+    p_accessories: accessories,
+  });
+  if (error) {
+    if (/Could not find the function|PGRST202/.test(error.message)) {
+      throw new Error("Mobile sales are not set up yet — run migration 20260924000059_mobile_device_sales.sql.");
+    }
+    throw new Error(error.message);
+  }
+  if (typeof data !== "string" || !data) throw new Error("The sale was not recorded — no invoice number came back.");
+  return data;
+}
+
 export async function deleteDevice(id: number): Promise<void> {
   const { error } = await getSupabaseBrowserClient().from("mobile_devices").delete().eq("id", id);
   if (error) throw new Error(error.message);

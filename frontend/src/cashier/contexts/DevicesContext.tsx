@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { useRealtimeTable } from "@/lib/supabase/useRealtime";
-import { fetchDevices, saveDevice as saveDeviceRow, deleteDevice as deleteDeviceRow } from "@/lib/inventory/devices";
+import { fetchDevices, saveDevice as saveDeviceRow, deleteDevice as deleteDeviceRow, sellMobileSale } from "@/lib/inventory/devices";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 
 /**
@@ -42,6 +42,11 @@ interface DevicesContextType {
    *  keep the form open rather than reporting a false success. */
   saveDevice: (device: DeviceRecord) => Promise<DeviceRecord>;
   deleteDevice: (id: number) => Promise<void>;
+  /** Marks the devices sold, deducts the accessory lines and returns the new
+   *  invoice number — atomically, see sell_mobile_sale(). Throws (selling
+   *  nothing) if any device was sold elsewhere or priced below its minimum.
+   *  Refetches afterwards so the list is the database's. */
+  sellSale: (devices: { id: number; price: number }[], accessories: { id: number; qty: number }[]) => Promise<string>;
 
   loading: boolean;
   error: string | null;
@@ -92,8 +97,17 @@ export function DevicesProvider({ children }: { children: ReactNode }) {
     setDevices(prev => prev.filter(d => d.id !== id));
   }, []);
 
+  const sellSale = useCallback(async (
+    lines: { id: number; price: number }[],
+    accessories: { id: number; qty: number }[],
+  ) => {
+    const invoiceNo = await sellMobileSale(lines, accessories);
+    try { setDevices(await fetchDevices()); } catch { /* next reload corrects it */ }
+    return invoiceNo;
+  }, []);
+
   return (
-    <DevicesContext.Provider value={{ devices, saveDevice, deleteDevice, loading, error, configured, reload }}>
+    <DevicesContext.Provider value={{ devices, saveDevice, deleteDevice, sellSale, loading, error, configured, reload }}>
       {children}
     </DevicesContext.Provider>
   );

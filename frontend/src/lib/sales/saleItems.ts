@@ -12,11 +12,12 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
  * for the invoice itself.
  */
 
-export type SaleItemKind = "repair_service" | "repair_part" | "accessory" | "sim" | "reload" | "other";
+export type SaleItemKind = "repair_service" | "repair_part" | "accessory" | "device" | "sim" | "reload" | "other";
 
 export interface NewSaleItem {
   kind: SaleItemKind;
-  /** RM-nnn for a repair line, the product id for an accessory, absent otherwise. */
+  /** RM-nnn for a repair line, the product id for an accessory, the IMEI for a
+   *  device, absent otherwise. */
   referenceId?: string | number | null;
   description: string;
   qty: number;

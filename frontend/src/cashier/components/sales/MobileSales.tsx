@@ -1,33 +1,27 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import { useSales } from "@/cashier/contexts/SalesContext";
+import { useDevices, type DeviceRecord } from "@/cashier/contexts/DevicesContext";
+import { useAccessories } from "@/cashier/contexts/AccessoriesContext";
+import { useAuth } from "@/lib/auth/AuthContext";
 import { createPortal } from "react-dom";
 import { Search, Trash2, Plus, Minus, X, Printer } from "lucide-react";
 import CreditCustomerPicker, { type POSCreditCustomer } from "./CreditCustomerPicker";
-import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 import { usePersistInvoiceDocument } from "@/lib/sales/invoiceDoc";
+import { posPostCredit } from "@/lib/pos/api";
+import type { NewSaleItem } from "@/lib/sales/saleItems";
+import { SHOP_DETAILS } from "@/lib/shop";
 import InvoiceNoBadge from "@/cashier/components/sales/InvoiceNoBadge";
 import { QRCodeSVG } from "qrcode.react";
 import Barcode from "react-barcode";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Phone {
-  id: number;
-  imei: string;
-  name: string;
-  brand: string;
-  supplier: string;
-  storage: string;
-  color: string;
-  buyingPrice: number;
-  boughtDate: string;
-  minSellingPrice: number;
-  suggestedPrice: number;
-}
+/** A phone from mobile_devices — one unit, one IMEI. */
+type Phone = DeviceRecord;
 
 interface PhoneCartItem {
   phone: Phone;
@@ -35,22 +29,33 @@ interface PhoneCartItem {
   discount: string;
 }
 
-interface AccessoryCartItem {
+/** An accessory as the counter sees it, from accessory_products. */
+interface AccessoryBase {
   id: number;
   code: string;
   name: string;
   model: string;
   brand: string;
   price: number;
+  /** Real stock left, less whatever this cart already holds. */
+  stock: number;
+}
+
+interface AccessoryCartItem extends Omit<AccessoryBase, "stock"> {
   discount: string;
   qty: number;
 }
 
-// ─── Live data only — stock comes from the inventory backend ─────────────────
+/** A phone line's net: selling price less its own discount, never negative. */
+const phoneNet = (pc: PhoneCartItem) =>
+  Math.max(0, (parseFloat(pc.sellingPrice) || 0) - (parseFloat(pc.discount) || 0));
 
-const PHONE_INVENTORY: Phone[] = [];
+/** An accessory line's net, clamped the same way. */
+const accNet = (i: AccessoryCartItem) =>
+  Math.max(0, i.price * i.qty - (parseFloat(i.discount) || 0));
 
-const ACCESSORIES: { id: number; code: string; name: string; model: string; brand: string; price: number }[] = [];
+/** Every identifier a phone can be scanned by. */
+const phoneIds = (p: Phone) => [p.imei, p.imei2, p.serialNumber].filter(Boolean).map(s => s.toLowerCase());
 
 
 // ─── Shared Styles ────────────────────────────────────────────────────────────
@@ -87,11 +92,10 @@ const searchBtn: React.CSSProperties = {
 // ─── Card Payment Modal ───────────────────────────────────────────────────────
 
 function CardPaymentModal({
-  invoiceNo, phoneCart, accessoryCart, customer,
+  phoneCart, accessoryCart, customer,
   subtotal, overallDiscount, total,
   onConfirm, onCancel,
 }: {
-  invoiceNo: string;
   phoneCart: PhoneCartItem[];
   accessoryCart: AccessoryCartItem[];
   customer: { name: string; phone: string; whatsapp: string; email: string; nic: string };
@@ -133,7 +137,10 @@ function CardPaymentModal({
               Card Payment
             </div>
             <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: "0.02em" }}>
-              {invoiceNo}
+              {fmt(total)}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 2 }}>
+              The invoice number is assigned when the payment is confirmed.
             </div>
             <div style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 3 }}>
               {today}
@@ -156,7 +163,7 @@ function CardPaymentModal({
                 <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "monospace" }}>{pc.phone.imei}</div>
               </div>
               <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", flexShrink: 0 }}>
-                {fmt(Math.max(0, (parseFloat(pc.sellingPrice) || 0) - (parseFloat(pc.discount) || 0)))}
+                {fmt(phoneNet(pc))}
               </div>
             </div>
           ))}
@@ -166,7 +173,7 @@ function CardPaymentModal({
                 {item.name} <span style={{ color: "var(--text-muted)" }}>×{item.qty}</span>
               </div>
               <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", flexShrink: 0 }}>
-                {fmt(item.price * item.qty - (parseFloat(item.discount) || 0))}
+                {fmt(accNet(item))}
               </div>
             </div>
           ))}
@@ -258,7 +265,8 @@ function CardPaymentModal({
 function MobilePrintPreviewModal({
   invoiceNo, phoneCart, accessoryCart, customer,
   paymentMethod, cardRef, creditCustomer,
-  subtotal, overallDiscount, total,
+  subtotal, overallDiscount, total, issuedBy,
+  cashReceived, change, cardPaid, creditDue,
   onDone,
 }: {
   invoiceNo: string;
@@ -271,6 +279,12 @@ function MobilePrintPreviewModal({
   subtotal: number;
   overallDiscount: number;
   total: number;
+  issuedBy: string;
+  /** Set only for a cash sale — what was handed over, before change. */
+  cashReceived?: number;
+  change: number;
+  cardPaid: number;
+  creditDue: number;
   onDone: () => void;
 }) {
   const receiptRef = useRef<HTMLDivElement>(null);
@@ -371,12 +385,12 @@ function MobilePrintPreviewModal({
 
             {/* Left — Branding */}
             <div style={{ flex: "0 0 52%", padding: "14px 18px 12px", borderRight: "1px solid #d1d5db" }}>
-              <div style={{ fontSize: 17, fontWeight: 900, letterSpacing: "0.12em", color: "#111827", lineHeight: 1 }}>MANO MOBILE</div>
-              <div style={{ fontSize: 8, letterSpacing: "0.22em", color: "#6b7280", marginTop: 3, marginBottom: 10 }}>MANAGEMENT SUITE</div>
+              <div style={{ fontSize: 17, fontWeight: 900, letterSpacing: "0.12em", color: "#111827", lineHeight: 1 }}>{SHOP_DETAILS.name.toUpperCase()}</div>
+              <div style={{ fontSize: 8, letterSpacing: "0.22em", color: "#6b7280", marginTop: 3, marginBottom: 10 }}>{SHOP_DETAILS.tagline.toUpperCase()}</div>
               <div style={{ fontSize: 9.5, color: "#374151", lineHeight: 1.65 }}>
-                <div>123 Main Street, Colombo 03</div>
-                <div>Tel: 0112 345 678</div>
-                <div>mano@manomobile.lk</div>
+                <div>{SHOP_DETAILS.address}</div>
+                <div>Tel: {SHOP_DETAILS.phone}</div>
+                <div>{SHOP_DETAILS.email}</div>
               </div>
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
                 <div>
@@ -406,7 +420,7 @@ function MobilePrintPreviewModal({
               )}
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e5e7eb" }}>
                 <div style={{ fontSize: 8, fontWeight: 700, color: "#6b7280", letterSpacing: "0.14em", textTransform: "uppercase" as const, marginBottom: 3 }}>Payment Method</div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: paymentMethod === "Credit" ? "#dc2626" : "#111827" }}>{paymentMethod}</div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: creditDue > 0 ? "#dc2626" : "#111827" }}>{paymentMethod}</div>
                 {cardRef && (
                   <div style={{ fontSize: 9, color: "#6b7280", marginTop: 2 }}>Ref: <span style={{ fontWeight: 700, color: "#374151" }}>{cardRef}</span></div>
                 )}
@@ -442,7 +456,7 @@ function MobilePrintPreviewModal({
               <tbody>
                 {phoneCart.map(pc => {
                   const disc = parseFloat(pc.discount) || 0;
-                  const net  = Math.max(0, (parseFloat(pc.sellingPrice) || 0) - disc);
+                  const net  = phoneNet(pc);
                   return (
                     <tr key={pc.phone.imei} style={{ borderBottom: "1px solid #e5e7eb" }}>
                       <td style={{ padding: "5px 6px 5px 0", fontWeight: 600, color: "#111827" }}>
@@ -459,7 +473,7 @@ function MobilePrintPreviewModal({
                 })}
                 {accessoryCart.map(item => {
                   const disc = parseFloat(item.discount) || 0;
-                  const net  = item.price * item.qty - disc;
+                  const net  = accNet(item);
                   return (
                     <tr key={item.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
                       <td style={{ padding: "5px 6px 5px 0", fontWeight: 600, color: "#111827" }}>{item.name}</td>
@@ -490,10 +504,20 @@ function MobilePrintPreviewModal({
                   <span>TOTAL</span>
                   <span>Rs.{total.toLocaleString()}</span>
                 </div>
-                {paymentMethod === "Credit" && (
+                {[
+                  { label: "Cash Received", value: cashReceived ?? 0,  show: cashReceived !== undefined && cashReceived > 0 },
+                  { label: "Change",        value: change,             show: change > 0 },
+                  { label: "Paid by Card",  value: cardPaid,           show: cardPaid > 0 },
+                ].filter(r => r.show).map(r => (
+                  <div key={r.label} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 9.5, borderBottom: "1px solid #f3f4f6" }}>
+                    <span style={{ color: "#6b7280" }}>{r.label}</span>
+                    <span style={{ color: "#374151" }}>Rs.{r.value.toLocaleString()}</span>
+                  </div>
+                ))}
+                {creditDue > 0 && (
                   <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 9.5, fontWeight: 700, color: "#dc2626" }}>
-                    <span>Balance Due</span>
-                    <span>Rs.{total.toLocaleString()}</span>
+                    <span>Balance Due (Credit)</span>
+                    <span>Rs.{creditDue.toLocaleString()}</span>
                   </div>
                 )}
               </div>
@@ -509,10 +533,10 @@ function MobilePrintPreviewModal({
                 <div>• Warranty valid only with this receipt.</div>
                 <div>• Physical damage not covered under warranty.</div>
                 <div>• Device IMEI is verified at point of sale.</div>
-                <div>• Queries: 0112 345 678</div>
+                <div>• Queries: {SHOP_DETAILS.phone}</div>
               </div>
               <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e5e7eb", fontSize: 8.5, color: "#6b7280" }}>
-                Issued by: <span style={{ fontWeight: 700, color: "#111827" }}>Admin</span>
+                Issued by: <span style={{ fontWeight: 700, color: "#111827" }}>{issuedBy}</span>
               </div>
             </div>
             <div style={{ flex: 1, padding: "10px 18px 12px", display: "flex", alignItems: "center", justifyContent: "space-evenly", gap: 6 }}>
@@ -530,48 +554,54 @@ function MobilePrintPreviewModal({
 // ─── Phone Search Popup ───────────────────────────────────────────────────────
 
 function PhoneSearchPopup({
-  phones, phoneCart, onAddMultiple, onClose,
+  phones, phoneCart, initialName = "", initialImei = "", onAddMultiple, onClose,
 }: {
   phones: Phone[];
   phoneCart: PhoneCartItem[];
+  initialName?: string;
+  initialImei?: string;
   onAddMultiple: (selected: Phone[]) => void;
   onClose: () => void;
 }) {
   const [filterBrand,   setFilterBrand]   = useState("");
   const [filterStorage, setFilterStorage] = useState("");
   const [filterColor,   setFilterColor]   = useState("");
-  const [filterName,    setFilterName]    = useState("");
-  const [filterImei,    setFilterImei]    = useState("");
+  const [filterName,    setFilterName]    = useState(initialName);
+  const [filterImei,    setFilterImei]    = useState(initialImei);
   const [selectedImeis, setSelectedImeis] = useState<Set<string>>(new Set());
 
-  const brands    = [...new Set(phones.map(p => p.brand))];
-  const storages  = [...new Set(phones.map(p => p.storage))];
-  const colors    = [...new Set(phones.map(p => p.color))];
+  const brands    = [...new Set(phones.map(p => p.brand).filter(Boolean))].sort();
+  const storages  = [...new Set(phones.map(p => p.storage).filter(Boolean))].sort();
+  const colors    = [...new Set(phones.map(p => p.color).filter(Boolean))].sort();
 
   const filtered = phones.filter(p => {
     if (filterBrand   && p.brand   !== filterBrand)   return false;
     if (filterStorage && p.storage !== filterStorage) return false;
     if (filterColor   && p.color   !== filterColor)   return false;
-    if (filterName    && !p.name.toLowerCase().includes(filterName.toLowerCase())) return false;
+    if (filterName) {
+      const q = filterName.trim().toLowerCase();
+      if (![p.name, p.brand, p.modelNumber].some(v => v.toLowerCase().includes(q))) return false;
+    }
     if (filterImei) {
-      const q = filterImei.trim();
-      if (!p.imei.includes(q) && !p.imei.endsWith(q)) return false;
+      const q = filterImei.trim().toLowerCase();
+      if (!phoneIds(p).some(id => id.includes(q))) return false;
     }
     return true;
   });
+
+  const inCart = (imei: string) => phoneCart.some(pc => pc.phone.imei === imei);
+  const selectable = filtered.filter(p => !inCart(p.imei));
 
   const toggleSelect = (imei: string) =>
     setSelectedImeis(prev => { const n = new Set(prev); n.has(imei) ? n.delete(imei) : n.add(imei); return n; });
 
   const toggleAll = () =>
-    setSelectedImeis(selectedImeis.size === filtered.length ? new Set() : new Set(filtered.map(p => p.imei)));
+    setSelectedImeis(selectedImeis.size === selectable.length ? new Set() : new Set(selectable.map(p => p.imei)));
 
   const addSelected = () => {
-    onAddMultiple(filtered.filter(p => selectedImeis.has(p.imei)));
+    onAddMultiple(phones.filter(p => selectedImeis.has(p.imei)));
     onClose();
   };
-
-  const inCart = (imei: string) => phoneCart.some(pc => pc.phone.imei === imei);
 
   const selStyle: React.CSSProperties = {
     padding: "7px 10px", borderRadius: 8, border: "1px solid var(--border)",
@@ -673,7 +703,7 @@ function PhoneSearchPopup({
                 <th style={{ ...thStyle, width: 40 }}>
                   <input
                     type="checkbox"
-                    checked={filtered.length > 0 && selectedImeis.size === filtered.length}
+                    checked={selectable.length > 0 && selectedImeis.size === selectable.length}
                     onChange={toggleAll}
                     style={{ cursor: "pointer", accentColor: "var(--accent)" }}
                   />
@@ -723,7 +753,7 @@ function PhoneSearchPopup({
                       </td>
                       <td style={{ ...tdStyle, fontWeight: 600 }}>{p.name}</td>
                       <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: 11, color: "var(--text-secondary)" }}>
-                        {filterImei && p.imei.includes(filterImei.trim()) ? (() => {
+                        {filterImei.trim() && p.imei.includes(filterImei.trim()) ? (() => {
                           const idx = p.imei.lastIndexOf(filterImei.trim());
                           return (<>
                             {p.imei.slice(0, idx)}
@@ -746,6 +776,10 @@ function PhoneSearchPopup({
                         {already ? (
                           <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: "var(--accent-dim)", color: "var(--accent)", fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                             In cart
+                          </span>
+                        ) : p.status === "reserved" ? (
+                          <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: "rgba(251,191,36,0.12)", color: "#f59e0b", fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                            Reserved
                           </span>
                         ) : null}
                       </td>
@@ -793,8 +827,6 @@ function PhoneSearchPopup({
 
 // ─── Accessory Search Popup ───────────────────────────────────────────────────
 
-type AccessoryBase = typeof ACCESSORIES[number];
-
 function AccessorySearchPopup({
   accessories, accessoryCart, onAddMultiple, onClose,
 }: {
@@ -808,7 +840,7 @@ function AccessorySearchPopup({
   const [filterCode,  setFilterCode]  = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
-  const brands = [...new Set(accessories.map(a => a.brand))];
+  const brands = [...new Set(accessories.map(a => a.brand).filter(Boolean))].sort();
 
   const filtered = accessories.filter(a => {
     if (filterBrand && a.brand !== filterBrand) return false;
@@ -816,15 +848,16 @@ function AccessorySearchPopup({
     if (filterCode  && !a.code.toLowerCase().includes(filterCode.trim().toLowerCase())) return false;
     return true;
   });
+  const selectable = filtered.filter(a => a.stock > 0);
 
   const toggleSelect = (id: number) =>
     setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   const toggleAll = () =>
-    setSelectedIds(selectedIds.size === filtered.length ? new Set() : new Set(filtered.map(a => a.id)));
+    setSelectedIds(selectedIds.size === selectable.length ? new Set() : new Set(selectable.map(a => a.id)));
 
   const addSelected = () => {
-    onAddMultiple(filtered.filter(a => selectedIds.has(a.id)));
+    onAddMultiple(accessories.filter(a => selectedIds.has(a.id)));
     onClose();
   };
 
@@ -922,7 +955,7 @@ function AccessorySearchPopup({
                 <th style={{ ...thStyle, width: 40 }}>
                   <input
                     type="checkbox"
-                    checked={filtered.length > 0 && selectedIds.size === filtered.length}
+                    checked={selectable.length > 0 && selectedIds.size === selectable.length}
                     onChange={toggleAll}
                     style={{ cursor: "pointer", accentColor: "var(--accent)" }}
                   />
@@ -932,13 +965,14 @@ function AccessorySearchPopup({
                 <th style={thStyle}>Brand</th>
                 <th style={thStyle}>Code</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Price</th>
+                <th style={{ ...thStyle, textAlign: "right" }}>Stock</th>
                 <th style={{ ...thStyle, textAlign: "center", width: 80 }}>Status</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ ...tdStyle, textAlign: "center", padding: "32px 0", color: "var(--text-muted)" }}>
+                  <td colSpan={8} style={{ ...tdStyle, textAlign: "center", padding: "32px 0", color: "var(--text-muted)" }}>
                     No items match the filters
                   </td>
                 </tr>
@@ -946,12 +980,14 @@ function AccessorySearchPopup({
                 filtered.map(a => {
                   const selected = selectedIds.has(a.id);
                   const already  = inCart(a.id);
+                  const out      = a.stock <= 0;
                   return (
                     <tr
                       key={a.id}
-                      onClick={() => toggleSelect(a.id)}
+                      onClick={() => !out && toggleSelect(a.id)}
                       style={{
-                        cursor: "pointer",
+                        cursor: out ? "not-allowed" : "pointer",
+                        opacity: out ? 0.45 : 1,
                         background: selected ? `rgba(var(--accent-rgb),0.06)` : "transparent",
                         transition: "background 0.1s",
                       }}
@@ -960,9 +996,10 @@ function AccessorySearchPopup({
                         <input
                           type="checkbox"
                           checked={selected}
+                          disabled={out}
                           onChange={() => toggleSelect(a.id)}
                           onClick={e => e.stopPropagation()}
-                          style={{ cursor: "pointer", accentColor: "var(--accent)" }}
+                          style={{ cursor: out ? "not-allowed" : "pointer", accentColor: "var(--accent)" }}
                         />
                       </td>
                       <td style={{ ...tdStyle, fontWeight: 600 }}>{a.name}</td>
@@ -981,6 +1018,9 @@ function AccessorySearchPopup({
                       </td>
                       <td style={{ ...tdStyle, textAlign: "right", fontWeight: 600 }}>
                         Rs. {a.price.toLocaleString()}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: "right", color: out ? "#ef4444" : "var(--text-secondary)" }}>
+                        {out ? "Out" : a.stock}
                       </td>
                       <td style={{ ...tdStyle, textAlign: "center" }}>
                         {already && (
@@ -1037,12 +1077,17 @@ export default function MobileSales() {
   const isMobile = useIsMobile();
   const { addEntry } = useCashRegister();
   const { addSale } = useSales();
+  const { profile } = useAuth();
+  const { devices, sellSale, loading: devicesLoading, error: devicesError, configured } = useDevices();
+  const { products, reload: reloadAccessories } = useAccessories();
+
   const [imeiQuery,       setImeiQuery]       = useState("");
-  const [imeiError,       setImeiError]       = useState(false);
+  const [imeiError,       setImeiError]       = useState<string | null>(null);
   const [phoneCart,       setPhoneCart]       = useState<PhoneCartItem[]>([]);
-  const [showPhoneSearch, setShowPhoneSearch] = useState(false);
+  const [phoneSearch,     setPhoneSearch]     = useState<{ name: string; imei: string } | null>(null);
 
   const [barcodeQuery,      setBarcodeQuery]      = useState("");
+  const [barcodeError,      setBarcodeError]      = useState<string | null>(null);
   const [accessoryCart,     setAccessoryCart]     = useState<AccessoryCartItem[]>([]);
   const [showAccessorySearch, setShowAccessorySearch] = useState(false);
 
@@ -1052,113 +1097,310 @@ export default function MobileSales() {
   const [completed,              setCompleted]              = useState(false);
   const [showCardModal,          setShowCardModal]          = useState(false);
   const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<POSCreditCustomer | null>(null);
-  const [showPrintPreview,       setShowPrintPreview]       = useState(false);
+  // Cash: what the customer handed over, and — when it falls short of the
+  // total — how the rest is being settled.
+  const [cashReceived,           setCashReceived]           = useState("");
+  const [balanceMethod,          setBalanceMethod]          = useState<"" | "Card" | "Credit">("");
+  const [balanceCardRef,         setBalanceCardRef]         = useState("");
+  const [showPrintPreview,      setShowPrintPreview]       = useState(false);
   const [confirmedCardRef,       setConfirmedCardRef]       = useState("");
+  const [checkoutError,          setCheckoutError]          = useState<string | null>(null);
+  // Set when the stock moved and the invoice number was taken, but the ledger
+  // row or its credit charge did not land — the sale happened, the books need
+  // somebody to look at them.
+  const [saveWarning,            setSaveWarning]            = useState<string | null>(null);
 
-  // Assigned for real (from the shared invoice_no_seq sequence) only once the
-  // sale is actually completed — see fetchNextInvoiceNo's own comment for why
-  // this can't just run on mount.
+  // Assigned by sell_mobile_sale() in the same transaction that marks the
+  // devices sold, so a refused sale never burns a number.
   const [invoiceNo, setInvoiceNo] = useState<string | null>(null);
   const [invoicing, setInvoicing] = useState(false);
+  const busyRef = useRef(false);
+
+  const cashierName = profile?.fullName?.trim() || "Cashier";
+
+  // ── What can be sold ───────────────────────────────────────────────────────
+  // Sold phones are history, not stock. Reserved ones are still on the shelf —
+  // usually for the very customer now at the counter — and are flagged.
+  const sellablePhones = useMemo(
+    () => devices.filter(d => d.status !== "sold"),
+    [devices],
+  );
+
+  // Real stock less what this cart already holds, so the pickers can't offer
+  // more than is on the shelf. The actual deduction happens at checkout.
+  const accessories = useMemo<AccessoryBase[]>(() => {
+    const held = new Map(accessoryCart.map(i => [i.id, i.qty]));
+    return products.map(p => ({
+      id: p.id, code: p.code, name: p.name, model: p.model, brand: p.brand,
+      price: p.sellingPrice,
+      stock: Math.max(0, p.stock - (held.get(p.id) ?? 0)),
+    }));
+  }, [products, accessoryCart]);
+  const stockOf = (id: number) => products.find(p => p.id === id)?.stock ?? 0;
 
   // ── Phone cart handlers ────────────────────────────────────────────────────
-  const handleImeiSearch = () => {
-    const q = imeiQuery.trim().toLowerCase();
-    if (!q) return;
-    const found = PHONE_INVENTORY.find(p =>
-      p.imei.toLowerCase().includes(q) ||
-      p.name.toLowerCase().includes(q) ||
-      p.brand.toLowerCase().includes(q)
-    );
-    if (found) {
-      const alreadyIn = phoneCart.find(pc => pc.phone.imei === found.imei);
-      if (!alreadyIn) {
-        setPhoneCart(prev => [...prev, { phone: found, sellingPrice: found.suggestedPrice.toString(), discount: "" }]);
-      }
-      setImeiError(false);
-      setImeiQuery("");
-    } else {
-      setImeiError(true);
-    }
-  };
-
-  const handleAddMultiplePhones = (selected: Phone[]) => {
+  const addPhones = (selected: Phone[]) => {
     setPhoneCart(prev => {
-      const existing = new Set(prev.map(pc => pc.phone.imei));
+      const existing = new Set(prev.map(pc => pc.phone.id));
       const toAdd = selected
-        .filter(p => !existing.has(p.imei))
-        .map(p => ({ phone: p, sellingPrice: p.suggestedPrice.toString(), discount: "" }));
+        .filter(p => !existing.has(p.id))
+        .map(p => ({ phone: p, sellingPrice: p.suggestedPrice ? p.suggestedPrice.toString() : "", discount: "" }));
       return [...prev, ...toAdd];
     });
   };
 
-  const updatePhonePrice    = (imei: string, val: string) =>
-    setPhoneCart(prev => prev.map(pc => pc.phone.imei === imei ? { ...pc, sellingPrice: val } : pc));
-  const updatePhoneDiscount = (imei: string, val: string) =>
-    setPhoneCart(prev => prev.map(pc => pc.phone.imei === imei ? { ...pc, discount: val } : pc));
-  const removePhone         = (imei: string) =>
-    setPhoneCart(prev => prev.filter(pc => pc.phone.imei !== imei));
+  const handleImeiSearch = () => {
+    const q = imeiQuery.trim().toLowerCase();
+    if (!q) return;
 
-  // ── Accessory cart handlers ────────────────────────────────────────────────
-  const handleBarcodeAdd = () => {
-    const q = barcodeQuery.trim().toLowerCase();
-    const acc = ACCESSORIES.find(a => a.code.toLowerCase() === q || a.name.toLowerCase().includes(q));
-    if (acc) {
-      setAccessoryCart(prev => {
-        const existing = prev.find(i => i.id === acc.id);
-        if (existing) return prev.map(i => i.id === acc.id ? { ...i, qty: i.qty + 1 } : i);
-        return [...prev, { ...acc, discount: "", qty: 1 }];
-      });
-      setBarcodeQuery("");
+    // A scanned IMEI / serial is exact; a typed one is often just the last few
+    // digits; anything else is a name.
+    const exact = sellablePhones.filter(p => phoneIds(p).includes(q));
+    const partial = exact.length ? exact : sellablePhones.filter(p =>
+      phoneIds(p).some(id => id.endsWith(q)) ||
+      [p.name, p.brand, p.modelNumber].some(v => v.toLowerCase().includes(q)),
+    );
+
+    if (partial.length === 0) {
+      const sold = devices.find(p => p.status === "sold" && phoneIds(p).includes(q));
+      setImeiError(sold ? `${sold.name} (${sold.imei}) has already been sold` : "No device found — check IMEI or name");
+      return;
     }
+    if (partial.length === 1) {
+      if (phoneCart.some(pc => pc.phone.id === partial[0].id)) {
+        setImeiError("That device is already in this sale");
+        return;
+      }
+      addPhones(partial);
+      setImeiError(null);
+      setImeiQuery("");
+      return;
+    }
+    // Several match — let the cashier pick.
+    const numeric = /^[0-9]+$/.test(q);
+    setPhoneSearch({ name: numeric ? "" : imeiQuery.trim(), imei: numeric ? imeiQuery.trim() : "" });
+    setImeiError(null);
+    setImeiQuery("");
   };
 
-  const handleAddMultipleAccessories = (selected: typeof ACCESSORIES[number][]) => {
+  const updatePhonePrice    = (id: number, val: string) =>
+    setPhoneCart(prev => prev.map(pc => pc.phone.id === id ? { ...pc, sellingPrice: val } : pc));
+  const updatePhoneDiscount = (id: number, val: string) =>
+    setPhoneCart(prev => prev.map(pc => pc.phone.id === id ? { ...pc, discount: val } : pc));
+  const removePhone         = (id: number) =>
+    setPhoneCart(prev => prev.filter(pc => pc.phone.id !== id));
+
+  // ── Accessory cart handlers ────────────────────────────────────────────────
+  const addAccessories = (selected: AccessoryBase[]) => {
     setAccessoryCart(prev => {
       let next = [...prev];
-      selected.forEach(a => {
+      for (const a of selected) {
         const existing = next.find(i => i.id === a.id);
         if (existing) {
-          next = next.map(i => i.id === a.id ? { ...i, qty: i.qty + 1 } : i);
-        } else {
-          next = [...next, { ...a, discount: "", qty: 1 }];
+          if (existing.qty < stockOf(a.id)) next = next.map(i => i.id === a.id ? { ...i, qty: i.qty + 1 } : i);
+        } else if (stockOf(a.id) > 0) {
+          next = [...next, { id: a.id, code: a.code, name: a.name, model: a.model, brand: a.brand, price: a.price, discount: "", qty: 1 }];
         }
-      });
+      }
       return next;
     });
   };
 
+  const handleBarcodeAdd = () => {
+    const q = barcodeQuery.trim().toLowerCase();
+    if (!q) return;
+    const byCode = accessories.find(a => a.code.toLowerCase() === q);
+    const byName = byCode ? [] : accessories.filter(a => a.name.toLowerCase().includes(q));
+    const acc = byCode ?? (byName.length === 1 ? byName[0] : undefined);
+
+    if (!acc) {
+      if (byName.length > 1) { setShowAccessorySearch(true); setBarcodeError(null); return; }
+      setBarcodeError("No item found — check the code");
+      return;
+    }
+    if (acc.stock <= 0) {
+      setBarcodeError(`${acc.name} is out of stock`);
+      return;
+    }
+    addAccessories([acc]);
+    setBarcodeError(null);
+    setBarcodeQuery("");
+  };
+
   const updateAccQty      = (id: number, delta: number) =>
-    setAccessoryCart(prev => prev.map(i => i.id === id ? { ...i, qty: Math.max(1, i.qty + delta) } : i));
+    setAccessoryCart(prev => prev.map(i => i.id === id
+      ? { ...i, qty: Math.min(stockOf(id), Math.max(1, i.qty + delta)) }
+      : i));
   const updateAccDiscount = (id: number, val: string) =>
     setAccessoryCart(prev => prev.map(i => i.id === id ? { ...i, discount: val } : i));
   const removeAcc         = (id: number) =>
     setAccessoryCart(prev => prev.filter(i => i.id !== id));
 
   // ── Bill ───────────────────────────────────────────────────────────────────
-  const phonesNet   = phoneCart.reduce((s, pc) =>
-    s + Math.max(0, (parseFloat(pc.sellingPrice) || 0) - (parseFloat(pc.discount) || 0)), 0);
-  const accNet      = accessoryCart.reduce((s, i) =>
-    s + i.price * i.qty - (parseFloat(i.discount) || 0), 0);
-  const subtotal    = phonesNet + Math.max(0, accNet);
-  const overallAmt  = Math.min(subtotal, parseFloat(overallDiscount) || 0);
+  const phonesNet   = phoneCart.reduce((s, pc) => s + phoneNet(pc), 0);
+  const accsNet     = accessoryCart.reduce((s, i) => s + accNet(i), 0);
+  const subtotal    = phonesNet + accsNet;
+  const overallAmt  = Math.min(subtotal, Math.max(0, parseFloat(overallDiscount) || 0));
   const total       = subtotal - overallAmt;
+  // Before any discount at all — what sales.subtotal means.
+  const grossTotal  = phoneCart.reduce((s, pc) => s + (parseFloat(pc.sellingPrice) || 0), 0)
+                    + accessoryCart.reduce((s, i) => s + i.price * i.qty, 0);
 
-  const belowMin    = phoneCart.some(pc =>
-    parseFloat(pc.sellingPrice) > 0 && parseFloat(pc.sellingPrice) < pc.phone.minSellingPrice
+  // What each phone is really sold for: its own net, less its share of the
+  // overall discount. That is what the minimum is checked against — here and
+  // again in sell_mobile_sale() — and what the device records as sold_price.
+  const effectivePrice = (pc: PhoneCartItem) => {
+    const net = phoneNet(pc);
+    return subtotal > 0 ? Math.round((net - overallAmt * (net / subtotal)) * 100) / 100 : net;
+  };
+  const isPhoneBelowMin = (pc: PhoneCartItem) =>
+    pc.phone.minSellingPrice > 0 && effectivePrice(pc) < pc.phone.minSellingPrice;
+
+  const belowMin      = phoneCart.some(isPhoneBelowMin);
+  const missingPrice  = phoneCart.some(pc => !(parseFloat(pc.sellingPrice) > 0));
+  const customerReady = customer.name.trim() !== "" && customer.phone.trim() !== "";
+
+  // ── Payment split ──────────────────────────────────────────────────────────
+  const isCash       = paymentMethod === "Cash";
+  const cashEntered  = cashReceived.trim() !== "";
+  const received     = Math.max(0, parseFloat(cashReceived) || 0);
+  const cashPaid     = isCash ? Math.min(received, total) : 0;
+  const change       = isCash ? Math.max(0, Math.round((received - total) * 100) / 100) : 0;
+  const cashBalance  = isCash && cashEntered ? Math.max(0, Math.round((total - received) * 100) / 100) : 0;
+  const cardPaid     = paymentMethod === "Card" ? total : cashBalance > 0 && balanceMethod === "Card" ? cashBalance : 0;
+  const creditDue    = paymentMethod === "Credit" ? total : cashBalance > 0 && balanceMethod === "Credit" ? cashBalance : 0;
+  const usesCredit   = creditDue > 0;
+  /** What the ledger and the invoice call it. Credit wins whenever a balance
+   *  is going on account, the same rule the repair checkout uses. */
+  const recordedMethod: "Cash" | "Card" | "Credit" | "Split" | "" =
+    usesCredit ? "Credit" : isCash && cardPaid > 0 ? "Split" : paymentMethod;
+
+  const cashReady = isCash && cashEntered && (
+    cashBalance === 0 ||
+    (balanceMethod === "Card" && balanceCardRef.trim() !== "") ||
+    (balanceMethod === "Credit" && selectedCreditCustomer !== null)
   );
-  const canComplete = phoneCart.length > 0 && !belowMin &&
-    (paymentMethod === "Cash" ||
+
+  const canComplete = configured && phoneCart.length > 0 && !belowMin && !missingPrice && customerReady &&
+    (cashReady ||
      paymentMethod === "Card" ||
      (paymentMethod === "Credit" && selectedCreditCustomer !== null));
 
+  const choosePayment = (m: "Cash" | "Card" | "Credit") => {
+    setPaymentMethod(paymentMethod === m ? "" : m);
+    setCashReceived(""); setBalanceMethod(""); setBalanceCardRef("");
+    setSelectedCreditCustomer(null);
+  };
+
+  /**
+   * The sale itself. Stock first — every device marked sold and every
+   * accessory deducted in one transaction that also hands back the invoice
+   * number — then the ledger row, the till and, for credit, the charge.
+   * Nothing is recorded for a sale the database refused.
+   */
+  const finalize = async (cardRef?: string) => {
+    // A ref, not the state: a double click lands twice before any re-render.
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setInvoicing(true);
+    setCheckoutError(null);
+    setSaveWarning(null);
+    try {
+      const no = await sellSale(
+        phoneCart.map(pc => ({ id: pc.phone.id, price: effectivePrice(pc) })),
+        accessoryCart.map(i => ({ id: i.id, qty: i.qty })),
+      );
+      setInvoiceNo(no);
+      if (accessoryCart.length) void reloadAccessories();
+
+      // Only the cash actually kept goes in the drawer — change handed back
+      // never belonged to the till.
+      if (cashPaid > 0) addEntry("in", `Cash Sale — ${no}`, cashPaid);
+
+      const stored = await addSale(
+        {
+          invoiceNo: no,
+          date: new Date().toISOString().slice(0, 10),
+          customer: customer.name.trim() || "Walk-in",
+          category: "Mobile",
+          items: [
+            ...phoneCart.map(pc => pc.phone.name),
+            ...accessoryCart.map(ac => `${ac.name} ×${ac.qty}`),
+          ].join(", ") || "Mobile Sale",
+          total,
+          subtotal: grossTotal,
+          discountAmount: Math.max(0, grossTotal - total),
+          // Everything settled now; the rest is what the credit charge covers.
+          paid: Math.round((total - creditDue) * 100) / 100,
+          status: "Paid",
+          paymentMethod: recordedMethod || undefined,
+          cashAmount: isCash ? cashPaid : undefined,
+          cardAmount: cardPaid > 0 ? cardPaid : undefined,
+          cardRef: cardRef || (cardPaid > 0 && isCash ? balanceCardRef.trim() : "") || undefined,
+          cashier: profile?.fullName?.trim() || undefined,
+        },
+        {
+          customerPhone: customer.phone.trim() || null,
+          creditAccountId: usesCredit ? selectedCreditCustomer?.id ?? null : null,
+          lineItems: [
+            ...phoneCart.map(pc => ({ type: "device" as const, id: pc.phone.id, qty: 1 })),
+            ...accessoryCart.map(i => ({ type: "accessory" as const, id: i.id, qty: i.qty })),
+          ],
+          saleItems: [
+            ...phoneCart.map<NewSaleItem>(pc => ({
+              kind: "device",
+              referenceId: pc.phone.imei,
+              description: [pc.phone.name, pc.phone.storage, pc.phone.color].filter(Boolean).join(" · "),
+              qty: 1,
+              unitPrice: parseFloat(pc.sellingPrice) || 0,
+              discount: Math.min(parseFloat(pc.discount) || 0, parseFloat(pc.sellingPrice) || 0),
+              lineTotal: phoneNet(pc),
+            })),
+            ...accessoryCart.map<NewSaleItem>(i => ({
+              kind: "accessory",
+              referenceId: i.id,
+              description: i.name,
+              qty: i.qty,
+              unitPrice: i.price,
+              discount: Math.min(parseFloat(i.discount) || 0, i.price * i.qty),
+              lineTotal: accNet(i),
+            })),
+          ],
+        },
+      );
+
+      if (configured && !stored) {
+        setSaveWarning(`${no} was sold but could not be written to the sales ledger — check Sales History and tell an Admin.`);
+      } else if (usesCredit && stored && selectedCreditCustomer) {
+        // Charges total − paid, read from the stored row — i.e. just the balance.
+        try {
+          await posPostCredit(no, selectedCreditCustomer.id);
+        } catch (e) {
+          setSaveWarning(`${no} was saved, but the charge to ${selectedCreditCustomer.name}'s credit account failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
+      setShowCardModal(false);
+      setShowPrintPreview(true);
+    } catch (e) {
+      setShowCardModal(false);
+      setCheckoutError(e instanceof Error ? e.message : String(e));
+    } finally {
+      busyRef.current = false;
+      setInvoicing(false);
+    }
+  };
+
   const resetAll = () => {
     setPhoneCart([]); setAccessoryCart([]); setImeiQuery(""); setBarcodeQuery("");
+    setImeiError(null); setBarcodeError(null);
     setOverallDiscount(""); setPaymentMethod("");
     setCustomer({ name: "", phone: "", whatsapp: "", email: "", nic: "" });
     setSelectedCreditCustomer(null);
+    setCashReceived(""); setBalanceMethod(""); setBalanceCardRef("");
     setShowCardModal(false);
     setShowPrintPreview(false); setConfirmedCardRef("");
+    setCheckoutError(null); setSaveWarning(null);
     setCompleted(false); setInvoiceNo(null);
   };
 
@@ -1168,8 +1410,15 @@ export default function MobileSales() {
         <div style={{ fontSize: 52, color: "var(--accent)" }}>✓</div>
         <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "var(--text-primary)" }}>Invoice Complete</div>
         <div style={{ fontSize: 13, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-          {phoneCart.length} device{phoneCart.length !== 1 ? "s" : ""} · {fmt(total)} · {paymentMethod}
+          {invoiceNo} · {phoneCart.length} device{phoneCart.length !== 1 ? "s" : ""} · {fmt(total)} · {recordedMethod}
+          {change > 0 && ` · Change ${fmt(change)}`}
+          {creditDue > 0 && ` · ${fmt(creditDue)} on credit`}
         </div>
+        {saveWarning && (
+          <div style={{ maxWidth: 460, padding: "10px 14px", borderRadius: 9, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.35)", fontSize: 12.5, color: "#dc2626", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            {saveWarning}
+          </div>
+        )}
         <button onClick={resetAll} style={{ marginTop: 8, padding: "10px 28px", borderRadius: 8, border: "none", background: "var(--accent)", color: "var(--accent-fg)", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
           New Sale
         </button>
@@ -1178,37 +1427,60 @@ export default function MobileSales() {
   }
 
   return (
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+
+      {!configured && (
+        <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 9, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)", fontSize: 12.5, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          Connect Supabase to sell devices — the inventory is empty and nothing here will be saved.
+        </div>
+      )}
+      {configured && devicesLoading && devices.length === 0 && (
+        <div style={{ marginBottom: 12, fontSize: 12.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Loading device inventory…</div>
+      )}
+      {devicesError && (
+        <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 9, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.35)", fontSize: 12.5, color: "#dc2626", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          Could not load the device inventory: {devicesError}
+        </div>
+      )}
+      {checkoutError && (
+        <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 9, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.35)", fontSize: 12.5, color: "#dc2626", fontFamily: "'Plus Jakarta Sans', sans-serif", display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <span>Sale not completed — {checkoutError}</span>
+          <button onClick={() => setCheckoutError(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", display: "flex", padding: 0 }}><X size={14} /></button>
+        </div>
+      )}
+
     <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", flex: 1, minHeight: 0, overflowY: isMobile ? "auto" : undefined }}>
 
-      {showPhoneSearch && (
+      {phoneSearch && (
         <PhoneSearchPopup
-          phones={PHONE_INVENTORY}
+          phones={sellablePhones}
           phoneCart={phoneCart}
-          onAddMultiple={handleAddMultiplePhones}
-          onClose={() => setShowPhoneSearch(false)}
+          initialName={phoneSearch.name}
+          initialImei={phoneSearch.imei}
+          onAddMultiple={addPhones}
+          onClose={() => setPhoneSearch(null)}
         />
       )}
 
       {showAccessorySearch && (
         <AccessorySearchPopup
-          accessories={ACCESSORIES}
+          accessories={accessories}
           accessoryCart={accessoryCart}
-          onAddMultiple={handleAddMultipleAccessories}
+          onAddMultiple={addAccessories}
           onClose={() => setShowAccessorySearch(false)}
         />
       )}
 
-      {showCardModal && invoiceNo && (
+      {showCardModal && (
         <CardPaymentModal
-          invoiceNo={invoiceNo}
           phoneCart={phoneCart}
           accessoryCart={accessoryCart}
           customer={customer}
           subtotal={subtotal}
-          overallDiscount={parseFloat(overallDiscount) || 0}
+          overallDiscount={overallAmt}
           total={total}
-          onConfirm={(ref) => { setConfirmedCardRef(ref); setShowCardModal(false); setShowPrintPreview(true); }}
-          onCancel={() => setShowCardModal(false)}
+          onConfirm={(ref) => { setConfirmedCardRef(ref); void finalize(ref); }}
+          onCancel={() => { if (!invoicing) setShowCardModal(false); }}
         />
       )}
 
@@ -1218,29 +1490,18 @@ export default function MobileSales() {
           phoneCart={phoneCart}
           accessoryCart={accessoryCart}
           customer={customer}
-          paymentMethod={paymentMethod}
-          cardRef={confirmedCardRef || undefined}
-          creditCustomer={selectedCreditCustomer}
+          paymentMethod={recordedMethod === "Split" ? "Cash + Card" : isCash && usesCredit ? "Cash + Credit" : recordedMethod}
+          cardRef={confirmedCardRef || (isCash && cardPaid > 0 ? balanceCardRef.trim() : "") || undefined}
+          creditCustomer={usesCredit ? selectedCreditCustomer : null}
+          cashReceived={isCash ? received : undefined}
+          change={change}
+          cardPaid={cardPaid}
+          creditDue={creditDue}
           subtotal={subtotal}
-          overallDiscount={parseFloat(overallDiscount) || 0}
+          overallDiscount={overallAmt}
           total={total}
+          issuedBy={cashierName}
           onDone={() => {
-            if (paymentMethod === "Cash") {
-              addEntry("in", `Cash Sale — ${invoiceNo}`, total);
-            }
-            const itemLabel = [
-              ...phoneCart.map(pc => pc.phone.name),
-              ...accessoryCart.map(ac => `${ac.name} ×${ac.qty}`),
-            ].join(", ") || "Mobile Sale";
-            addSale({
-              invoiceNo,
-              date: new Date().toISOString().slice(0, 10),
-              customer: customer.name || "Walk-in",
-              category: "Mobile",
-              items: itemLabel,
-              total,
-              status: "Paid",
-            });
             setShowPrintPreview(false);
             setCompleted(true);
           }}
@@ -1248,23 +1509,23 @@ export default function MobileSales() {
       )}
 
       {/* ── Col 1: Devices ───────────────────────────────────────────────────── */}
-      <div style={{ flex: isMobile ? "none" : 1.3, display: "flex", flexDirection: "column", gap: 14, paddingRight: isMobile ? 0 : 20, paddingBottom: isMobile ? 16 : 0, borderRight: isMobile ? "none" : "1px solid var(--border)", borderBottom: isMobile ? "1px solid var(--border)" : "none", minHeight: 0 }}>
+      <div style={{ flex: isMobile ? "none" : 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 14, paddingRight: isMobile ? 0 : 20, paddingBottom: isMobile ? 16 : 0, borderRight: isMobile ? "none" : "1px solid var(--border)", borderBottom: isMobile ? "1px solid var(--border)" : "none", minHeight: 0 }}>
 
         {/* IMEI search */}
         <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", gap: 8 }}>
             <input
               value={imeiQuery}
-              onChange={e => { setImeiQuery(e.target.value); setImeiError(false); }}
+              onChange={e => { setImeiQuery(e.target.value); setImeiError(null); }}
               onKeyDown={e => e.key === "Enter" && handleImeiSearch()}
               placeholder="Scan IMEI or enter phone name..."
               style={{ ...inputStyle, flex: 1, borderColor: imeiError ? "#ef4444" : undefined }}
             />
-            <button onClick={() => setShowPhoneSearch(true)} style={searchBtn}><Search size={15} /></button>
+            <button onClick={() => setPhoneSearch({ name: "", imei: "" })} style={searchBtn}><Search size={15} /></button>
           </div>
           {imeiError && (
             <div style={{ fontSize: 11, color: "#ef4444", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-              No device found — check IMEI or name
+              {imeiError}
             </div>
           )}
         </div>
@@ -1280,10 +1541,10 @@ export default function MobileSales() {
             </div>
           ) : (
             phoneCart.map(pc => {
-              const sp = parseFloat(pc.sellingPrice) || 0;
-              const isBelowMin = sp > 0 && sp < pc.phone.minSellingPrice;
+              const isBelowMin = (parseFloat(pc.sellingPrice) || 0) > 0 && isPhoneBelowMin(pc);
+              const effective  = effectivePrice(pc);
               return (
-                <div key={pc.phone.imei} style={{
+                <div key={pc.phone.id} style={{
                   padding: "12px 14px", borderRadius: 10,
                   border: `1px solid ${isBelowMin ? "rgba(239,68,68,0.4)" : "var(--border)"}`,
                   background: "var(--bg-card)", display: "flex", flexDirection: "column", gap: 10,
@@ -1295,11 +1556,12 @@ export default function MobileSales() {
                         {pc.phone.name}
                       </div>
                       <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 2 }}>
-                        {pc.phone.color} · {pc.phone.storage} · <span style={{ fontFamily: "monospace" }}>{pc.phone.imei}</span>
+                        {[pc.phone.color, pc.phone.storage, pc.phone.ram && `${pc.phone.ram} RAM`].filter(Boolean).join(" · ")} · <span style={{ fontFamily: "monospace" }}>{pc.phone.imei}</span>
+                        {pc.phone.status === "reserved" && <span style={{ color: "#f59e0b", fontWeight: 600 }}> · Reserved</span>}
                       </div>
                     </div>
                     <button
-                      onClick={() => removePhone(pc.phone.imei)}
+                      onClick={() => removePhone(pc.phone.id)}
                       style={{ background: "none", border: "none", cursor: "pointer", color: "#ef4444", display: "flex", padding: 2, flexShrink: 0 }}
                     >
                       <Trash2 size={13} />
@@ -1311,8 +1573,8 @@ export default function MobileSales() {
                     {[
                       ["Brand",    pc.phone.brand],
                       ["Supplier", pc.phone.supplier],
-                      ["Bought",   pc.phone.boughtDate],
-                    ].map(([k, v]) => (
+                      ["Bought",   pc.phone.addedDate],
+                    ].filter(([, v]) => v).map(([k, v]) => (
                       <span key={k} style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                         <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{k}:</span> {v}
                       </span>
@@ -1332,12 +1594,13 @@ export default function MobileSales() {
                       <label style={{ ...labelStyle, marginBottom: 3 }}>Selling Price (Rs.)</label>
                       <input
                         type="number" value={pc.sellingPrice}
-                        onChange={e => updatePhonePrice(pc.phone.imei, e.target.value)}
+                        min={0}
+                        onChange={e => updatePhonePrice(pc.phone.id, e.target.value)}
                         style={{ ...inputStyle, fontWeight: 700, borderColor: isBelowMin ? "#ef4444" : undefined }}
                       />
                       {isBelowMin && (
                         <div style={{ fontSize: 10, color: "#ef4444", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 3 }}>
-                          Below minimum
+                          Sells for {fmt(effective)} after discounts — below minimum
                         </div>
                       )}
                     </div>
@@ -1345,7 +1608,8 @@ export default function MobileSales() {
                       <label style={{ ...labelStyle, marginBottom: 3 }}>Discount (Rs.)</label>
                       <input
                         type="number" value={pc.discount}
-                        onChange={e => updatePhoneDiscount(pc.phone.imei, e.target.value)}
+                        min={0}
+                        onChange={e => updatePhoneDiscount(pc.phone.id, e.target.value)}
                         placeholder="0"
                         style={inputStyle}
                       />
@@ -1359,17 +1623,24 @@ export default function MobileSales() {
       </div>
 
       {/* ── Col 2: Accessories ───────────────────────────────────────────────── */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 14, padding: isMobile ? "16px 0" : "0 20px", borderRight: isMobile ? "none" : "1px solid var(--border)", borderBottom: isMobile ? "1px solid var(--border)" : "none", minHeight: 0 }}>
+      <div style={{ flex: isMobile ? "none" : 0.8, minWidth: 0, display: "flex", flexDirection: "column", gap: 14, padding: isMobile ? "16px 0" : "0 20px", borderRight: isMobile ? "none" : "1px solid var(--border)", borderBottom: isMobile ? "1px solid var(--border)" : "none", minHeight: 0 }}>
 
-        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-          <input
-            value={barcodeQuery}
-            onChange={e => setBarcodeQuery(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handleBarcodeAdd()}
-            placeholder="Scan barcode or enter item code..."
-            style={{ ...inputStyle, flex: 1 }}
-          />
-          <button onClick={() => setShowAccessorySearch(true)} style={searchBtn}><Search size={15} /></button>
+        <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              value={barcodeQuery}
+              onChange={e => { setBarcodeQuery(e.target.value); setBarcodeError(null); }}
+              onKeyDown={e => e.key === "Enter" && handleBarcodeAdd()}
+              placeholder="Scan barcode or enter item code..."
+              style={{ ...inputStyle, flex: 1, borderColor: barcodeError ? "#ef4444" : undefined }}
+            />
+            <button onClick={() => setShowAccessorySearch(true)} style={searchBtn}><Search size={15} /></button>
+          </div>
+          {barcodeError && (
+            <div style={{ fontSize: 11, color: "#ef4444", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              {barcodeError}
+            </div>
+          )}
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1386,7 +1657,9 @@ export default function MobileSales() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{item.name}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 2 }}>{item.model} · {item.brand}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 2 }}>
+                      {[item.model, item.brand].filter(Boolean).join(" · ")} · {stockOf(item.id)} in stock
+                    </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>Rs. {item.price.toLocaleString()}</span>
@@ -1405,7 +1678,7 @@ export default function MobileSales() {
                     <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--border)", borderRadius: 7, overflow: "hidden" }}>
                       <button onClick={() => updateAccQty(item.id, -1)} style={{ width: 28, height: 32, border: "none", background: "transparent", cursor: "pointer", color: "var(--text-secondary)", display: "flex", alignItems: "center", justifyContent: "center" }}><Minus size={11} /></button>
                       <span style={{ width: 28, textAlign: "center", fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{item.qty}</span>
-                      <button onClick={() => updateAccQty(item.id, 1)} style={{ width: 28, height: 32, border: "none", background: "transparent", cursor: "pointer", color: "var(--text-secondary)", display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={11} /></button>
+                      <button onClick={() => updateAccQty(item.id, 1)} disabled={item.qty >= stockOf(item.id)} style={{ width: 28, height: 32, border: "none", background: "transparent", cursor: item.qty >= stockOf(item.id) ? "not-allowed" : "pointer", opacity: item.qty >= stockOf(item.id) ? 0.35 : 1, color: "var(--text-secondary)", display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={11} /></button>
                     </div>
                   </div>
                 </div>
@@ -1416,10 +1689,10 @@ export default function MobileSales() {
       </div>
 
       {/* ── Col 3: Customer + Bill ────────────────────────────────────────────── */}
-      <div style={{ width: isMobile ? "100%" : 300, flexShrink: 0, display: "flex", flexDirection: "column", paddingLeft: isMobile ? 0 : 20, paddingTop: isMobile ? 16 : 0, minHeight: 0, overflowY: "auto" }}>
+      <div style={{ width: isMobile ? "100%" : undefined, flex: isMobile ? "none" : 1.35, minWidth: isMobile ? 0 : 420, display: "flex", flexDirection: "column", paddingLeft: isMobile ? 0 : 20, paddingTop: isMobile ? 16 : 0, minHeight: 0, overflowY: "auto" }}>
 
         <div style={{ ...sectionHead, marginBottom: 12 }}>Customer Info</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
           {([
             { key: "name",     label: "Name *",              placeholder: "Customer name"      },
             { key: "phone",    label: "Phone Number *",      placeholder: "07X XXX XXXX"       },
@@ -1427,7 +1700,7 @@ export default function MobileSales() {
             { key: "email",    label: "Email (Optional)",    placeholder: "customer@email.com" },
             { key: "nic",      label: "NIC (Optional)",      placeholder: "199912345678"       },
           ] as { key: keyof typeof customer; label: string; placeholder: string }[]).map(({ key, label, placeholder }) => (
-            <div key={key}>
+            <div key={key} style={{ gridColumn: key === "nic" ? "1 / -1" : undefined, minWidth: 0 }}>
               <label style={labelStyle}>{label}</label>
               <input value={customer[key]} onChange={e => setCustomer(c => ({ ...c, [key]: e.target.value }))} placeholder={placeholder} style={inputStyle} />
             </div>
@@ -1436,34 +1709,44 @@ export default function MobileSales() {
 
         <div style={{ borderTop: "1px solid var(--border)", marginBottom: 16 }} />
 
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 4 }}>
-            Invoice No.
-          </div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: "0.03em" }}>
-            {invoiceNo}
-          </div>
-        </div>
-
         <div style={{ ...sectionHead, marginBottom: 10 }}>Bill Summary</div>
 
         {/* Per-phone breakdown */}
         {phoneCart.map(pc => (
-          <div key={pc.phone.imei} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 6 }}>
-            <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 }}>{pc.phone.name}</span>
-            <span style={{ color: "var(--text-primary)", fontWeight: 600, flexShrink: 0 }}>
-              {fmt(Math.max(0, (parseFloat(pc.sellingPrice) || 0) - (parseFloat(pc.discount) || 0)))}
-            </span>
+          <div key={pc.phone.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 8 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: "var(--text-primary)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pc.phone.name}</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>
+                <span style={{ fontFamily: "monospace" }}>{pc.phone.imei}</span>
+                {[pc.phone.storage, pc.phone.color].filter(Boolean).map(v => ` · ${v}`).join("")}
+              </div>
+            </div>
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <div style={{ color: "var(--text-primary)", fontWeight: 600 }}>{fmt(phoneNet(pc))}</div>
+              {(parseFloat(pc.discount) || 0) > 0 && (
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>
+                  {fmt(parseFloat(pc.sellingPrice) || 0)} − {fmt(parseFloat(pc.discount) || 0)}
+                </div>
+              )}
+            </div>
           </div>
         ))}
 
         {/* Per-accessory breakdown */}
         {accessoryCart.map(item => (
-          <div key={item.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 6 }}>
-            <span style={{ color: "var(--text-secondary)" }}>{item.name} ×{item.qty}</span>
-            <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-              {fmt(item.price * item.qty - (parseFloat(item.discount) || 0))}
-            </span>
+          <div key={item.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 8 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: "var(--text-primary)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>
+                <span style={{ fontFamily: "monospace" }}>{item.code}</span> · {item.qty} × {fmt(item.price)}
+              </div>
+            </div>
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <div style={{ color: "var(--text-primary)", fontWeight: 600 }}>{fmt(accNet(item))}</div>
+              {(parseFloat(item.discount) || 0) > 0 && (
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>− {fmt(parseFloat(item.discount) || 0)}</div>
+              )}
+            </div>
           </div>
         ))}
 
@@ -1489,10 +1772,7 @@ export default function MobileSales() {
           {(["Cash", "Card", "Credit"] as const).map(m => (
             <button
               key={m}
-              onClick={() => {
-                setPaymentMethod(paymentMethod === m ? "" : m);
-                if (m !== "Credit") setSelectedCreditCustomer(null);
-              }}
+              onClick={() => choosePayment(m)}
               style={{
                 flex: 1, padding: "8px 0", borderRadius: 7, fontSize: 12, fontWeight: 600,
                 border: `1px solid ${paymentMethod === m ? "var(--border-active)" : "var(--border)"}`,
@@ -1513,15 +1793,94 @@ export default function MobileSales() {
           </div>
         )}
 
+        {/* ── Cash: what was handed over, and how any shortfall is settled ── */}
+        {isCash && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 10, padding: 12, borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg-card)" }}>
+            <div>
+              <label style={labelStyle}>Cash Received (Rs.) *</label>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  type="number" min={0} autoFocus
+                  value={cashReceived}
+                  onChange={e => { setCashReceived(e.target.value); setBalanceMethod(""); setBalanceCardRef(""); setSelectedCreditCustomer(null); }}
+                  placeholder={total.toString()}
+                  style={{ ...inputStyle, flex: 1, fontWeight: 700 }}
+                />
+                <button
+                  onClick={() => { setCashReceived(total.toString()); setBalanceMethod(""); setBalanceCardRef(""); setSelectedCreditCustomer(null); }}
+                  style={{ padding: "0 12px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}
+                >
+                  Exact
+                </button>
+              </div>
+            </div>
+
+            {cashEntered && change > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "#16a34a" }}>
+                <span>Change to give</span><span>{fmt(change)}</span>
+              </div>
+            )}
+
+            {cashBalance > 0 && (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "#dc2626" }}>
+                  <span>Balance remaining</span><span>{fmt(cashBalance)}</span>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 6 }}>
+                    How is the balance being settled?
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {([["Card", "Paid by Card"], ["Credit", "Put on Credit"]] as const).map(([m, label]) => (
+                      <button
+                        key={m}
+                        onClick={() => { setBalanceMethod(balanceMethod === m ? "" : m); setBalanceCardRef(""); setSelectedCreditCustomer(null); }}
+                        style={{
+                          flex: 1, padding: "7px 0", borderRadius: 7, fontSize: 12, fontWeight: 600,
+                          border: `1px solid ${balanceMethod === m ? "var(--border-active)" : "var(--border)"}`,
+                          background: balanceMethod === m ? "var(--accent-dim)" : "transparent",
+                          color: balanceMethod === m ? "var(--accent)" : "var(--text-secondary)",
+                          cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif",
+                        }}
+                      >{label}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {balanceMethod === "Card" && (
+                  <div>
+                    <label style={labelStyle}>Card Reference No. for {fmt(cashBalance)} *</label>
+                    <input
+                      value={balanceCardRef}
+                      onChange={e => setBalanceCardRef(e.target.value)}
+                      placeholder="Reference number from terminal..."
+                      style={{ ...inputStyle, fontFamily: "monospace" }}
+                    />
+                  </div>
+                )}
+
+                {balanceMethod === "Credit" && (
+                  <div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 6 }}>
+                      Select the customer&apos;s credit account, or open a new one — {fmt(cashBalance)} will be charged to it.
+                    </div>
+                    <CreditCustomerPicker
+                      selected={selectedCreditCustomer}
+                      onSelect={setSelectedCreditCustomer}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         <button
-          onClick={async () => {
+          onClick={() => {
             if (!canComplete || invoicing) return;
-            setInvoicing(true);
-            const no = await fetchNextInvoiceNo();
-            setInvoiceNo(no);
-            setInvoicing(false);
+            // Card waits for the terminal's reference before anything is sold.
             if (paymentMethod === "Card") { setShowCardModal(true); return; }
-            setShowPrintPreview(true);
+            void finalize();
           }}
           disabled={!canComplete || invoicing}
           style={{
@@ -1533,18 +1892,33 @@ export default function MobileSales() {
           }}
         >
           {invoicing
-            ? "Generating invoice…"
+            ? "Completing sale…"
+            : !configured
+            ? "Database not connected"
             : phoneCart.length === 0
             ? "Scan a device first"
+            : missingPrice
+            ? "Enter a selling price"
             : belowMin
             ? "Price below minimum"
+            : !customerReady
+            ? "Enter customer name & phone"
             : !paymentMethod
             ? "Select payment method"
             : paymentMethod === "Credit" && !selectedCreditCustomer
             ? "Select credit customer"
+            : isCash && !cashEntered
+            ? "Enter cash received"
+            : isCash && cashBalance > 0 && !balanceMethod
+            ? "Choose how the balance is paid"
+            : isCash && balanceMethod === "Card" && !balanceCardRef.trim()
+            ? "Enter card reference"
+            : isCash && balanceMethod === "Credit" && !selectedCreditCustomer
+            ? "Select credit account"
             : `Complete Invoice · ${fmt(total)}`}
         </button>
       </div>
+    </div>
     </div>
   );
 }
