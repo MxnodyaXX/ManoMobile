@@ -83,6 +83,9 @@ interface CompletedRepair {
   issue: string;
   createdAt: string;
   completedAt?: string;
+  /** Printed on a dealer's sales invoice — see RepairInvoicePrintable. */
+  technician: string;
+  techRemarks?: string;
 }
 
 interface DealerProfile {
@@ -345,11 +348,14 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
     const styleEl = document.createElement("style");
     styleEl.id = "__rp_inv_style__";
     styleEl.textContent = `
-      @page { size: ${isManoMobile ? "A5 landscape" : "A4 landscape"}; margin: ${isManoMobile ? "0" : "12mm"}; }
+      ${pageCss}
       #__rp_inv__ { display: none; }
       @media print {
         body { visibility: hidden; }
-        #__rp_inv__ { display: block !important; visibility: visible; position: fixed; top: 0; left: 0; width: 100%; }
+        /* absolute, not fixed — a fixed element doesn't flow across printed
+           pages, so a dealer invoice long enough to need a second sheet would
+           get pinned to the first and clipped there. */
+        #__rp_inv__ { display: block !important; visibility: visible; position: absolute; top: 0; left: 0; width: 100%; }
         #__rp_inv__ * { visibility: visible; }
       }
     `;
@@ -655,6 +661,8 @@ export default function RepairSales({ initialDealer, initialJobId }: {
         issue: j.issue,
         createdAt: j.createdAt,
         completedAt: j.completedAt,
+        technician: j.technician,
+        techRemarks: j.techRemarks,
       }));
     const liveIds = new Set(live.map(r => r.id));
     return [

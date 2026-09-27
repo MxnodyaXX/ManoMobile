@@ -34,9 +34,13 @@ type Draft = Omit<ReceiptTemplate, "id" | "isDefault">;
 // Issue invoice: A4 portrait with its existing 15mm print margin left in
 // place (not reported as broken), so the design only needs to fill the
 // content area inside that margin — 210x297 minus 15mm each side.
+// Dealer invoice: A5 portrait, no print margin — matches
+// DEALER_INVOICE_PAGE_CSS in DealerInvoicePrintable.tsx, so a template built
+// here lines up with the built-in fallback it's replacing.
 const BLANK_BY_KIND: Record<TemplateKind, Draft> = {
   receipt: { name: "", kind: "receipt", pageWidthMm: 210, pageHeightMm: 148, elements: [] },
   issue: { name: "", kind: "issue", pageWidthMm: 180, pageHeightMm: 267, elements: [] },
+  dealerInvoice: { name: "", kind: "dealerInvoice", pageWidthMm: 148, pageHeightMm: 210, elements: [] },
 };
 
 const COPY: Record<TemplateKind, {
@@ -59,6 +63,17 @@ const COPY: Record<TemplateKind, {
       + "added yet) keeps printing the plain built-in invoice, so nothing changes until you build one here.",
     pageNote: "A4 portrait prints with a 15mm page margin — 180 × 267mm is the content area inside that margin.",
     migrationFile: "20260819000017_issue_invoice_templates.sql",
+  },
+  dealerInvoice: {
+    title: "Dealer Invoice Templates",
+    listEmpty: "No dealer invoice templates yet — click New Template to design one.",
+    description: "Design the sales invoice billed to an outside dealer for their completed repairs — it can carry many jobs "
+      + "across several pages. Tag each element's repeat scope in its properties: \"Every page\" for things like the logo "
+      + "band, \"First page only\" for the dealer/invoice-number block, \"Last page only\" for the totals and closing "
+      + "footer. The Invoice Table element grows across as many pages as it needs on its own — no manual page-splitting. "
+      + "An empty design (no elements added yet) keeps printing the plain built-in invoice.",
+    pageNote: "A5 portrait prints at 148 × 210mm with no page margin — the design has to fill that itself, and it may span more than one physical sheet.",
+    migrationFile: "20260928000001_dealer_invoice_templates.sql",
   },
 };
 
@@ -166,7 +181,7 @@ export default function ReceiptTemplateManager({ kind }: { kind: TemplateKind })
     try {
       await setDefaultReceiptTemplate(selected.id);
       await reload();
-      toast.dialog("success", "Default set", `${selected.name} is now what prints ${kind === "receipt" ? "on job intake" : "on job issue"}.`);
+      toast.dialog("success", "Default set", `${selected.name} is now what prints ${kind === "receipt" ? "on job intake" : kind === "issue" ? "on job issue" : "on a dealer invoice"}.`);
     } catch (e) {
       toast.dialog("error", "Could not set default", e instanceof Error ? e.message : String(e));
     } finally {

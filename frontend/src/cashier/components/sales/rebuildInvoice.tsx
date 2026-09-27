@@ -70,8 +70,27 @@ export function useRebuiltInvoice(tx: SaleTx, lines: SaleItem[]): RebuiltInvoice
       ?? IN_HOUSE_DEALER;
     const inHouse = isInHouseDealer(dealers, dealerName);
 
-    const repairs: InvoiceRepairLine[] = saleJobs.map(j => {
-      const svc = lines.find(l => l.kind === "repair_service" && l.referenceId === j.id);
+    // Walk the sale's own job list, not saleJobs — saleJobs silently drops any
+    // id the jobs table no longer has (deleted, or a stale id from before an
+    // edit), and that used to make the row disappear from the invoice with no
+    // trace, quietly under-billing it too. A job that can't be found still
+    // gets a row, built from what the sale's own line items remember about it.
+    const repairs: InvoiceRepairLine[] = (sale?.jobIds ?? []).map(id => {
+      const j = jobs.find(job => job.id === id);
+      const svc = lines.find(l => l.kind === "repair_service" && l.referenceId === id);
+      if (!j) {
+        return {
+          id,
+          dealer: dealerName,
+          customerName: tx.customer,
+          brand: "", model: svc?.description || "",
+          imei: "", issue: "Job record no longer available",
+          technician: "—", warranty: "—",
+          advance: 0,
+          unitPrice: svc?.unitPrice ?? 0,
+          discount: svc?.discount ?? 0,
+        };
+      }
       const back = j.completionType === "Cash Return" ? (j.cashReturnAmount ?? 0) : 0;
       // The intake advance is what the job had received before the handover
       // took the rest; advance_paid holds both, the handover says which part.
@@ -84,6 +103,9 @@ export function useRebuiltInvoice(tx: SaleTx, lines: SaleItem[]): RebuiltInvoice
         brand: j.brand,
         model: j.model,
         imei: j.imei ?? "",
+        issue: j.issue,
+        technician: j.technician,
+        techRemarks: j.techRemarks,
         warranty: j.jobWarranty || warrantyLine("NO WARRANTY", j.completionType),
         advance: Math.max(0, (j.advancePaid ?? 0) - settled),
         unitPrice: svc && svc.unitPrice > 0 ? svc.unitPrice : j.estimatedCost,

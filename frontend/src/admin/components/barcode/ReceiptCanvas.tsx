@@ -12,7 +12,7 @@ import {
   blankReceiptElement, clampReceiptElement, copyReceiptElements, RECEIPT_TOKENS,
   INVOICE_COLUMNS, invoiceColumns,
   type ReceiptElement, type ReceiptElementType, type ReceiptData, type TemplateKind,
-  type InvoiceColumn,
+  type InvoiceColumn, type RepeatScope,
 } from "@/lib/repair/receiptElements";
 import { FONT_OPTIONS, DEFAULT_FONT_FAMILY } from "@/lib/fonts";
 
@@ -359,6 +359,30 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
                 <NumIn value={selected.h} onChange={v => update(selected.id, { h: v })} />
               </Row>
 
+              {/* Only a dealerInvoice ever spans more than one physical page —
+                  a receipt or issue template is always exactly one, so this
+                  choice would do nothing there and isn't offered. */}
+              {kind === "dealerInvoice" && selected.type === "invoiceTable" && (
+                <Field label="Repeats">
+                  <div style={{ width: "100%", background: "var(--bg-secondary)", border: "1px dashed var(--border)", borderRadius: 7, padding: "8px 9px", fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                    <strong style={{ color: "var(--text-secondary)" }}>Body.</strong> The job list — it isn&apos;t tagged like the header/footer pieces, it always fills the space between them and grows across as many pages as the jobs need.
+                  </div>
+                </Field>
+              )}
+              {kind === "dealerInvoice" && selected.type !== "invoiceTable" && (
+                <Field label="Repeats">
+                  <select
+                    value={selected.repeatScope ?? "page"}
+                    onChange={e => update(selected.id, { repeatScope: e.target.value as RepeatScope })}
+                    style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 7, padding: "7px 9px", fontSize: 12, color: "var(--text-primary)", fontFamily: ff, outline: "none", cursor: "pointer" }}
+                  >
+                    <option value="page">Every page (page header / footer)</option>
+                    <option value="firstOnly">First page only (invoice header)</option>
+                    <option value="lastOnly">Last page only (invoice footer)</option>
+                  </select>
+                </Field>
+              )}
+
               {selected.type === "text" && (
                 <>
                   <Field label="Text">
@@ -371,7 +395,7 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
                   </Field>
                   <Field label="Insert a field">
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                      {RECEIPT_TOKENS.filter(t => !t.kind || t.kind === kind).map(t => (
+                      {RECEIPT_TOKENS.filter(t => !t.kind || t.kind.includes(kind)).map(t => (
                         <button
                           key={t.token}
                           title={t.label}
@@ -592,6 +616,11 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
                   <Row label="Font (pt)">
                     <NumIn value={selected.fontSize} onChange={v => update(selected.id, { fontSize: Math.max(4, v) })} />
                   </Row>
+                  {kind === "dealerInvoice" && (
+                    <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+                      How many rows fit on a page is measured off the real printed row height automatically — nothing to set here.
+                    </p>
+                  )}
                   <InvoiceColumnsField
                     columns={invoiceColumns(selected)}
                     onChange={columns => update(selected.id, { columns })}

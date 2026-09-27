@@ -35,7 +35,15 @@ interface TemplateRow {
 }
 
 const num = (v: number | string | null | undefined) => (v == null ? 0 : Number(v));
-const toKind = (v: string): TemplateKind => (v === "issue" ? "issue" : "receipt");
+// Was `v === "issue" ? "issue" : "receipt"` — silently relabelled every other
+// kind as "receipt", which was harmless while there were only two kinds (the
+// row's actual kind was already the one asked for, since every fetch below
+// filters `.eq("kind", kind)` at the database) but mislabels a dealerInvoice
+// row's own `.kind` field the moment a caller reads it back — e.g. the
+// "Copy Design From" list, which looks up COPY[t.kind] across every kind at
+// once. A plain cast is safe here for the same reason: the value only ever
+// reaches this app through the column's own check constraint.
+const toKind = (v: string): TemplateKind => v as TemplateKind;
 
 function toTemplate(row: TemplateRow): ReceiptTemplate {
   return {

@@ -11,9 +11,22 @@ import { DEFAULT_FONT_FAMILY } from "@/lib/fonts";
  * code and two different priced tables (one per document kind).
  */
 
-export type TemplateKind = "receipt" | "issue";
+export type TemplateKind = "receipt" | "issue" | "dealerInvoice";
 
 export type ReceiptElementType = "text" | "image" | "line" | "shape" | "qr" | "table" | "invoiceTable";
+
+/**
+ * Only meaningful on a `dealerInvoice` template, which is the only kind that
+ * ever spans more than one physical page — see ReceiptPagedRender.tsx.
+ *   "page"       — repeats on every page (a logo band, a page footer).
+ *   "firstOnly"  — only the first page (the dealer/invoice-number block).
+ *   "lastOnly"   — only the last page (totals, the closing footer band).
+ * Absent = "page". A receipt/issue template is always exactly one page, so
+ * every element there is trivially "on the page" regardless of this field —
+ * it's only read once a document actually has more than one page to place
+ * things across.
+ */
+export type RepeatScope = "page" | "firstOnly" | "lastOnly";
 
 interface BaseElement {
   id: string;
@@ -23,6 +36,7 @@ interface BaseElement {
   y: number;
   w: number;
   h: number;
+  repeatScope?: RepeatScope;
 }
 
 export interface ReceiptTextElement extends BaseElement {
@@ -281,22 +295,26 @@ export interface ReceiptData {
   dueAmount?: string;
   paymentType?: string;
   adminApprover?: string;
+  // ── Dealer invoice only ──
+  dealerName?: string;
+  dealerAddress?: string;
+  dealerContact?: string;
 }
 
-export const RECEIPT_TOKENS: { token: string; label: string; kind?: TemplateKind }[] = [
+export const RECEIPT_TOKENS: { token: string; label: string; kind?: TemplateKind[] }[] = [
   { token: "{{jobId}}",         label: "Job number" },
   { token: "{{customer}}",      label: "Customer name" },
   { token: "{{phone}}",         label: "Customer phone" },
   { token: "{{address}}",       label: "Customer address" },
   { token: "{{device}}",        label: "Device brand & model" },
   { token: "{{imei}}",          label: "IMEI" },
-  { token: "{{fault}}",         label: "Fault type", kind: "receipt" },
+  { token: "{{fault}}",         label: "Fault type", kind: ["receipt"] },
   { token: "{{estimate}}",      label: "Estimate" },
   { token: "{{advance}}",       label: "Advance paid" },
-  { token: "{{technician}}",    label: "Technician", kind: "receipt" },
-  { token: "{{estCompletion}}", label: "Est. completion", kind: "receipt" },
-  { token: "{{priority}}",      label: "Priority", kind: "receipt" },
-  { token: "{{itemsReceived}}", label: "Items received", kind: "receipt" },
+  { token: "{{technician}}",    label: "Technician", kind: ["receipt", "dealerInvoice"] },
+  { token: "{{estCompletion}}", label: "Est. completion", kind: ["receipt"] },
+  { token: "{{priority}}",      label: "Priority", kind: ["receipt"] },
+  { token: "{{itemsReceived}}", label: "Items received", kind: ["receipt"] },
   { token: "{{date}}",          label: "Date created" },
   { token: "{{createdBy}}",     label: "Created by" },
   { token: "{{shopName}}",      label: "Shop name" },
@@ -308,23 +326,26 @@ export const RECEIPT_TOKENS: { token: string; label: string; kind?: TemplateKind
   { token: "{{bankName}}",           label: "Bank name" },
   { token: "{{bankAccountNumber}}",  label: "Bank account number" },
   { token: "{{bankAccountHolder}}",  label: "Bank account holder" },
-  { token: "{{invoiceNo}}",     label: "Invoice number", kind: "issue" },
-  { token: "{{nic}}",           label: "Customer NIC", kind: "issue" },
-  { token: "{{email}}",         label: "Customer email", kind: "issue" },
-  { token: "{{warranty}}",      label: "Warranty terms", kind: "issue" },
-  { token: "{{completionDate}}",    label: "Date of completion", kind: "issue" },
-  { token: "{{finalAmount}}",       label: "Final amount", kind: "issue" },
-  { token: "{{technicianRemarks}}", label: "Technician remarks", kind: "issue" },
-  { token: "{{warrantyPeriod}}",    label: "Warranty period (parts/labour)", kind: "issue" },
-  { token: "{{balanceDue}}",        label: "Due amount (before discount)", kind: "issue" },
-  { token: "{{amountToBePaid}}",    label: "Amount to be paid (after discount)", kind: "issue" },
-  { token: "{{discount}}",      label: "Discount", kind: "issue" },
-  { token: "{{lineTotal}}",     label: "Line total (after discount)", kind: "issue" },
-  { token: "{{paidAmount}}",    label: "Paid amount", kind: "issue" },
-  { token: "{{dueAfterPayment}}",   label: "Due after payment", kind: "issue" },
-  { token: "{{dueAmount}}",     label: "Balance due", kind: "issue" },
-  { token: "{{paymentType}}",   label: "Payment type (CASH / CREDIT)", kind: "issue" },
-  { token: "{{adminApprover}}", label: "Credit approved by", kind: "issue" },
+  { token: "{{invoiceNo}}",     label: "Invoice number", kind: ["issue", "dealerInvoice"] },
+  { token: "{{nic}}",           label: "Customer NIC", kind: ["issue"] },
+  { token: "{{email}}",         label: "Customer email", kind: ["issue"] },
+  { token: "{{warranty}}",      label: "Warranty terms", kind: ["issue", "dealerInvoice"] },
+  { token: "{{completionDate}}",    label: "Date of completion", kind: ["issue", "dealerInvoice"] },
+  { token: "{{finalAmount}}",       label: "Final amount", kind: ["issue", "dealerInvoice"] },
+  { token: "{{technicianRemarks}}", label: "Technician remarks", kind: ["issue", "dealerInvoice"] },
+  { token: "{{warrantyPeriod}}",    label: "Warranty period (parts/labour)", kind: ["issue", "dealerInvoice"] },
+  { token: "{{balanceDue}}",        label: "Due amount (before discount)", kind: ["issue", "dealerInvoice"] },
+  { token: "{{amountToBePaid}}",    label: "Amount to be paid (after discount)", kind: ["issue", "dealerInvoice"] },
+  { token: "{{discount}}",      label: "Discount", kind: ["issue", "dealerInvoice"] },
+  { token: "{{lineTotal}}",     label: "Line total (after discount)", kind: ["issue", "dealerInvoice"] },
+  { token: "{{paidAmount}}",    label: "Paid amount", kind: ["issue", "dealerInvoice"] },
+  { token: "{{dueAfterPayment}}",   label: "Due after payment", kind: ["issue", "dealerInvoice"] },
+  { token: "{{dueAmount}}",     label: "Balance due", kind: ["issue", "dealerInvoice"] },
+  { token: "{{paymentType}}",   label: "Payment type (CASH / CREDIT)", kind: ["issue"] },
+  { token: "{{adminApprover}}", label: "Credit approved by", kind: ["issue"] },
+  { token: "{{dealerName}}",    label: "Dealer name", kind: ["dealerInvoice"] },
+  { token: "{{dealerAddress}}", label: "Dealer address", kind: ["dealerInvoice"] },
+  { token: "{{dealerContact}}", label: "Dealer contact", kind: ["dealerInvoice"] },
 ];
 
 export function resolveReceiptTokens(text: string, data: ReceiptData): string {
@@ -339,7 +360,10 @@ const newId = () => `re-${Date.now().toString(36)}-${(seq++).toString(36)}`;
 
 /** A sensible starting box for each type, placed at the top-left. */
 export function blankReceiptElement(type: ReceiptElementType, page: { w: number; h: number }): ReceiptElement {
-  const base = { id: newId(), x: 4, y: 4 };
+  // "page" — repeats on every sheet — is the sane default for a freshly
+  // dropped element; a dealer invoice's only firstOnly/lastOnly elements are
+  // the ones someone deliberately retags, not the common case.
+  const base = { id: newId(), x: 4, y: 4, repeatScope: "page" as RepeatScope };
   switch (type) {
     case "text":
       return { ...base, type, w: Math.min(60, page.w - 8), h: 8, text: "New text", fontSize: 11, bold: false, align: "left", color: "#000000", fontFamily: DEFAULT_FONT_FAMILY };

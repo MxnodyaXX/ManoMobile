@@ -1140,7 +1140,7 @@ function BarcodeManager() {
   // each (LabelTemplatesPanel's restrictToLayout) so a phone label and an
   // accessory label can be designed independently without three copies of
   // this screen.
-  const [section, setSection] = useState<"labels" | "device" | "accessory" | "receipt" | "issue">("labels");
+  const [section, setSection] = useState<"labels" | "device" | "accessory" | "receipt" | "issue" | "dealerInvoice">("labels");
 
   const { templates, loading, error, configured, reload } = useBarcodeTemplates();
 
@@ -1153,7 +1153,7 @@ function BarcodeManager() {
           differently-sized/shaped printables, so they each get their own
           section rather than one picker trying to hold all three. */}
       <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, width: "fit-content", flexWrap: "wrap" }}>
-        {([["labels", "Barcode Labels"], ["device", "Mobile Devices"], ["accessory", "Accessories"], ["receipt", "Job Receipt"], ["issue", "Job Issue Invoice"]] as const).map(([sec, lbl]) => {
+        {([["labels", "Barcode Labels"], ["device", "Mobile Devices"], ["accessory", "Accessories"], ["receipt", "Job Receipt"], ["issue", "Job Issue Invoice"], ["dealerInvoice", "Dealer Invoice"]] as const).map(([sec, lbl]) => {
           const active = section === sec;
           return (
             <button key={sec} onClick={() => setSection(sec)} style={{ padding: "7px 15px", borderRadius: 7, fontSize: 12.5, cursor: "pointer", fontFamily: ff, background: active ? "var(--bg-secondary)" : "transparent", border: active ? "1px solid var(--border-active)" : "1px solid transparent", color: active ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: active ? 600 : 400 }}>
@@ -1167,6 +1167,8 @@ function BarcodeManager() {
         <ReceiptTemplateManager kind="receipt" />
       ) : section === "issue" ? (
         <ReceiptTemplateManager kind="issue" />
+      ) : section === "dealerInvoice" ? (
+        <ReceiptTemplateManager kind="dealerInvoice" />
       ) : (
         <LabelTemplatesPanel
           templates={templates}

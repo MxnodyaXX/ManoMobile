@@ -11,6 +11,7 @@ export type { JobStatus, RepairJob } from "@/cashier/contexts/RepairContext";
 import { createPortal } from "react-dom";
 import JobReceiptPrintable from "./JobReceiptPrintable";
 import JobIssuePrintable, { type IssueInvoiceData } from "./JobIssuePrintable";
+import DealerInvoicePrintable, { type InvoiceRepairLine } from "@/cashier/components/sales/DealerInvoicePrintable";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import { useParts } from "@/cashier/contexts/PartsContext";
 import { useMyPermissions } from "@/lib/settings/staffRules";
@@ -771,13 +772,18 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
     st.id = "__slip_style__";
     const pageRule = isIssued
       ? "size: A4 portrait; margin: 15mm;"
-      : `size: ${useInvoiceFormat ? "A4 landscape" : "A5 landscape"}; margin: ${useInvoiceFormat ? "12mm" : "0"};`;
+      : useInvoiceFormat
+        ? "size: A5 portrait; margin: 0;" // matches DealerInvoicePrintable's own page CSS
+        : "size: A5 landscape; margin: 0;";
     st.textContent = `
       @page { ${pageRule} }
       #__slip__ { display: none; }
       @media print {
         body { visibility: hidden; }
-        #__slip__ { display: block !important; visibility: visible; position: fixed; top: 0; left: 0; width: 100%; }
+        /* absolute, not fixed — a fixed element doesn't flow across printed
+           pages, so a dealer invoice long enough to need a second sheet would
+           get pinned to the first and clipped there. */
+        #__slip__ { display: block !important; visibility: visible; position: absolute; top: 0; left: 0; width: 100%; }
         #__slip__ * { visibility: visible; }
       }
     `;
@@ -858,117 +864,40 @@ const SalesInvoiceSlip = forwardRef<HTMLDivElement, { job: RepairJob; fmtSlipDat
   function SalesInvoiceSlip({ job, fmtSlipDate }, ref) {
     const { dealers } = useRepair();
     const dealerRecord = findDealer(dealers, job);
-    const balance   = Math.max(0, job.estimatedCost - job.advancePaid);
-    const settled   = balance === 0;
-    const lineTotal = job.estimatedCost;
-    const invTh: React.CSSProperties = { padding: "5px 7px", border: "1px solid #999", fontWeight: 700, fontStyle: "italic", textAlign: "left", whiteSpace: "nowrap", fontSize: 10.5, background: "#f0f0f0" };
-    const invTd: React.CSSProperties = { padding: "5px 7px", border: "1px solid #ccc", fontSize: 10.5, fontStyle: "italic" };
+    const dealerName = dealerRecord?.name || job.dealer || IN_HOUSE_DEALER;
+    const balance = Math.max(0, job.estimatedCost - job.advancePaid);
     const issuedDate = job.handover?.handedOverAt ?? job.completedAt ?? job.createdAt;
 
+    const line: InvoiceRepairLine = {
+      id: job.id,
+      dealer: dealerName,
+      customerName: job.customerName,
+      dealerJobNo: job.dealerJobNo,
+      brand: job.brand,
+      model: job.model,
+      imei: job.imei ?? "",
+      issue: job.issue,
+      technician: job.technician,
+      techRemarks: job.techRemarks,
+      warranty: job.jobWarranty || "NO WARRANTY",
+      advance: job.advancePaid,
+      unitPrice: job.estimatedCost,
+      discount: 0,
+      cashReturnAmount: job.completionType === "Cash Return" ? (job.cashReturnAmount ?? 0) : 0,
+    };
+
     return (
-      <div ref={ref} style={{ background: "#fff", padding: "30px 36px", fontFamily: "Arial, Helvetica, sans-serif", color: "#000", minWidth: 720 }}>
-        <h1 style={{ textAlign: "center", fontWeight: 900, textDecoration: "underline", fontSize: 24, margin: 0, letterSpacing: "0.06em" }}>SALES INVOICE</h1>
-
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 22 }}>
-          <table style={{ borderCollapse: "collapse" }}>
-            <tbody>
-              <tr>
-                <td style={{ padding: "3px 10px", fontWeight: 700, fontSize: 11, textAlign: "right", whiteSpace: "nowrap" }}>INVOICE NUMBER:</td>
-                <td style={{ padding: "4px 14px", background: "#e0e0e0", border: "1px solid #aaa", minWidth: 160, fontWeight: 700, fontSize: 14 }}>{job.id}</td>
-              </tr>
-              <tr>
-                <td style={{ padding: "3px 10px", fontWeight: 700, fontSize: 11, textAlign: "right", whiteSpace: "nowrap" }}>DATE and CREATED BY:</td>
-                <td style={{ padding: "4px 14px", background: "#e0e0e0", border: "1px solid #aaa", fontWeight: 700, fontSize: 11 }}>{fmtSlipDate(issuedDate)} | MANOMOBILE</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div style={{ marginTop: 18, display: "flex", gap: 48 }}>
-          <div>
-            <p style={{ fontSize: 12, fontWeight: 700, color: "#555" }}>DEALER</p>
-            <p style={{ fontSize: 13, fontWeight: 700 }}>{dealerRecord?.name || job.dealer || IN_HOUSE_DEALER}</p>
-            {dealerRecord?.address && <p style={{ fontSize: 11, color: "#555", marginTop: 1 }}>{dealerRecord.address}</p>}
-            {dealerRecord?.contact && <p style={{ fontSize: 11, color: "#555", marginTop: 1 }}>Tel: {dealerRecord.contact}</p>}
-          </div>
-          <div>
-            <p style={{ fontSize: 12, fontWeight: 700, color: "#555" }}>CUSTOMER</p>
-            <p style={{ fontSize: 13, fontWeight: 700 }}>{(job.customerName || "WALK-IN").toUpperCase()}</p>
-            {job.phone && <p style={{ fontSize: 11, color: "#555", marginTop: 1 }}>Tel: {job.phone}</p>}
-          </div>
-        </div>
-
-        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 16, border: "1px solid #999" }}>
-          <thead>
-            <tr>
-              <th style={invTh}>No.</th>
-              <th style={invTh}>Item type</th>
-              <th style={invTh}>Item name</th>
-              <th style={invTh}>IMEI no.</th>
-              <th style={invTh}>Warranty</th>
-              <th style={{ ...invTh, textAlign: "right" }}>Qty</th>
-              <th style={{ ...invTh, textAlign: "right" }}>Advance</th>
-              <th style={{ ...invTh, textAlign: "right" }}>Unit price</th>
-              <th style={{ ...invTh, textAlign: "right" }}>Discount</th>
-              <th style={{ ...invTh, textAlign: "right" }}>Line total</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td style={invTd}>1.</td>
-              <td style={invTd}>Repair</td>
-              <td style={invTd}>{job.id} | {job.brand} | {job.model}</td>
-              <td style={invTd}>{job.imei || "—"}</td>
-              <td style={invTd}>{job.jobWarranty || "NO WARRANTY"}</td>
-              <td style={{ ...invTd, textAlign: "right" }}>1</td>
-              <td style={{ ...invTd, textAlign: "right" }}>{job.advancePaid.toLocaleString()}</td>
-              <td style={{ ...invTd, textAlign: "right" }}>{job.estimatedCost.toLocaleString()}</td>
-              <td style={{ ...invTd, textAlign: "right" }}>—</td>
-              <td style={{ ...invTd, textAlign: "right", fontWeight: 700, fontStyle: "normal" }}>{lineTotal.toLocaleString()}</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-          <div style={{ width: 280, display: "flex", flexDirection: "column", gap: 3 }}>
-            <div style={{ borderTop: "2px solid #000", paddingTop: 5, display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700 }}>
-              <span>TOTAL</span><span>Rs. {job.estimatedCost.toLocaleString()}</span>
-            </div>
-            {job.advancePaid > 0 && (
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-                <span style={{ color: "#555" }}>Advance (previously paid)</span>
-                <span style={{ fontWeight: 600 }}>Rs. {job.advancePaid.toLocaleString()}</span>
-              </div>
-            )}
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, borderTop: "1px solid #e0e0e0", paddingTop: 3, marginTop: 1 }}>
-              <span style={{ color: "#555" }}>Total Paid</span>
-              <span style={{ fontWeight: 700 }}>Rs. {job.advancePaid.toLocaleString()}</span>
-            </div>
-            {settled ? (
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: "#f0fdf4", border: "1px solid #4ade80", borderRadius: 4, padding: "3px 6px", marginTop: 2 }}>
-                <span style={{ fontWeight: 700, color: "#166534" }}>SETTLED</span>
-                <span style={{ fontWeight: 700, color: "#166534" }}>✓</span>
-              </div>
-            ) : (
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: "#fff8e1", border: "1px solid #f59e0b", borderRadius: 4, padding: "3px 6px", marginTop: 2 }}>
-                <span style={{ fontWeight: 700, color: "#b45309" }}>BALANCE DUE</span>
-                <span style={{ fontWeight: 700, color: "#b45309" }}>Rs. {balance.toLocaleString()}</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div style={{ marginTop: 14, fontSize: 11 }}>
-          <span style={{ fontWeight: 700 }}>Payment Type: </span>
-          <span style={{ fontWeight: 700, color: settled ? "#166534" : "#b45309", background: settled ? "#f0fdf4" : "#fff8e1", border: `1px solid ${settled ? "#4ade80" : "#f59e0b"}`, borderRadius: 4, padding: "2px 8px" }}>
-            {settled ? "CASH / FULL" : "CREDIT"}
-          </span>
-        </div>
-
-        <p style={{ marginTop: 28, fontSize: 9.5, color: "#888", textAlign: "center" }}>
-          This is a computer-generated invoice. No signature required.
-        </p>
-      </div>
+      <DealerInvoicePrintable
+        ref={ref}
+        invoiceNo={job.id}
+        createdAt={fmtSlipDate(issuedDate)}
+        dealerName={dealerName}
+        dealerAddress={dealerRecord?.address}
+        dealerContact={dealerRecord?.contact}
+        repairs={[line]}
+        paidAmount={job.advancePaid}
+        dueAmount={balance}
+      />
     );
   },
 );

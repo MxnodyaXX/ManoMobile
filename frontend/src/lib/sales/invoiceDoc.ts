@@ -176,7 +176,10 @@ export function printInvoiceDocument(doc: InvoiceDocument) {
     #${holderId} { display: none; }
     @media print {
       body { visibility: hidden; }
-      #${holderId} { display: block !important; visibility: visible; position: fixed; top: 0; left: 0; width: 100%; }
+      /* absolute, not fixed — a fixed element doesn't flow across printed
+         pages, so a dealer invoice long enough to need a second sheet would
+         get pinned to the first and clipped there. */
+      #${holderId} { display: block !important; visibility: visible; position: absolute; top: 0; left: 0; width: 100%; }
       #${holderId} * { visibility: visible; }
     }
   `;

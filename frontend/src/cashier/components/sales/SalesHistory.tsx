@@ -462,6 +462,17 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
   };
   const canPrint = !!doc || (!loading && !rebuilt.loading);
 
+  /**
+   * The stored document is frozen on purpose — see the file comment — but a
+   * template redesign is exactly the case where somebody at the counter does
+   * want the new look on an old sale, not the one that was current the day it
+   * was rung up. This re-renders from today's template without touching the
+   * stored record, so the original stays retrievable and nothing here rewrites
+   * invoice_documents (which has no update policy at all).
+   */
+  const [showCurrentTemplate, setShowCurrentTemplate] = useState(false);
+  const showingRebuilt = !doc || showCurrentTemplate;
+
   return createPortal(
     <div style={{ position: "fixed", inset: 0, zIndex: 1010, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)" }} />
@@ -494,32 +505,56 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
         </div>
 
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 0 }}>
-          {(loading || (!doc && rebuilt.loading)) && (
+          {(loading || (showingRebuilt && rebuilt.loading)) && (
             <p style={{ fontSize: 12.5, color: "var(--text-muted)", padding: 22, textAlign: "center", fontFamily: ff }}>
               Loading the invoice…
             </p>
           )}
 
-          {/* The stored document, exactly as it printed. Rendered on a white
-              sheet because that is the paper it was designed against — the
-              app's dark surfaces behind it would misrepresent the layout. */}
-          {!loading && doc && (
-            <div style={{ background: "#525659", padding: 20, display: "flex", justifyContent: "center" }}>
-              <div
-                style={{ background: "#fff", boxShadow: "0 4px 24px rgba(0,0,0,0.35)", maxWidth: "100%", overflowX: "auto" }}
-                dangerouslySetInnerHTML={{ __html: doc.html }}
-              />
+          {/* Stored document exists, but the current template was asked for
+              instead — offer the way back before the current-template notice
+              and preview render below. */}
+          {!loading && doc && showCurrentTemplate && (
+            <div style={{ display: "flex", gap: 9, padding: "11px 13px", margin: "16px 22px 0", borderRadius: 9, background: "rgba(96,165,250,0.08)", border: "1px solid rgba(96,165,250,0.35)", alignItems: "center", justifyContent: "space-between" }}>
+              <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.55, fontFamily: ff }}>
+                Showing today&apos;s template, not the page that was actually printed.
+              </p>
+              <button onClick={() => setShowCurrentTemplate(false)} style={{ background: "none", border: "1px solid rgba(96,165,250,0.4)", borderRadius: 7, color: "#60a5fa", cursor: "pointer", fontSize: 11.5, fontWeight: 600, padding: "5px 10px", fontFamily: ff, whiteSpace: "nowrap" }}>
+                View original
+              </button>
             </div>
           )}
 
-          {!loading && !doc && !rebuilt.loading && (
+          {/* The stored document, exactly as it printed. Rendered on a white
+              sheet because that is the paper it was designed against — the
+              app's dark surfaces behind it would misrepresent the layout. */}
+          {!loading && doc && !showCurrentTemplate && (
+            <>
+              <div style={{ display: "flex", gap: 9, padding: "11px 13px", margin: "16px 22px 0", borderRadius: 9, background: "var(--bg-secondary)", border: "1px solid var(--border)", alignItems: "center", justifyContent: "space-between" }}>
+                <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.55, fontFamily: ff }}>
+                  This is the page as it was actually printed.
+                </p>
+                <button onClick={() => setShowCurrentTemplate(true)} style={{ background: "none", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text-secondary)", cursor: "pointer", fontSize: 11.5, fontWeight: 600, padding: "5px 10px", fontFamily: ff, whiteSpace: "nowrap" }}>
+                  View in current template
+                </button>
+              </div>
+              <div style={{ background: "#525659", padding: 20, display: "flex", justifyContent: "center" }}>
+                <div
+                  style={{ background: "#fff", boxShadow: "0 4px 24px rgba(0,0,0,0.35)", maxWidth: "100%", overflowX: "auto" }}
+                  dangerouslySetInnerHTML={{ __html: doc.html }}
+                />
+              </div>
+            </>
+          )}
+
+          {!loading && showingRebuilt && !rebuilt.loading && (
             <>
               <div style={{ display: "flex", gap: 9, padding: "11px 13px", margin: "16px 22px 0", borderRadius: 9, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.35)" }}>
                 <AlertCircle size={14} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
                 <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.55, fontFamily: ff }}>
-                  The printed page for this sale was not kept, so this invoice is rebuilt from
-                  the sale record and its jobs as they stand today. It prints in the same layout;
-                  anything changed since the sale shows as it is now.
+                  {doc
+                    ? "Rebuilt from the sale record and its jobs as they stand today, in today's template. The original printed page is one tap away."
+                    : "The printed page for this sale was not kept, so this invoice is rebuilt from the sale record and its jobs as they stand today. It prints in the same layout; anything changed since the sale shows as it is now."}
                 </p>
               </div>
               <div style={{ background: "#525659", padding: 20, marginTop: 16, display: "flex", justifyContent: "center" }}>
@@ -540,9 +575,9 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
             Close
           </button>
           <button
-            onClick={() => (doc ? printInvoiceDocument(doc) : printRebuilt())}
+            onClick={() => (doc && !showCurrentTemplate ? printInvoiceDocument(doc) : printRebuilt())}
             disabled={!canPrint}
-            title={doc ? undefined : "Prints the invoice rebuilt from the sale record"}
+            title={doc && !showCurrentTemplate ? undefined : "Prints the invoice rebuilt from the sale record, in today's template"}
             style={{
               flex: 1, padding: "10px 0", borderRadius: 9, border: "1px solid var(--accent-glow)",
               background: "var(--accent-dim)", color: "var(--accent)",
@@ -551,7 +586,7 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
               display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
             }}
           >
-            <Printer size={14} /> {doc ? "Reprint Invoice" : "Print Invoice"}
+            <Printer size={14} /> {doc && !showCurrentTemplate ? "Reprint Invoice" : "Print Invoice"}
           </button>
         </div>
       </div>

@@ -6,6 +6,7 @@ import {
   resolveReceiptTokens,
   type ReceiptElement,
   type ReceiptData,
+  type ReceiptInvoiceTableElement,
   INVOICE_COLUMNS, invoiceColumns,
 } from "@/lib/repair/receiptElements";
 import { DEFAULT_FONT_FAMILY } from "@/lib/fonts";
@@ -23,13 +24,24 @@ interface ReceiptRenderProps {
   heightMm: number;
   /** Editor zoom. 1 = physical size, which is what printing uses. */
   scale?: number;
+  /**
+   * Multiple rows for the invoiceTable element, e.g. one dealer invoice's
+   * worth of jobs on this physical page — see ReceiptPagedRender.tsx, which
+   * is what actually splits a job list across pages and calls this once per
+   * page with just that page's slice. Absent (the receipt/issue case) means
+   * the invoiceTable element prints its usual single row from `data` itself.
+   */
+  tableRows?: ReceiptData[];
+  /** How many rows came before this page's slice — so the "No." column keeps
+   *  counting up across pages instead of starting over at 1 on each one. */
+  tableRowStart?: number;
 }
 
 const mm = (v: number) => `${v}mm`;
 const money = (v: string | undefined) => (v && v.trim() ? `Rs. ${v}` : "—");
 
 const ReceiptRender = forwardRef<HTMLDivElement, ReceiptRenderProps>(function ReceiptRender(
-  { elements, data, widthMm, heightMm, scale = 1 }, ref,
+  { elements, data, widthMm, heightMm, scale = 1, tableRows, tableRowStart = 0 }, ref,
 ) {
   return (
     <div
@@ -56,7 +68,7 @@ const ReceiptRender = forwardRef<HTMLDivElement, ReceiptRenderProps>(function Re
             boxSizing: "border-box",
           }}
         >
-          <ElementBody el={el} data={data} />
+          <ElementBody el={el} data={data} tableRows={tableRows} tableRowStart={tableRowStart} />
         </div>
       ))}
     </div>
@@ -65,7 +77,7 @@ const ReceiptRender = forwardRef<HTMLDivElement, ReceiptRenderProps>(function Re
 
 export default ReceiptRender;
 
-function ElementBody({ el, data }: { el: ReceiptElement; data: ReceiptData }) {
+function ElementBody({ el, data, tableRows, tableRowStart = 0 }: { el: ReceiptElement; data: ReceiptData; tableRows?: ReceiptData[]; tableRowStart?: number }) {
   switch (el.type) {
     case "text": {
       const text = resolveReceiptTokens(el.text, data);
@@ -167,62 +179,94 @@ function ElementBody({ el, data }: { el: ReceiptElement; data: ReceiptData }) {
       );
     }
 
-    case "invoiceTable": {
-      const th: React.CSSProperties = {
-        padding: "1.2mm 1.6mm", border: `0.2mm solid ${el.borderColor}`, fontWeight: 700,
-        whiteSpace: "nowrap", fontSize: `${el.fontSize}pt`,
-        background: el.headerBg, color: el.headerColor,
-      };
-      const td: React.CSSProperties = {
-        padding: "1.4mm 1.6mm", border: `0.2mm solid ${el.borderColor}`, fontSize: `${el.fontSize}pt`,
-        color: "#000", verticalAlign: "top",
-      };
-
-      const cols = invoiceColumns(el);
-      // Widths are relative weights, so they are normalised here rather than
-      // being required to add up to 100 in the editor — a column can be
-      // dropped without every remaining width needing to be retyped.
-      const total = cols.reduce((n, c) => n + Math.max(1, c.width), 0);
-
-      return (
-        <table style={{ width: "100%", height: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontFamily: "'Plus Jakarta Sans', Arial, sans-serif" }}>
-          <thead>
-            <tr>
-              {cols.map((c, n) => {
-                const spec = INVOICE_COLUMNS.find(k => k.id === c.id)!;
-                return (
-                  <th key={`${c.id}-${n}`} style={{ ...th, textAlign: spec.align, width: `${(Math.max(1, c.width) / total) * 100}%` }}>
-                    {c.label || spec.label}
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              {cols.map((c, n) => {
-                const spec = INVOICE_COLUMNS.find(k => k.id === c.id)!;
-                const raw = spec.value(data);
-                return (
-                  <td
-                    key={`${c.id}-${n}`}
-                    style={{
-                      ...td,
-                      textAlign: spec.align,
-                      // The IMEI is read digit by digit off a printed page, so
-                      // it keeps the fixed pitch it has always had.
-                      fontFamily: c.id === "imei" ? "monospace" : undefined,
-                      fontWeight: c.id === "lineTotal" ? 700 : undefined,
-                    }}
-                  >
-                    {spec.money ? money(raw) : (raw && raw.trim() ? raw : "—")}
-                  </td>
-                );
-              })}
-            </tr>
-          </tbody>
-        </table>
-      );
-    }
+    case "invoiceTable":
+      // The issue invoice has always printed its own one row from `data`, and
+      // that one row is meant to stretch and fill the box it was given. A
+      // dealer invoice hands in the whole page's slice of jobs instead — those
+      // rows must stay their natural height regardless of how many happen to
+      // land on a page, or a short last page stretches every row on it to
+      // fill the space the fuller pages needed, ballooning them for no reason.
+      return <InvoiceTableBody el={el} rows={tableRows ?? [data]} fill={!tableRows} startIndex={tableRowStart} />;
   }
+}
+
+/**
+ * The invoiceTable's header + body rows, on their own — split out so
+ * ReceiptPagedRender can render this exact markup a second time, off-screen,
+ * to measure how tall a header and a row of real content actually come out.
+ * Nothing else in this file knows that measurement happens; the table is
+ * simply reused byte-for-byte, so what gets measured is what prints.
+ */
+export function InvoiceTableBody({ el, rows, fill, startIndex = 0, headerRef, rowRef }: {
+  el: ReceiptInvoiceTableElement;
+  rows: ReceiptData[];
+  /** true inside the normal absolutely-positioned box (fills it); false in
+   *  the measuring pass, which needs the table to size to its own content. */
+  fill?: boolean;
+  /** How many rows came before this slice, so "No." keeps counting across
+   *  pages instead of restarting at 1 on every page. */
+  startIndex?: number;
+  headerRef?: (node: HTMLTableRowElement | null) => void;
+  rowRef?: (index: number) => (node: HTMLTableRowElement | null) => void;
+}) {
+  const th: React.CSSProperties = {
+    padding: "1.2mm 1.6mm", border: `0.2mm solid ${el.borderColor}`, fontWeight: 700,
+    whiteSpace: "nowrap", fontSize: `${el.fontSize}pt`,
+    background: el.headerBg, color: el.headerColor,
+  };
+  const td: React.CSSProperties = {
+    padding: "1.4mm 1.6mm", border: `0.2mm solid ${el.borderColor}`, fontSize: `${el.fontSize}pt`,
+    color: "#000", verticalAlign: "top",
+  };
+
+  const cols = invoiceColumns(el);
+  // Widths are relative weights, so they are normalised here rather than
+  // being required to add up to 100 in the editor — a column can be
+  // dropped without every remaining width needing to be retyped.
+  const total = cols.reduce((n, c) => n + Math.max(1, c.width), 0);
+
+  return (
+    <table style={{ width: "100%", height: fill ? "100%" : undefined, borderCollapse: "collapse", tableLayout: "fixed", fontFamily: "'Plus Jakarta Sans', Arial, sans-serif" }}>
+      <thead>
+        <tr ref={headerRef}>
+          {cols.map((c, n) => {
+            const spec = INVOICE_COLUMNS.find(k => k.id === c.id)!;
+            return (
+              <th key={`${c.id}-${n}`} style={{ ...th, textAlign: spec.align, width: `${(Math.max(1, c.width) / total) * 100}%` }}>
+                {c.label || spec.label}
+              </th>
+            );
+          })}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((rowData, rowIndex) => (
+          <tr key={rowIndex} ref={rowRef?.(rowIndex)}>
+            {cols.map((c, n) => {
+              const spec = INVOICE_COLUMNS.find(k => k.id === c.id)!;
+              // "No." is synthesised per catalogue entry as a literal "1" —
+              // right for a single-row issue invoice, wrong once there's a
+              // real list of rows, where it has to count from the top.
+              const raw = c.id === "index" ? String(startIndex + rowIndex + 1) : spec.value(rowData);
+              return (
+                <td
+                  key={`${c.id}-${n}`}
+                  style={{
+                    ...td,
+                    textAlign: spec.align,
+                    // The IMEI is read digit by digit off a printed page, so
+                    // it keeps the fixed pitch it has always had.
+                    fontFamily: c.id === "imei" ? "monospace" : undefined,
+                    fontWeight: c.id === "lineTotal" ? 700 : undefined,
+                  }}
+                >
+                  {spec.money ? money(raw) : (raw && raw.trim() ? raw : "—")}
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
