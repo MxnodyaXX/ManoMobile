@@ -74,11 +74,17 @@ export const nothingMissing = (job: RepairJob) => {
 const ff = "'Plus Jakarta Sans', sans-serif";
 const TA = "#34d399";
 
-export default function DeviceDetailsFields({ job, value, onChange, inputStyle }: {
+export default function DeviceDetailsFields({ job, value, onChange, inputStyle, allFields = false }: {
   job: RepairJob;
   value: DeviceDraft;
   onChange: (next: DeviceDraft) => void;
   inputStyle: React.CSSProperties;
+  /**
+   * Show every field, prefilled with what intake recorded, rather than only
+   * the missing ones. The completion form uses this so a technician holding
+   * the handset can correct a model or IMEI the counter got wrong.
+   */
+  allFields?: boolean;
 }) {
   const { lookup: deviceModelLookup } = useDeviceModelLookup();
   const [lookupResult, setLookupResult] = useState<string | null>(null);
@@ -88,12 +94,16 @@ export default function DeviceDetailsFields({ job, value, onChange, inputStyle }
   const [typing, setTyping] = useState(false);
   const imeiRef = useRef<HTMLInputElement>(null);
 
-  const need = missingOn(job);
+  const missing = missingOn(job);
+  const need = allFields ? { modelNumber: true, imei: true } : missing;
 
   // Whether the technician has said the device cannot be read. Derived from
   // the draft rather than held separately, so reopening the form shows what
   // was already recorded instead of an empty checkbox over a saved reason.
   const unavailable = value.unavailableReason !== "";
+  // "Cannot be identified" only means something while something is missing —
+  // on a fully recorded job it would contradict the numbers on it.
+  const offerUnavailable = missing.modelNumber || missing.imei || unavailable;
   const preset = UNAVAILABLE_REASONS.includes(value.unavailableReason);
 
   const cap: React.CSSProperties = {
@@ -139,6 +149,13 @@ export default function DeviceDetailsFields({ job, value, onChange, inputStyle }
         blank it is — nobody has looked yet, or somebody looked and it cannot
         be known.
       */}
+      {allFields && !offerUnavailable && (
+        <p style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5, margin: 0 }}>
+          Recorded at intake. Check them against the handset and correct anything the counter got wrong.
+        </p>
+      )}
+
+      {offerUnavailable && (
       <label style={{
         display: "flex", alignItems: "flex-start", gap: 9, cursor: "pointer",
         padding: "9px 11px", borderRadius: 9,
@@ -167,6 +184,7 @@ export default function DeviceDetailsFields({ job, value, onChange, inputStyle }
           </span>
         </span>
       </label>
+      )}
 
       {unavailable && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

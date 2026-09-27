@@ -32,9 +32,27 @@ export interface DeviceRecord {
   suggestedPrice: number;
   supplier: string;
   addedDate: string;
-  status: "available" | "sold" | "reserved";
+  /** supplier_return: a customer return set aside to go back to the company;
+   *  returned_to_supplier: it has gone. See migration 20260927000060. */
+  status: DeviceStatus;
   notes: string;
+  /** The invoice it is sold on, while it is sold. */
+  soldInvoiceNo?: string | null;
+  soldPrice?: number | null;
+  /** Set when a customer brought this unit back — a customer return, not new stock. */
+  returnedFromInvoice?: string | null;
+  returnReason?: string | null;
 }
+
+export type DeviceStatus = "available" | "sold" | "reserved" | "supplier_return" | "returned_to_supplier";
+
+export const DEVICE_STATUS_LABEL: Record<DeviceStatus, string> = {
+  available: "available",
+  sold: "sold",
+  reserved: "reserved",
+  supplier_return: "return to company",
+  returned_to_supplier: "returned to company",
+};
 
 interface DevicesContextType {
   devices: DeviceRecord[];

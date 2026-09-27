@@ -5,6 +5,7 @@ import RequireSignIn from "@/lib/auth/RequireSignIn";
 import { ToastProvider } from "@/lib/ui/toast";
 import AppearanceProvider from "@/lib/settings/AppearanceProvider";
 import NumberInputGuards from "@/lib/ui/NumberInputGuards";
+import UppercaseInputs from "@/lib/ui/UppercaseInputs";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <body>
         <NumberInputGuards />
+        <UppercaseInputs />
         <ThemeProvider>
           <AuthProvider>
             <AppearanceProvider>

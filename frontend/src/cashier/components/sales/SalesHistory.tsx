@@ -14,8 +14,9 @@ import ExportButtons from "@/cashier/components/shared/ExportButtons";
 import { exportToPdf, exportToExcel, exportToPng } from "@/cashier/utils/exportUtils";
 import {
   Search, Printer, XCircle, RotateCcw,
-  ChevronDown, FileText, AlertTriangle, X, CheckCircle, AlertCircle, Pencil,
+  ChevronDown, FileText, AlertTriangle, X, CheckCircle, AlertCircle, Pencil, Repeat,
 } from "lucide-react";
+import ReplaceDeviceModal from "./ReplaceDeviceModal";
 import { useMyPermissions } from "@/lib/settings/staffRules";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import { correctSalePayment } from "@/lib/sales/correctPayment";
@@ -588,6 +589,7 @@ export default function SalesHistory() {
   const [voidTarget,   setVoidTarget]   = useState<SaleTx | null>(null);
   const [viewTarget,   setViewTarget]   = useState<SaleTx | null>(null);
   const [returnTarget, setReturnTarget] = useState<SaleTx | null>(null);
+  const [replaceTarget, setReplaceTarget] = useState<SaleTx | null>(null);
   const [correctTarget, setCorrectTarget] = useState<SaleTx | null>(null);
 
   /**
@@ -903,6 +905,17 @@ export default function SalesHistory() {
                           }}>
                             <RotateCcw size={13} />
                           </button>
+                          {/* A phone sold here came back faulty and the
+                              customer takes a different unit. */}
+                          {tx.category === "Mobile" && (
+                            <button onClick={() => setReplaceTarget(tx)} title="Replace device" style={{
+                              width: 28, height: 28, borderRadius: 7, border: "1px solid rgba(52,211,153,0.3)",
+                              background: "rgba(52,211,153,0.08)", color: "#34d399",
+                              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                            }}>
+                              <Repeat size={13} />
+                            </button>
+                          )}
                           {/* Senior counter staff only. The person who made
                               the mistake is usually the one who spots it, but
                               a payment record that anybody can rewrite is not
@@ -938,6 +951,7 @@ export default function SalesHistory() {
       {voidTarget   && <VoidModal   tx={voidTarget}   onConfirm={handleVoidConfirm}   onClose={() => setVoidTarget(null)} />}
       {returnTarget && <ReturnModal tx={returnTarget} onConfirm={handleReturnConfirm} onClose={() => setReturnTarget(null)} />}
       {viewTarget   && <ReceiptModal tx={viewTarget}  onClose={() => setViewTarget(null)} />}
+      {replaceTarget && <ReplaceDeviceModal tx={replaceTarget} onClose={() => setReplaceTarget(null)} />}
     </div>
   );
 }

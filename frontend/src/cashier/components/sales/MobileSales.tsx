@@ -781,6 +781,10 @@ function PhoneSearchPopup({
                           <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: "rgba(251,191,36,0.12)", color: "#f59e0b", fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                             Reserved
                           </span>
+                        ) : p.returnedFromInvoice ? (
+                          <span title={p.returnReason ?? undefined} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: "rgba(239,68,68,0.1)", color: "#ef4444", fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
+                            Customer return
+                          </span>
                         ) : null}
                       </td>
                     </tr>
@@ -1122,7 +1126,8 @@ export default function MobileSales() {
   // Sold phones are history, not stock. Reserved ones are still on the shelf —
   // usually for the very customer now at the counter — and are flagged.
   const sellablePhones = useMemo(
-    () => devices.filter(d => d.status !== "sold"),
+    // Units set aside for (or already sent back to) the company are not stock.
+    () => devices.filter(d => d.status === "available" || d.status === "reserved"),
     [devices],
   );
 
@@ -1558,6 +1563,9 @@ export default function MobileSales() {
                       <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 2 }}>
                         {[pc.phone.color, pc.phone.storage, pc.phone.ram && `${pc.phone.ram} RAM`].filter(Boolean).join(" · ")} · <span style={{ fontFamily: "monospace" }}>{pc.phone.imei}</span>
                         {pc.phone.status === "reserved" && <span style={{ color: "#f59e0b", fontWeight: 600 }}> · Reserved</span>}
+                        {pc.phone.returnedFromInvoice && (
+                          <span title={pc.phone.returnReason ?? undefined} style={{ color: "#ef4444", fontWeight: 600 }}> · Customer return ({pc.phone.returnedFromInvoice})</span>
+                        )}
                       </div>
                     </div>
                     <button

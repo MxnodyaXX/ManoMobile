@@ -606,12 +606,15 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
       // Only when something was actually typed. A blank box means intake had
       // nothing and the technician could not read it either — not an
       // instruction to wipe a number somebody already recorded.
-      if (deviceNeed.modelNumber) {
-        if (deviceDraft.modelNumber.trim()) completedPatch.modelNumber = deviceDraft.modelNumber.trim();
-        if (deviceDraft.brand.trim())       completedPatch.brand       = deviceDraft.brand.trim();
-        if (deviceDraft.model.trim())       completedPatch.model       = deviceDraft.model.trim();
-      }
-      if (deviceNeed.imei && deviceDraft.imei.trim()) completedPatch.imei = deviceDraft.imei.trim();
+      //
+      // Every field is on the form now, prefilled from intake, so this is also
+      // how a counter mistake gets corrected: whatever differs from the job is
+      // written, whether it filled a gap or replaced a wrong value.
+      const changed = (next: string, prev?: string | null) => next.trim() !== "" && next.trim() !== (prev ?? "").trim();
+      if (changed(deviceDraft.modelNumber, job.modelNumber)) completedPatch.modelNumber = deviceDraft.modelNumber.trim();
+      if (changed(deviceDraft.brand, job.brand))             completedPatch.brand       = deviceDraft.brand.trim();
+      if (changed(deviceDraft.model, job.model))             completedPatch.model       = deviceDraft.model.trim();
+      if (changed(deviceDraft.imei, job.imei))               completedPatch.imei        = deviceDraft.imei.trim();
       // "Cannot be read" recorded as a fact, so the empty model number stops
       // looking like a gap somebody still has to go and fill. Cleared when the
       // technician unticks it, since the question is open again.
@@ -1374,23 +1377,23 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                     the right. */}
                 <div className="suj-cols-2">
                   <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
-                  {/* Nothing at all when intake already captured both — an empty
-                      fold saying "Recorded" is a row of chrome asking to be read
-                      on every single job that does not need it. */}
-                  {deviceIncomplete ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                      {fold("Device details", deviceOpen, () => setDeviceOpen(v => !v),
-                        deviceNeed.modelNumber && deviceNeed.imei ? "Model no. and IMEI missing"
-                          : deviceNeed.modelNumber ? "Model number missing"
-                            : "IMEI missing")}
+                  {/* Always here, filled or not: the technician is holding the
+                      handset and is the one who can catch a model or IMEI the
+                      counter typed wrong. Open by default only when something
+                      is missing; a complete record stays folded. */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                    {fold("Device details", deviceOpen, () => setDeviceOpen(v => !v),
+                      deviceNeed.modelNumber && deviceNeed.imei ? "Model no. and IMEI missing"
+                        : deviceNeed.modelNumber ? "Model number missing"
+                          : deviceNeed.imei ? "IMEI missing"
+                            : "Recorded — check & correct")}
 
-                      {deviceOpen && (
-                        <div style={foldBody}>
-                          <DeviceDetailsFields job={job} value={deviceDraft} onChange={setDeviceDraft} inputStyle={inputStyle} />
-                        </div>
-                      )}
-                    </div>
-                  ) : <div />}
+                    {deviceOpen && (
+                      <div style={foldBody}>
+                        <DeviceDetailsFields job={job} value={deviceDraft} onChange={setDeviceDraft} inputStyle={inputStyle} allFields />
+                      </div>
+                    )}
+                  </div>
 
                   {/* Future faults — worth recording when spotted, never worth
                       blocking a finished job on, so it folds away with the rest

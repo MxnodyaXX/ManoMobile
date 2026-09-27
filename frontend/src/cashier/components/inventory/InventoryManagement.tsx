@@ -12,7 +12,7 @@ import StockReceiving from "./StockReceiving";
 import { useInventory, type Category, type Subcategory } from "@/cashier/contexts/InventoryContext";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
-import { useDevices, type DeviceRecord } from "@/cashier/contexts/DevicesContext";
+import { useDevices, DEVICE_STATUS_LABEL, type DeviceRecord } from "@/cashier/contexts/DevicesContext";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import { printLabelsNode } from "@/cashier/utils/printLabel";
@@ -1220,6 +1220,8 @@ function AddEditDeviceModal({ device, devices, onSave, onClose }: {
               <option value="available">Available</option>
               <option value="reserved">Reserved</option>
               <option value="sold">Sold</option>
+              <option value="supplier_return">Return to company</option>
+              <option value="returned_to_supplier">Returned to company</option>
             </select>
           </div>
           <div>
@@ -2043,6 +2045,8 @@ function OverviewTab({ devices, accessories }: { devices: DeviceItem[]; accessor
     available: { bg: "#dcfce7", color: "#16a34a", label: "Available" },
     sold:      { bg: "var(--bg-surface)", color: "var(--text-muted)", label: "Sold" },
     reserved:  { bg: "#fef3c7", color: "#b45309", label: "Reserved" },
+    supplier_return:      { bg: "#fee2e2", color: "#b91c1c", label: "Return to company" },
+    returned_to_supplier: { bg: "var(--bg-surface)", color: "var(--text-muted)", label: "Returned to company" },
   } as const;
 
   return (
@@ -2167,6 +2171,8 @@ function BulkPrintLabelsModal({ group, units, onClose }: {
     available: { bg: "#dcfce7", color: "#16a34a" },
     sold:      { bg: "var(--bg-surface)", color: "var(--text-muted)" },
     reserved:  { bg: "#fef3c7", color: "#b45309" },
+    supplier_return:      { bg: "#fee2e2", color: "#b91c1c" },
+    returned_to_supplier: { bg: "var(--bg-surface)", color: "var(--text-muted)" },
   } as const;
   // Default to what actually needs a shelf label — a sold or reserved unit
   // isn't sitting out waiting to be tagged.
@@ -2317,7 +2323,7 @@ function BulkPrintLabelsModal({ group, units, onClose }: {
                           <span style={{ fontSize: 10.5, color: "var(--text-muted)", width: 20, flexShrink: 0 }}>{i + 1}</span>
                           <span style={{ fontSize: 11.5, fontFamily: "monospace", color: "var(--text-primary)", flex: 1 }}>{d.imei}</span>
                           <span style={{ background: sc.bg, color: sc.color, fontSize: 9.5, fontWeight: 700, padding: "2px 7px", borderRadius: 20, textTransform: "capitalize", flexShrink: 0 }}>
-                            {d.status}
+                            {DEVICE_STATUS_LABEL[d.status]}
                           </span>
                         </label>
                       );
@@ -2400,7 +2406,7 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
     const q = search.trim().toLowerCase();
     return devices.filter(d => {
       if (brandFilter !== "All" && d.brand !== brandFilter) return false;
-      if (statusFilter !== "All" && d.status !== statusFilter.toLowerCase()) return false;
+      if (statusFilter !== "All" && d.status !== statusFilter) return false;
       if (q && !d.imei.includes(q) && !d.name.toLowerCase().includes(q) && !d.brand.toLowerCase().includes(q) && !d.supplier.toLowerCase().includes(q)) return false;
       return true;
     });
@@ -2486,6 +2492,8 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
     available: { bg: "#dcfce7", color: "#16a34a" },
     sold:      { bg: "var(--bg-surface)", color: "var(--text-muted)" },
     reserved:  { bg: "#fef3c7", color: "#b45309" },
+    supplier_return:      { bg: "#fee2e2", color: "#b91c1c" },
+    returned_to_supplier: { bg: "var(--bg-surface)", color: "var(--text-muted)" },
   } as const;
 
   return (
@@ -2514,7 +2522,7 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
             {brands.map(b => <option key={b}>{b}</option>)}
           </select>
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ ...selectStyle, flex: isMobile ? 1 : undefined }}>
-            {["All", "Available", "Reserved", "Sold"].map(s => <option key={s}>{s}</option>)}
+            {([["All", "All"], ["Available", "available"], ["Reserved", "reserved"], ["Sold", "sold"], ["Return to company", "supplier_return"], ["Returned to company", "returned_to_supplier"]] as const).map(([label, v]) => <option key={v} value={v}>{label}</option>)}
           </select>
           {groups.length > 0 && (
             <button onClick={toggleAllGroups} style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 12.5, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
@@ -2549,7 +2557,7 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
                 <tr><td colSpan={16} style={{ ...tdBase, textAlign: "center", padding: 40, color: "var(--text-muted)" }}>No devices match your filters</td></tr>
               ) : groups.flatMap(g => {
                 const open = isGroupOpen(g);
-                const counts = { available: 0, sold: 0, reserved: 0 };
+                const counts = { available: 0, sold: 0, reserved: 0, supplier_return: 0, returned_to_supplier: 0 };
                 for (const u of g.units) counts[u.status]++;
                 const buy = numRange(g.units, u => u.buyingPrice);
                 const minSell = numRange(g.units, u => u.minSellingPrice);
@@ -2603,9 +2611,9 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
                     <td style={{ ...tdBase, color: "var(--text-muted)", fontSize: 12 }}>—</td>
                     <td style={tdBase}>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                        {(["available", "sold", "reserved"] as const).filter(s => counts[s] > 0).map(s => (
+                        {(["available", "sold", "reserved", "supplier_return", "returned_to_supplier"] as const).filter(s => counts[s] > 0).map(s => (
                           <span key={s} style={{ background: statusColors[s].bg, color: statusColors[s].color, fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap" }}>
-                            {counts[s]} {s}
+                            {counts[s]} {DEVICE_STATUS_LABEL[s]}
                           </span>
                         ))}
                       </div>
@@ -2656,8 +2664,13 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
                                   Device {i + 1}
                                 </span>
                                 <span style={{ background: sc.bg, color: sc.color, fontSize: 9.5, fontWeight: 700, padding: "2px 7px", borderRadius: 20, textTransform: "capitalize" }}>
-                                  {d.status}
+                                  {DEVICE_STATUS_LABEL[d.status]}
                                 </span>
+                                {d.returnedFromInvoice && (
+                                  <span title={d.returnReason ? `Returned: ${d.returnReason}` : undefined} style={{ background: "#fee2e2", color: "#b91c1c", fontSize: 9.5, fontWeight: 700, padding: "2px 7px", borderRadius: 20 }}>
+                                    Customer return · {d.returnedFromInvoice}
+                                  </span>
+                                )}
                               </div>
 
                               <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 8 }}>
