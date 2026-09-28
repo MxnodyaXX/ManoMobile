@@ -300,7 +300,7 @@ export interface ReceiptData {
   dealerAddress?: string;
   dealerContact?: string;
   /** The dealer's own reference for this job. When set, the Job No. column
-   *  prints it bold with our internal number (jobId) small beneath it. */
+   *  prints it in bold instead of our internal number (jobId). */
   dealerJobNo?: string;
 }
 

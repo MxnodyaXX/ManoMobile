@@ -270,12 +270,9 @@ export function InvoiceTableBody({ el, rows, fill, startIndex = 0, headerRef, ro
                   }}
                 >
                   {c.id === "jobId" && rowData.dealerJobNo?.trim() ? (
-                    // A dealer's job: their own number is the one they look
-                    // for, so it leads in bold; ours sits small beneath it.
-                    <>
-                      <div style={{ fontWeight: 700 }}>{(rowData.dealerJobNo ?? "").trim()}</div>
-                      <div style={{ fontSize: "0.78em", color: "#555", marginTop: "0.3mm" }}>{raw}</div>
-                    </>
+                    // A dealer's job: their own number is the only one they
+                    // look for, so it replaces ours, in bold.
+                    <span style={{ fontWeight: 700 }}>{(rowData.dealerJobNo ?? "").trim()}</span>
                   ) : spec.money ? money(raw) : (raw && raw.trim() ? raw : "—")}
                 </td>
               );
