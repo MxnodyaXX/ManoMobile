@@ -15,6 +15,7 @@ import {
   type InvoiceColumn, type RepeatScope,
 } from "@/lib/repair/receiptElements";
 import { FONT_OPTIONS, DEFAULT_FONT_FAMILY } from "@/lib/fonts";
+import { publicOrigin } from "@/lib/siteUrl";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 /** Editor zoom. A5 landscape's ~190mm content area at 3.5px/mm is ~665px —
@@ -37,7 +38,7 @@ const SAMPLE: ReceiptData = {
   technicianRemarks: "Screen replaced, tested OK", warrantyPeriod: "3 Months — Parts & Labour",
   balanceDue: "3,000", amountToBePaid: "3,000", dueAfterPayment: "3,000",
   date: new Date().toLocaleDateString("en-GB"), createdBy: "MANOMOBILE",
-  trackUrl: typeof window === "undefined" ? "" : `${window.location.origin}/track?job=RM-016`,
+  trackUrl: typeof window === "undefined" ? "" : `${publicOrigin()}/track?job=RM-016`,
   shopName: SHOP_DETAILS.name, shopTagline: SHOP_DETAILS.tagline, shopPhone: SHOP_DETAILS.phone,
   shopEmail: SHOP_DETAILS.email, shopWebsite: SHOP_DETAILS.website, shopAddress: SHOP_DETAILS.address,
   bankName: SHOP_DETAILS.bankName, bankAccountNumber: SHOP_DETAILS.bankAccountNumber,

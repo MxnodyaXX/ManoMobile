@@ -1,5 +1,6 @@
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import { SHOP_DETAILS } from "@/lib/shop";
+import { publicOrigin } from "@/lib/siteUrl";
 
 /**
  * Customer SMS wording and rendering.
@@ -157,7 +158,7 @@ function trimReason(text: string, max = 90) {
  * either, this quietly omits the link rather than crashing.
  */
 function trackLink(jobId: string, baseUrl?: string): string {
-  const origin = baseUrl ?? (typeof window === "undefined" ? "" : window.location.origin);
+  const origin = baseUrl ?? publicOrigin();
   return origin ? `${origin}/track?job=${encodeURIComponent(jobId)}` : "";
 }
 

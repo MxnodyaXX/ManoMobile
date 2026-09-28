@@ -3,6 +3,7 @@
 import { forwardRef } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { type RepairJob, useRepair, findDealer, IN_HOUSE_DEALER } from "@/cashier/contexts/RepairContext";
+import { publicOrigin } from "@/lib/siteUrl";
 
 /**
  * The Mano Mobile job-receipt slip — an A5 **landscape** template: branded
@@ -44,7 +45,7 @@ const JobReceiptSlip = forwardRef<HTMLDivElement, { job: RepairJob; signatureOve
     // A collected job carries the handover signature; otherwise fall back to the
     // consent signed at intake, and to a blank rule when neither exists.
     const signature = signatureOverride || job.handover?.handoverSignature || job.customerConsentSignature;
-    const origin = typeof window === "undefined" ? "" : window.location.origin;
+    const origin = publicOrigin();
     const trackUrl = `${origin}/track?job=${encodeURIComponent(job.id)}`;
 
     return (
@@ -71,7 +72,7 @@ const JobReceiptSlip = forwardRef<HTMLDivElement, { job: RepairJob; signatureOve
           </div>
 
           <div style={{ flex: "0 0 auto", width: 118, textAlign: "center" }}>
-            <QRCodeSVG value={trackUrl} size={74} level="M" />
+            <QRCodeSVG value={trackUrl} size={74} level="M" marginSize={2} bgColor="#ffffff" />
             <p style={{ fontSize: 6.8, color: "#444", marginTop: 3, lineHeight: 1.35 }}>
               Scan The QR Code To<br />Track the Job Status
             </p>

@@ -7,6 +7,7 @@ import { type ReceiptData } from "@/lib/repair/receiptElements";
 import { type RepairJob } from "@/cashier/contexts/RepairContext";
 import { useWarranty } from "@/cashier/contexts/WarrantyContext";
 import { SHOP_DETAILS } from "@/lib/shop";
+import { publicOrigin } from "@/lib/siteUrl";
 
 /** What the job-issue sales invoice needs to print — the pricing and
  *  customer details collected at the moment a job is handed back to the
@@ -89,7 +90,7 @@ const JobIssuePrintable = forwardRef<HTMLDivElement, { data: IssueInvoiceData }>
       return () => { active = false; };
     }, []);
 
-    const origin = typeof window === "undefined" ? "" : window.location.origin;
+    const origin = publicOrigin();
     const canvasData: ReceiptData = {
       jobId: data.job.id,
       customer: data.name || "Walk-in",

@@ -7,6 +7,7 @@ import { fetchDefaultReceiptTemplate, type ReceiptTemplate } from "@/lib/repair/
 import { type ReceiptData } from "@/lib/repair/receiptElements";
 import { type RepairJob, useRepair, findDealer, IN_HOUSE_DEALER } from "@/cashier/contexts/RepairContext";
 import { SHOP_DETAILS } from "@/lib/shop";
+import { publicOrigin } from "@/lib/siteUrl";
 
 /**
  * What actually prints for a job receipt. Picks up Admin -> Barcode -> Job
@@ -44,7 +45,7 @@ const JobReceiptPrintable = forwardRef<HTMLDivElement, {
     const dt = new Date(s);
     return isNaN(dt.getTime()) ? "—" : dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
   };
-  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const origin = publicOrigin();
 
   const data: ReceiptData = {
     jobId: job.id,

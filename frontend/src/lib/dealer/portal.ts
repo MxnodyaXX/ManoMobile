@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { publicOrigin } from "@/lib/siteUrl";
 
 /**
  * The dealer portal — see migration 20260928000061.
@@ -143,10 +144,10 @@ export async function fetchDealerPortalInvoice(token: string, invoiceNo: string)
 
 /** The link printed as the QR on a dealer invoice. */
 export function dealerPortalUrl(token: string, invoiceNo?: string): string {
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const q = new URLSearchParams({ t: token });
-  if (invoiceNo) q.set("invoice", invoiceNo);
-  return `${origin}/dealer?${q.toString()}`;
+  // The short /d/<token>?i=<no> form (see app/d/[token]/page.tsx): every
+  // character saved makes the printed QR's squares bigger and easier to scan.
+  const base = `${publicOrigin()}/d/${encodeURIComponent(token)}`;
+  return invoiceNo ? `${base}?i=${encodeURIComponent(invoiceNo)}` : base;
 }
 
 /**

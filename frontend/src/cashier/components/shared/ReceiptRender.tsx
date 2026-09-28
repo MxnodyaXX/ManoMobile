@@ -143,8 +143,11 @@ function ElementBody({ el, data, tableRows, tableRowStart = 0 }: { el: ReceiptEl
       return (
         <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
           {/* A link (portal / tracking URL) is long; level L keeps its modules
-              large enough for a phone camera in a small printed box. */}
-          <QRCodeSVG value={value} size={sizePx} level={value.length > 40 ? "L" : "M"} />
+              large enough for a phone camera in a small printed box. The white
+              margin is the "quiet zone" a scanner needs to find the code at
+              all — without it, a QR drawn edge-to-edge in its box next to a
+              border or text often will not scan. */}
+          <QRCodeSVG value={value} size={sizePx} level={value.length > 40 ? "L" : "M"} marginSize={2} bgColor="#ffffff" />
         </div>
       );
     }

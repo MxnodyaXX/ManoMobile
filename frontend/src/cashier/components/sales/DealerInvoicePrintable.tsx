@@ -159,7 +159,7 @@ function HeaderBand({ qrValue }: { qrValue: string }) {
           {/* 16mm and error level L: the portal link is ~90 characters, and in
               the old 8mm box its modules were too fine for a phone camera. */}
           <div style={{ border: "1px solid #000", borderRadius: 3, padding: "1mm", width: "18mm", height: "18mm", boxSizing: "border-box", display: "flex", alignItems: "center", justifyContent: "center", background: "#fff" }}>
-            <QRCodeSVG value={qrValue} size={96} level="L" style={{ width: "16mm", height: "16mm" }} />
+            <QRCodeSVG value={qrValue} size={96} level="L" marginSize={2} bgColor="#ffffff" style={{ width: "16mm", height: "16mm" }} />
           </div>
           <div style={{ fontSize: 5.5, fontWeight: 700, marginTop: 1, lineHeight: 1.15, maxWidth: "18mm" }}>Scan for job details</div>
         </div>

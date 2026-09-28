@@ -82,6 +82,17 @@ const CSS = `
 .dp .sum b{font-size:16px}
 .dp .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:1px solid var(--line);background:#fff;font-size:13px;font-weight:650}
 .dp .empty{padding:24px;text-align:center;color:var(--muted);font-size:13px}
+.dp .info{width:20px;height:20px;border-radius:50%;border:1.5px solid rgba(255,255,255,.55)!important;color:#fff!important;font-size:12px;font-weight:800;font-style:italic;font-family:Georgia,serif;display:inline-grid;place-items:center;line-height:1;margin-left:8px;vertical-align:middle}
+.dp .info.on{background:#fff!important;color:#000!important}
+.dp .why{margin-top:14px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:12px 14px}
+.dp .why h3{font-size:13px;font-weight:750;margin-bottom:8px}
+.dp .why .ln{display:flex;justify-content:space-between;gap:12px;font-size:13px;padding:5px 0;border-bottom:1px dashed rgba(255,255,255,.14)}
+.dp .why .ln:last-of-type{border-bottom:0}
+.dp .why .ln span:first-child{color:rgba(255,255,255,.78)}
+.dp .why .ln small{display:block;font-size:11px;color:rgba(255,255,255,.55)}
+.dp .why .tot{border-top:1.5px solid rgba(255,255,255,.5);border-bottom:0!important;margin-top:4px;padding-top:8px;font-weight:800}
+.dp .why .tot span:first-child{color:#fff}
+.dp .why p{font-size:11.5px;color:rgba(255,255,255,.6);margin-top:8px;line-height:1.5}
 .dp .center{min-height:60vh;display:grid;place-items:center;text-align:center;padding:24px}
 @media print{.dp .top,.dp .noprint{display:none}.dp{background:#fff}.dp .card{border:0;padding:0}}
 `;
@@ -206,6 +217,7 @@ function Portal() {
   const [error, setError] = useState<string | null>(null);
   const [inv, setInv] = useState<PortalInvoice | null | undefined>(undefined);
   const [tab, setTab] = useState<"invoices" | "jobs">("invoices");
+  const [showWhy, setShowWhy] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -264,6 +276,10 @@ function Portal() {
   const acc = data.account;
   const balance = acc?.balance ?? 0;
   const billed = data.invoices.reduce((s, i) => s + i.total, 0);
+  // Settled when the invoice was issued (cash/card at the counter) — never
+  // went on the credit account, which is why "invoiced" and "billed on
+  // credit" differ by exactly this.
+  const paidAtCounter = data.invoices.reduce((s, i) => s + i.paid, 0);
   const accStatus = !acc || balance <= 0.005 ? { t: "Settled", c: "p-ok" }
     : acc.status === "Overdue" ? { t: "Overdue", c: "p-bad" } : { t: "Active", c: "p-amb" };
 
@@ -279,16 +295,59 @@ function Portal() {
 
         <div className="grid2">
           <section className="hero">
-            <div className="lbl">Total outstanding</div>
+            <div className="lbl" style={{ display: "flex", alignItems: "center" }}>
+              Total outstanding
+              <button
+                className={`info ${showWhy ? "on" : ""}`}
+                onClick={() => setShowWhy(v => !v)}
+                aria-expanded={showWhy}
+                aria-label="How is this worked out?"
+                title="How is this worked out?"
+              >i</button>
+            </div>
             <div className="amt">{rs(balance)}</div>
             <span className={`pill ${accStatus.c}`} style={{ marginTop: 8 }}>{accStatus.t}</span>
             <div className="kv">
-              <div><span>Total billed on credit</span><b>{rs(acc?.totalCharged)}</b></div>
-              <div><span>Total paid</span><b>{rs(acc?.totalPaid)}</b></div>
+              <div><span>Billed on credit</span><b>{rs(acc?.totalCharged)}</b></div>
+              <div><span>Payments received</span><b>{rs(acc?.totalPaid)}</b></div>
+              {acc && acc.totalRefunded > 0 && <div><span>Cash returns deducted</span><b>{rs(acc.totalRefunded)}</b></div>}
+              {acc && acc.totalWrittenOff > 0 && <div><span>Written off</span><b>{rs(acc.totalWrittenOff)}</b></div>}
               {acc && acc.creditLimit > 0 && <div><span>Credit limit</span><b>{rs(acc.creditLimit)}</b></div>}
               {acc?.lastPaymentOn && <div><span>Last payment</span><b>{day(acc.lastPaymentOn)}</b></div>}
               {acc && <div><span>Payment terms</span><b>{acc.termsDays} days</b></div>}
             </div>
+
+            {showWhy && (() => {
+              const onCredit = acc?.totalCharged ?? 0;
+              // Anything charged that is not an invoice balance (a charge
+              // added by hand, say) — shown rather than hidden so the lines
+              // always add up to the figure above.
+              const other = Math.round((onCredit - (billed - paidAtCounter)) * 100) / 100;
+              return (
+                <div className="why">
+                  <h3>How your outstanding is worked out</h3>
+                  <div className="ln"><span>Total invoiced<small>All {data.invoices.length} invoices, however they were paid</small></span><b>{rs(billed)}</b></div>
+                  {paidAtCounter > 0 && (
+                    <div className="ln"><span>− Paid at the counter<small>Invoices settled in cash/card when the jobs were issued — never went on credit</small></span><b>− {rs(paidAtCounter)}</b></div>
+                  )}
+                  {Math.abs(other) > 0.5 && (
+                    <div className="ln"><span>{other > 0 ? "+" : "−"} Other adjustments<small>Charges or corrections made on your account outside an invoice</small></span><b>{other > 0 ? "+" : "−"} {rs(Math.abs(other))}</b></div>
+                  )}
+                  <div className="ln tot"><span>= Billed on credit</span><b>{rs(onCredit)}</b></div>
+                  {(acc?.totalPaid ?? 0) > 0 && (
+                    <div className="ln"><span>− Payments received<small>Money you have paid against your account</small></span><b>− {rs(acc?.totalPaid)}</b></div>
+                  )}
+                  {(acc?.totalRefunded ?? 0) > 0 && (
+                    <div className="ln"><span>− Cash returns deducted<small>Jobs returned unrepaired, taken off your bill</small></span><b>− {rs(acc?.totalRefunded)}</b></div>
+                  )}
+                  {(acc?.totalWrittenOff ?? 0) > 0 && (
+                    <div className="ln"><span>− Written off<small>Amounts the shop agreed not to collect</small></span><b>− {rs(acc?.totalWrittenOff)}</b></div>
+                  )}
+                  <div className="ln tot"><span>= Total outstanding</span><b>{rs(balance)}</b></div>
+                  <p>Each invoice below shows how much of it is still due. Tap one to see its jobs.</p>
+                </div>
+              );
+            })()}
           </section>
 
           <section className="card">
@@ -296,6 +355,7 @@ function Portal() {
             <div className="sum">
               <div><span>Invoices</span><b>{data.invoices.length}</b></div>
               <div><span>Total invoiced</span><b>{rs(billed)}</b></div>
+              {paidAtCounter > 0 && <div><span>Paid at the counter</span><b>{rs(paidAtCounter)}</b></div>}
               <div><span>Jobs in the shop</span><b>{data.openJobs.length}</b></div>
               <div><span>Ready to collect</span><b>{data.openJobs.filter(j => j.status === "Completed").length}</b></div>
             </div>
