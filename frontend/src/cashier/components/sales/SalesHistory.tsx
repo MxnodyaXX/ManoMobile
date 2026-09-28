@@ -17,6 +17,8 @@ import {
   ChevronDown, FileText, AlertTriangle, X, CheckCircle, AlertCircle, Pencil, Repeat,
 } from "lucide-react";
 import ReplaceDeviceModal from "./ReplaceDeviceModal";
+import { QRCodeSVG } from "qrcode.react";
+import { useDealerPortalToken, dealerPortalUrl } from "@/lib/dealer/portal";
 import { useMyPermissions } from "@/lib/settings/staffRules";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import { correctSalePayment } from "@/lib/sales/correctPayment";
@@ -427,6 +429,46 @@ function ReturnModal({ tx, onConfirm, onClose }: {
  * the modal says so plainly rather than silently printing something that looks
  * like the original but is not.
  */
+/**
+ * The dealer's portal link for this invoice, on screen.
+ *
+ * Invoices printed before the portal existed carry a QR that is only the
+ * invoice number, and their stored copies reprint it that way. This gives the
+ * counter the real link for any dealer invoice, old or new: show the QR for
+ * the dealer to scan, or copy the link to send on WhatsApp.
+ */
+function DealerPortalPanel({ dealerId, invoiceNo }: { dealerId: number; invoiceNo: string }) {
+  const token = useDealerPortalToken(dealerId);
+  const [copied, setCopied] = useState(false);
+  if (!token) return null;
+  const url = dealerPortalUrl(token, invoiceNo);
+  return (
+    <div style={{ display: "flex", gap: 14, alignItems: "center", padding: "12px 14px", margin: "16px 22px 0", borderRadius: 9, background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
+      <div style={{ background: "#fff", padding: 6, borderRadius: 6, flexShrink: 0 }}>
+        <QRCodeSVG value={url} size={92} level="L" />
+      </div>
+      <div style={{ minWidth: 0, flex: 1, fontFamily: ff }}>
+        <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>Dealer portal</p>
+        <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.55, marginTop: 2 }}>
+          The dealer can scan this to see this invoice&apos;s jobs, their outstanding balance and past invoices.
+          Older printed copies only carry the invoice number, so use this QR or send the link.
+        </p>
+        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+          <button
+            onClick={() => { void navigator.clipboard?.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); }}
+            style={{ background: "none", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text-secondary)", cursor: "pointer", fontSize: 11.5, fontWeight: 600, padding: "5px 10px", fontFamily: ff }}
+          >
+            {copied ? "Copied" : "Copy link"}
+          </button>
+          <a href={url} target="_blank" rel="noreferrer" style={{ border: "1px solid var(--border)", borderRadius: 7, color: "var(--text-secondary)", fontSize: 11.5, fontWeight: 600, padding: "5px 10px", fontFamily: ff, textDecoration: "none" }}>
+            Open portal
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
   const { doc, loading } = useInvoiceDocument(tx.invoiceNo);
   /**
@@ -505,6 +547,8 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
         </div>
 
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 0 }}>
+          {tx.dealerId != null && <DealerPortalPanel dealerId={tx.dealerId} invoiceNo={tx.invoiceNo} />}
+
           {(loading || (showingRebuilt && rebuilt.loading)) && (
             <p style={{ fontSize: 12.5, color: "var(--text-muted)", padding: 22, textAlign: "center", fontFamily: ff }}>
               Loading the invoice…

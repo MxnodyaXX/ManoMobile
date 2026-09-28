@@ -132,13 +132,19 @@ function ElementBody({ el, data, tableRows, tableRowStart = 0 }: { el: ReceiptEl
       );
 
     case "qr": {
-      const value = resolveReceiptTokens(el.value, data) || data.trackUrl;
+      const value = (resolveReceiptTokens(el.value, data) || data.trackUrl || "").trim();
+      // Nothing to encode: print nothing. A QR of a blank space looks exactly
+      // like a working code on paper and scans as nothing, which is worse than
+      // an empty corner.
+      if (!value) return null;
       // A square QR centred in whatever box it was given — a QR stretched to
       // a non-square box just stops scanning.
       const sizePx = Math.max(16, Math.min(el.w, el.h) * (96 / 25.4));
       return (
         <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <QRCodeSVG value={value || " "} size={sizePx} level="M" />
+          {/* A link (portal / tracking URL) is long; level L keeps its modules
+              large enough for a phone camera in a small printed box. */}
+          <QRCodeSVG value={value} size={sizePx} level={value.length > 40 ? "L" : "M"} />
         </div>
       );
     }

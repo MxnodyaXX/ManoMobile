@@ -568,7 +568,7 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
                     />
                   </Field>
                   <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5 }}>
-                    Usually {"{{trackUrl}}"} — the customer's job-status tracking link. Kept square automatically.
+                    Use {"{{trackUrl}}"} — the customer&apos;s job-status link on receipts, and the dealer portal link on a dealer invoice. Keep the box at least 20mm so phones can scan it.
                   </p>
                 </>
               )}

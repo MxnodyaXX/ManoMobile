@@ -6,6 +6,7 @@ import { SHOP_DETAILS } from "@/lib/shop";
 import ReceiptPagedRender from "@/cashier/components/shared/ReceiptPagedRender";
 import { fetchDefaultReceiptTemplate, type ReceiptTemplate } from "@/lib/repair/receiptTemplates";
 import type { ReceiptData } from "@/lib/repair/receiptElements";
+import { useDealerPortalToken, dealerPortalUrl } from "@/lib/dealer/portal";
 
 /**
  * The branded dealer sales invoice — A5 portrait, paginated.
@@ -79,6 +80,13 @@ export interface DealerInvoiceProps {
   paidAmount: number;
   dueAmount: number;
   ref?: Ref<HTMLDivElement>;
+  /** The dealer billed — used to put their portal link in the QR code. */
+  dealerId?: number | null;
+  /** Open this invoice on the portal. False for a single-job slip whose
+   *  "invoice number" is really a job number. Default true. */
+  linkInvoice?: boolean;
+  /** Filled in by the wrapper below; what the QR encodes. */
+  qrValue?: string;
 }
 
 export const DEALER_INVOICE_PAGE_CSS = "@page { size: A5 portrait; margin: 0; }";
@@ -90,11 +98,12 @@ const PAD_X = 9;
 const PAD_TOP = 7;
 const PAD_BOTTOM = 7;
 
-// Estimated row capacity per page kind — tune against a real print.
-const ROWS_PAGE1_FULL = 16; // first page, more pages follow
-const ROWS_PAGE1_LAST = 12; // first page, and also the last (short invoice)
-const ROWS_OTHER_FULL = 19; // a continuation page, more pages follow
-const ROWS_OTHER_LAST = 15; // a continuation page that is also the last
+// Estimated row capacity per page kind — tune against a real print. Two fewer
+// than before since the header QR grew to 18mm so phones can scan it.
+const ROWS_PAGE1_FULL = 14; // first page, more pages follow
+const ROWS_PAGE1_LAST = 10; // first page, and also the last (short invoice)
+const ROWS_OTHER_FULL = 17; // a continuation page, more pages follow
+const ROWS_OTHER_LAST = 13; // a continuation page that is also the last
 
 type Row = { kind: "repair"; r: InvoiceRepairLine } | { kind: "extra"; e: DealerInvoiceExtraLine };
 
@@ -125,7 +134,7 @@ function paginate(rows: Row[]): Row[][] {
 const Rs = (n: number) => `Rs. ${Math.abs(n).toLocaleString("en-LK", { minimumFractionDigits: 2 })}`;
 
 /** The logo + "INVOICE / ISSUED JOB RECEIPT" banner — every page. */
-function HeaderBand({ invoiceNo }: { invoiceNo: string }) {
+function HeaderBand({ qrValue }: { qrValue: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -145,12 +154,14 @@ function HeaderBand({ invoiceNo }: { invoiceNo: string }) {
           <div style={{ fontSize: 17, fontWeight: 900, letterSpacing: "0.02em", lineHeight: 1 }}>INVOICE</div>
           <div style={{ fontSize: 8, fontWeight: 800, color: "#c0392b", letterSpacing: "0.03em", marginTop: 2 }}>ISSUED JOB RECEIPT</div>
         </div>
-        <div style={{ width: 1, height: 30, background: "#ccc" }} />
+        <div style={{ width: 1, height: 44, background: "#ccc" }} />
         <div style={{ textAlign: "center" }}>
-          <div style={{ border: "1px solid #000", borderRadius: 3, padding: 2, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <QRCodeSVG value={invoiceNo} size={30} />
+          {/* 16mm and error level L: the portal link is ~90 characters, and in
+              the old 8mm box its modules were too fine for a phone camera. */}
+          <div style={{ border: "1px solid #000", borderRadius: 3, padding: "1mm", width: "18mm", height: "18mm", boxSizing: "border-box", display: "flex", alignItems: "center", justifyContent: "center", background: "#fff" }}>
+            <QRCodeSVG value={qrValue} size={96} level="L" style={{ width: "16mm", height: "16mm" }} />
           </div>
-          <div style={{ fontSize: 4.6, fontWeight: 700, marginTop: 1, lineHeight: 1.15, maxWidth: 40 }}>Scan for job details</div>
+          <div style={{ fontSize: 5.5, fontWeight: 700, marginTop: 1, lineHeight: 1.15, maxWidth: "18mm" }}>Scan for job details</div>
         </div>
       </div>
     </div>
@@ -285,7 +296,13 @@ function Page({ children, isLast }: { children: React.ReactNode; isLast: boolean
  * designer changes nothing about what prints.
  */
 export default function DealerInvoicePrintable(props: DealerInvoiceProps) {
-  const { invoiceNo, createdAt, dealerName, dealerAddress, dealerContact, repairs, extras = [], paidAmount, dueAmount, ref } = props;
+  const { invoiceNo, createdAt, dealerName, dealerAddress, dealerContact, repairs, extras = [], paidAmount, dueAmount, ref, dealerId, linkInvoice = true } = props;
+
+  // The dealer's portal — their jobs, this invoice, what they owe. Until the
+  // token is known (or with no dealer) the QR is the bare invoice number, as
+  // it always was.
+  const portalToken = useDealerPortalToken(dealerId);
+  const qrValue = portalToken ? dealerPortalUrl(portalToken, linkInvoice ? invoiceNo : undefined) : invoiceNo;
 
   // undefined = still checking, null = no design to use (fall back), object = use it.
   const [template, setTemplate] = useState<ReceiptTemplate | null | undefined>(undefined);
@@ -297,11 +314,13 @@ export default function DealerInvoicePrintable(props: DealerInvoiceProps) {
     return () => { active = false; };
   }, []);
 
-  if (template && template.elements.length > 0) {
+  // A designed template shows once the portal link is known too, so its QR
+  // (bound to trackUrl) never prints without it.
+  if (template && template.elements.length > 0 && portalToken !== undefined) {
     const headerData: ReceiptData = {
       jobId: "", customer: dealerName, phone: "", address: "", device: "", imei: "",
       estimate: "", advance: "", remarks: "", date: createdAt, createdBy: "MANOMOBILE",
-      trackUrl: "", shopName: SHOP_DETAILS.name, shopTagline: SHOP_DETAILS.tagline,
+      trackUrl: qrValue, shopName: SHOP_DETAILS.name, shopTagline: SHOP_DETAILS.tagline,
       shopPhone: SHOP_DETAILS.phone, shopEmail: SHOP_DETAILS.email, shopWebsite: SHOP_DETAILS.website,
       shopAddress: SHOP_DETAILS.address, bankName: SHOP_DETAILS.bankName,
       bankAccountNumber: SHOP_DETAILS.bankAccountNumber, bankAccountHolder: SHOP_DETAILS.bankAccountHolder,
@@ -352,31 +371,31 @@ export default function DealerInvoicePrintable(props: DealerInvoiceProps) {
     );
   }
 
-  return <BuiltInDealerInvoice {...props} pending={template === undefined} />;
+  return <BuiltInDealerInvoice {...props} qrValue={qrValue} pending={template === undefined || portalToken === undefined} />;
 }
 
 /** The plain built-in layout — what printed before any dealer invoice design
  *  existed, and what still prints for a shop that hasn't opened the designer. */
 function BuiltInDealerInvoice({
-  invoiceNo, createdAt, dealerName, dealerAddress, dealerContact, repairs, extras = [], paidAmount, dueAmount, ref, pending,
+  invoiceNo, createdAt, dealerName, dealerAddress, dealerContact, repairs, extras = [], paidAmount, dueAmount, ref, pending, qrValue,
 }: DealerInvoiceProps & { pending: boolean }) {
   const rows: Row[] = [
     ...repairs.map((r): Row => ({ kind: "repair", r })),
     ...extras.map((e): Row => ({ kind: "extra", e })),
   ];
   const pages = rows.length > 0 ? paginate(rows) : [[]];
-  let running = 0;
+  // Where each page's row numbering starts, worked out before rendering.
+  const startOf = pages.map((_, i) => pages.slice(0, i).reduce((n, p) => n + p.length, 0) + 1);
 
   return (
     <div ref={ref} data-template-pending={pending ? "1" : undefined} style={{ background: "#fff" }}>
       {pages.map((chunk, pageIdx) => {
         const isFirst = pageIdx === 0;
         const isLast = pageIdx === pages.length - 1;
-        const startNo = running + 1;
-        running += chunk.length;
+        const startNo = startOf[pageIdx];
         return (
           <Page key={pageIdx} isLast={isLast}>
-            <HeaderBand invoiceNo={invoiceNo} />
+            <HeaderBand qrValue={qrValue ?? invoiceNo} />
             <div style={{ height: 2, background: "linear-gradient(90deg, #c0392b 12%, #000 12%)", marginTop: 6 }} />
 
             {isFirst && (

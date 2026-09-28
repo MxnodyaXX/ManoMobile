@@ -214,6 +214,7 @@ export default function RepairInvoicePrintable({
         dealerName={dealerRecord?.name ?? dealer}
         dealerAddress={dealerRecord?.address}
         dealerContact={dealerRecord?.contact}
+        dealerId={dealerRecord?.id ?? null}
         repairs={repairs}
         extras={extras.map((l): DealerInvoiceExtraLine => ({ id: String(l.productId), name: l.name, lineTotal: extraLineTotal(l) }))}
         paidAmount={paidAmount}
