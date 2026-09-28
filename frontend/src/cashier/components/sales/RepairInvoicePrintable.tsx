@@ -45,7 +45,7 @@ export interface RepairInvoiceProps {
 }
 
 /** Paper size is part of the document: an in-house repair slip is A5
- *  landscape, a dealer invoice A5 portrait (see DealerInvoicePrintable).
+ *  landscape, a dealer invoice A5 landscape too (see DealerInvoicePrintable).
  *  Stored alongside the markup so a reprint months later comes out the same
  *  shape rather than on whatever the reprinting screen defaults to. */
 export const repairInvoicePageCss = (inHouse: boolean) =>

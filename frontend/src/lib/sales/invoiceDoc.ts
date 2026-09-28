@@ -169,10 +169,19 @@ export function printInvoiceDocument(doc: InvoiceDocument) {
   holder.innerHTML = doc.html;
   document.body.appendChild(holder);
 
+  // Dealer invoices were once saved with an A5 *portrait* @page even when the
+  // page itself was drawn A5 landscape (a 210 × 148mm design), which printed
+  // the whole invoice squeezed into the top of a portrait sheet. A stored page
+  // whose sheets are 148mm tall is landscape whatever its saved CSS says.
+  let pageCss = doc.pageCss ?? "@page { size: A4; margin: 12mm; }";
+  if (/A5 portrait/i.test(pageCss) && /height:\s*148mm/.test(doc.html)) {
+    pageCss = pageCss.replace(/A5 portrait/i, "A5 landscape");
+  }
+
   const style = document.createElement("style");
   style.id = styleId;
   style.textContent = `
-    ${doc.pageCss ?? "@page { size: A4; margin: 12mm; }"}
+    ${pageCss}
     #${holderId} { display: none; }
     @media print {
       body { visibility: hidden; }

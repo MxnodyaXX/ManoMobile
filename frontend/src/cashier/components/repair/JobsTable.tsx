@@ -773,7 +773,7 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
     const pageRule = isIssued
       ? "size: A4 portrait; margin: 15mm;"
       : useInvoiceFormat
-        ? "size: A5 portrait; margin: 0;" // matches DealerInvoicePrintable's own page CSS
+        ? "size: A5 landscape; margin: 0;" // matches DealerInvoicePrintable's own page CSS
         : "size: A5 landscape; margin: 0;";
     st.textContent = `
       @page { ${pageRule} }

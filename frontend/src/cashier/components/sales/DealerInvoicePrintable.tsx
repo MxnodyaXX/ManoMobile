@@ -9,7 +9,7 @@ import type { ReceiptData } from "@/lib/repair/receiptElements";
 import { useDealerPortalToken, dealerPortalUrl } from "@/lib/dealer/portal";
 
 /**
- * The branded dealer sales invoice — A5 portrait, paginated.
+ * The branded dealer sales invoice — A5 landscape, paginated.
  *
  * Replaces what used to be a plain "SALES INVOICE" heading over a bare table.
  * The design comes from six reference images the shop supplied
@@ -89,21 +89,25 @@ export interface DealerInvoiceProps {
   qrValue?: string;
 }
 
-export const DEALER_INVOICE_PAGE_CSS = "@page { size: A5 portrait; margin: 0; }";
+// Landscape: the shop prints dealer invoices on A5 landscape, and its designed
+// template is 210 × 148mm. Printing that under an A5 *portrait* @page squeezed
+// the whole design into the top of a portrait sheet.
+export const DEALER_INVOICE_PAGE_CSS = "@page { size: A5 landscape; margin: 0; }";
 
 // ── Page geometry (mm) — see the file comment above ─────────────────────────
-const PAGE_W = 148;
-const PAGE_H = 210;
+const PAGE_W = 210;
+const PAGE_H = 148;
 const PAD_X = 9;
 const PAD_TOP = 7;
 const PAD_BOTTOM = 7;
 
-// Estimated row capacity per page kind — tune against a real print. Two fewer
-// than before since the header QR grew to 18mm so phones can scan it.
-const ROWS_PAGE1_FULL = 14; // first page, more pages follow
-const ROWS_PAGE1_LAST = 10; // first page, and also the last (short invoice)
-const ROWS_OTHER_FULL = 17; // a continuation page, more pages follow
-const ROWS_OTHER_LAST = 13; // a continuation page that is also the last
+// Estimated row capacity per page kind — tune against a real print. Sized for
+// A5 landscape (148mm tall, with an 18mm header QR), so fewer rows per sheet
+// than the portrait layout this replaced.
+const ROWS_PAGE1_FULL = 8;  // first page, more pages follow
+const ROWS_PAGE1_LAST = 5;  // first page, and also the last (short invoice)
+const ROWS_OTHER_FULL = 11; // a continuation page, more pages follow
+const ROWS_OTHER_LAST = 7;  // a continuation page that is also the last
 
 type Row = { kind: "repair"; r: InvoiceRepairLine } | { kind: "extra"; e: DealerInvoiceExtraLine };
 
