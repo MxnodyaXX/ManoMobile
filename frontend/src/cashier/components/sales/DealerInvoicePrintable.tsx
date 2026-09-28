@@ -5,7 +5,39 @@ import { QRCodeSVG } from "qrcode.react";
 import { SHOP_DETAILS } from "@/lib/shop";
 import ReceiptPagedRender from "@/cashier/components/shared/ReceiptPagedRender";
 import { fetchDefaultReceiptTemplate, type ReceiptTemplate } from "@/lib/repair/receiptTemplates";
-import type { ReceiptData } from "@/lib/repair/receiptElements";
+import type { ReceiptData, ReceiptElement } from "@/lib/repair/receiptElements";
+
+/**
+ * The smallest a dealer-invoice QR is allowed to print, in mm.
+ *
+ * The QR carries the dealer portal link (~77 characters), which needs a 33×33
+ * grid plus its white margin. At the 16mm a design had it at, each square was
+ * ~0.4mm — below what most phone cameras will lock onto from a printed sheet.
+ * At 22mm each square is ~0.6mm and scans first time.
+ */
+const MIN_QR_MM = 22;
+
+/**
+ * Grow any too-small QR in a design to MIN_QR_MM, anchored to the corner it
+ * already sits nearest — a QR in the top-right grows left and down, so it
+ * stays in its corner instead of running off the page. Kept inside the page.
+ */
+function withScannableQr(elements: ReceiptElement[], pageW: number, pageH: number): ReceiptElement[] {
+  return elements.map(e => {
+    if (e.type !== "qr" || Math.min(e.w, e.h) >= MIN_QR_MM) return e;
+    const size = Math.min(MIN_QR_MM, pageW, pageH);
+    const anchorRight = e.x + e.w / 2 > pageW / 2;
+    const anchorBottom = e.y + e.h / 2 > pageH / 2;
+    const x = anchorRight ? e.x + e.w - size : e.x;
+    const y = anchorBottom ? e.y + e.h - size : e.y;
+    return {
+      ...e,
+      w: size, h: size,
+      x: Math.max(0, Math.min(x, pageW - size)),
+      y: Math.max(0, Math.min(y, pageH - size)),
+    };
+  });
+}
 import { useDealerPortalToken, dealerPortalUrl } from "@/lib/dealer/portal";
 
 /**
@@ -160,12 +192,13 @@ function HeaderBand({ qrValue }: { qrValue: string }) {
         </div>
         <div style={{ width: 1, height: 44, background: "#ccc" }} />
         <div style={{ textAlign: "center" }}>
-          {/* 16mm and error level L: the portal link is ~90 characters, and in
-              the old 8mm box its modules were too fine for a phone camera. */}
-          <div style={{ border: "1px solid #000", borderRadius: 3, padding: "1mm", width: "18mm", height: "18mm", boxSizing: "border-box", display: "flex", alignItems: "center", justifyContent: "center", background: "#fff" }}>
-            <QRCodeSVG value={qrValue} size={96} level="L" marginSize={2} bgColor="#ffffff" style={{ width: "16mm", height: "16mm" }} />
+          {/* MIN_QR_MM (22mm) and error level L: the portal link is ~77
+              characters, and anything much smaller prints squares too fine
+              for a phone camera to lock onto. */}
+          <div style={{ border: "1px solid #000", borderRadius: 3, padding: "0.5mm", width: `${MIN_QR_MM}mm`, height: `${MIN_QR_MM}mm`, boxSizing: "border-box", display: "flex", alignItems: "center", justifyContent: "center", background: "#fff" }}>
+            <QRCodeSVG value={qrValue} size={128} level="L" marginSize={2} bgColor="#ffffff" fgColor="#000000" style={{ width: `${MIN_QR_MM - 1}mm`, height: `${MIN_QR_MM - 1}mm` }} />
           </div>
-          <div style={{ fontSize: 5.5, fontWeight: 700, marginTop: 1, lineHeight: 1.15, maxWidth: "18mm" }}>Scan for job details</div>
+          <div style={{ fontSize: 5.5, fontWeight: 700, marginTop: 1, lineHeight: 1.15, maxWidth: `${MIN_QR_MM}mm` }}>Scan for job details</div>
         </div>
       </div>
     </div>
@@ -340,6 +373,7 @@ export default function DealerInvoicePrintable(props: DealerInvoiceProps) {
         return {
           ...headerData,
           jobId: r.id,
+          dealerJobNo: r.dealerJobNo ?? "",
           device: [r.brand, r.model].filter(Boolean).join(" "),
           imei: r.imei,
           fault: back > 0 ? "Cash Return" : r.issue,
@@ -366,7 +400,7 @@ export default function DealerInvoicePrintable(props: DealerInvoiceProps) {
     return (
       <ReceiptPagedRender
         ref={ref}
-        elements={template.elements}
+        elements={withScannableQr(template.elements, template.pageWidthMm, template.pageHeightMm)}
         headerData={headerData}
         rows={rows}
         widthMm={template.pageWidthMm}

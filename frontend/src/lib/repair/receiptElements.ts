@@ -299,10 +299,14 @@ export interface ReceiptData {
   dealerName?: string;
   dealerAddress?: string;
   dealerContact?: string;
+  /** The dealer's own reference for this job. When set, the Job No. column
+   *  prints it bold with our internal number (jobId) small beneath it. */
+  dealerJobNo?: string;
 }
 
 export const RECEIPT_TOKENS: { token: string; label: string; kind?: TemplateKind[] }[] = [
   { token: "{{jobId}}",         label: "Job number" },
+  { token: "{{dealerJobNo}}",   label: "Dealer's job number", kind: ["dealerInvoice"] },
   { token: "{{customer}}",      label: "Customer name" },
   { token: "{{phone}}",         label: "Customer phone" },
   { token: "{{address}}",       label: "Customer address" },
