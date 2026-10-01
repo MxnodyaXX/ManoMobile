@@ -157,6 +157,10 @@ function ElementBody({ el, data, tableRows, tableRowStart = 0 }: { el: ReceiptEl
         padding: "1.2mm 1.6mm", border: `0.2mm solid ${el.borderColor}`, fontWeight: 700,
         textAlign: "left", whiteSpace: "nowrap", fontSize: `${el.fontSize}pt`,
         background: el.headerBg, color: el.headerColor,
+        // Browsers drop backgrounds when printing unless told not to — the
+        // header band printed white while the shapes (which already set this)
+        // kept their colour.
+        printColorAdjust: "exact", WebkitPrintColorAdjust: "exact",
       };
       const td: React.CSSProperties = {
         padding: "1.4mm 1.6mm", border: `0.2mm solid ${el.borderColor}`, fontSize: `${el.fontSize}pt`,
@@ -222,6 +226,8 @@ export function InvoiceTableBody({ el, rows, fill, startIndex = 0, headerRef, ro
     padding: "1.2mm 1.6mm", border: `0.2mm solid ${el.borderColor}`, fontWeight: 700,
     whiteSpace: "nowrap", fontSize: `${el.fontSize}pt`,
     background: el.headerBg, color: el.headerColor,
+    // Keep the header colour on paper — see the receipt table above.
+    printColorAdjust: "exact", WebkitPrintColorAdjust: "exact",
   };
   const td: React.CSSProperties = {
     padding: "1.4mm 1.6mm", border: `0.2mm solid ${el.borderColor}`, fontSize: `${el.fontSize}pt`,

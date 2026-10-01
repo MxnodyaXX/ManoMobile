@@ -18,13 +18,15 @@ import ExportButtons from "@/cashier/components/shared/ExportButtons";
 import { exportToExcel, exportToPng, exportMultiSectionToExcel, exportReportToPdf } from "@/cashier/utils/exportUtils";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useRepair } from "@/cashier/contexts/RepairContext";
+import BelowMinReport from "./BelowMinReport";
 
-type ReportTab = "Daily Report" | "Sales Report" | "Repair Report" | "P&L Report" | "Stock Valuation" | "Cashier Performance" | "Supplier Report" | "Credit Aging" | "Repair SLA";
+type ReportTab = "Daily Report" | "Sales Report" | "Repair Report" | "Below Minimum" | "P&L Report" | "Stock Valuation" | "Cashier Performance" | "Supplier Report" | "Credit Aging" | "Repair SLA";
 
 const tabs: { id: ReportTab; icon: any; label: string }[] = [
   { id: "Daily Report",        icon: Calendar,     label: "Daily" },
   { id: "Sales Report",        icon: ShoppingCart, label: "Sales" },
   { id: "Repair Report",       icon: Wrench,       label: "Repair" },
+  { id: "Below Minimum",       icon: TrendingDown, label: "Below Min" },
   { id: "P&L Report",          icon: TrendingUp,   label: "P&L" },
   { id: "Stock Valuation",     icon: Package,      label: "Stock Value" },
   { id: "Cashier Performance", icon: DollarSign,   label: "Cashier" },
@@ -37,6 +39,7 @@ const tabDescriptions: Record<ReportTab, string> = {
   "Daily Report":        "Full-day revenue, transaction count, and cash reconciliation",
   "Sales Report":        "Sales breakdown by category, product, and customer",
   "Repair Report":       "Repair job statistics, technician performance, and parts usage",
+  "Below Minimum":       "Devices sold under their minimum price — the Below-Minimum Sales account, with reasons and totals",
   "P&L Report":          "Profit & Loss — revenue vs COGS vs gross profit by category",
   "Stock Valuation":     "Current inventory value at cost and selling price",
   "Cashier Performance": "Sales and transaction count broken down by cashier",
@@ -2232,6 +2235,7 @@ export default function ReportsManagement() {
         {active === "Daily Report"  && <DailyReport  dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo} />}
         {active === "Sales Report"  && <SalesReport  dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo} />}
         {active === "Repair Report" && <RepairReport dateFrom={dateFrom} dateTo={dateTo} setDateFrom={setDateFrom} setDateTo={setDateTo} />}
+        {active === "Below Minimum" && <BelowMinReport />}
       </div>
     </div>
   );

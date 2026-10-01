@@ -63,32 +63,46 @@ export async function createDeviceFault(label: string, afterSortOrder: number): 
 
   if (error) {
     if (error.code === "23505") throw new Error(`"${label.trim()}" is already in the list.`);
+    if (error.code === "42501") throw new Error(NOT_ALLOWED);
     throw new Error(error.message);
   }
   return toFault(data as FaultRow);
 }
+
+/**
+ * Row-level security does not raise an error when it filters a write out — an
+ * UPDATE or DELETE the caller may not make simply matches no rows. Without
+ * checking for that, a refused delete looked like a delete that "didn't work"
+ * and a refused edit surfaced as a cryptic "no rows returned". This names it.
+ */
+const NOT_ALLOWED =
+  "You don't have permission to change the fault list. An Admin, or an Admin Cashier with catalogue rights on Repairs, can — "
+  + "and if that is you, run migration 20260929000063_device_faults_admin_cashier.sql.";
 
 export async function updateDeviceFault(id: string, label: string): Promise<DeviceFault> {
   const { data, error } = await getSupabaseBrowserClient()
     .from("device_faults")
     .update({ label: label.trim() })
     .eq("id", Number(id))
-    .select(COLUMNS)
-    .single();
+    .select(COLUMNS);
 
   if (error) {
     if (error.code === "23505") throw new Error(`"${label.trim()}" is already in the list.`);
     throw new Error(error.message);
   }
-  return toFault(data as FaultRow);
+  const rows = (data ?? []) as FaultRow[];
+  if (rows.length === 0) throw new Error(NOT_ALLOWED);
+  return toFault(rows[0]);
 }
 
 export async function deleteDeviceFault(id: string): Promise<void> {
-  const { error } = await getSupabaseBrowserClient()
+  const { data, error } = await getSupabaseBrowserClient()
     .from("device_faults")
     .delete()
-    .eq("id", Number(id));
+    .eq("id", Number(id))
+    .select("id");
   if (error) throw new Error(error.message);
+  if (!data || data.length === 0) throw new Error(NOT_ALLOWED);
 }
 
 export function useDeviceFaults() {

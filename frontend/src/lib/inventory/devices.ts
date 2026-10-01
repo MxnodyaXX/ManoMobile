@@ -127,10 +127,14 @@ export async function saveDevice(device: DeviceRecord): Promise<DeviceRecord> {
 export async function sellMobileSale(
   devices: { id: number; price: number }[],
   accessories: { id: number; qty: number }[],
+  /** Required by the database when any device is under its minimum price —
+   *  see migration 20261001000064. Booked to the Below-Minimum Sales account. */
+  belowMinReason?: string,
 ): Promise<string> {
   const { data, error } = await getSupabaseBrowserClient().rpc("sell_mobile_sale", {
     p_devices: devices,
     p_accessories: accessories,
+    p_below_min_reason: belowMinReason?.trim() || null,
   });
   if (error) {
     if (/Could not find the function|PGRST202/.test(error.message)) {

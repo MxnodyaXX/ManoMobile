@@ -1119,6 +1119,7 @@ export default function MobileSales() {
   const [invoiceNo, setInvoiceNo] = useState<string | null>(null);
   const [invoicing, setInvoicing] = useState(false);
   const busyRef = useRef(false);
+  const [belowMinReason, setBelowMinReason] = useState("");
 
   const cashierName = profile?.fullName?.trim() || "Cashier";
 
@@ -1262,6 +1263,11 @@ export default function MobileSales() {
     pc.phone.minSellingPrice > 0 && effectivePrice(pc) < pc.phone.minSellingPrice;
 
   const belowMin      = phoneCart.some(isPhoneBelowMin);
+  // Selling under the floor is allowed, with a reason: the shortfall goes to
+  // the Below-Minimum Sales account (migration 20261001000064).
+  const belowMinShortfall = phoneCart.reduce((s, pc) =>
+    s + (isPhoneBelowMin(pc) ? pc.phone.minSellingPrice - effectivePrice(pc) : 0), 0);
+  const belowMinReady = !belowMin || belowMinReason.trim() !== "";
   const missingPrice  = phoneCart.some(pc => !(parseFloat(pc.sellingPrice) > 0));
   const customerReady = customer.name.trim() !== "" && customer.phone.trim() !== "";
 
@@ -1286,7 +1292,7 @@ export default function MobileSales() {
     (balanceMethod === "Credit" && selectedCreditCustomer !== null)
   );
 
-  const canComplete = configured && phoneCart.length > 0 && !belowMin && !missingPrice && customerReady &&
+  const canComplete = configured && phoneCart.length > 0 && belowMinReady && !missingPrice && customerReady &&
     (cashReady ||
      paymentMethod === "Card" ||
      (paymentMethod === "Credit" && selectedCreditCustomer !== null));
@@ -1314,6 +1320,7 @@ export default function MobileSales() {
       const no = await sellSale(
         phoneCart.map(pc => ({ id: pc.phone.id, price: effectivePrice(pc) })),
         accessoryCart.map(i => ({ id: i.id, qty: i.qty })),
+        belowMin ? belowMinReason : undefined,
       );
       setInvoiceNo(no);
       if (accessoryCart.length) void reloadAccessories();
@@ -1407,6 +1414,7 @@ export default function MobileSales() {
     setShowPrintPreview(false); setConfirmedCardRef("");
     setCheckoutError(null); setSaveWarning(null);
     setCompleted(false); setInvoiceNo(null);
+    setBelowMinReason("");
   };
 
   if (completed) {
@@ -1604,11 +1612,11 @@ export default function MobileSales() {
                         type="number" value={pc.sellingPrice}
                         min={0}
                         onChange={e => updatePhonePrice(pc.phone.id, e.target.value)}
-                        style={{ ...inputStyle, fontWeight: 700, borderColor: isBelowMin ? "#ef4444" : undefined }}
+                        style={{ ...inputStyle, fontWeight: 700, borderColor: isBelowMin ? "#f59e0b" : undefined }}
                       />
                       {isBelowMin && (
-                        <div style={{ fontSize: 10, color: "#ef4444", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 3 }}>
-                          Sells for {fmt(effective)} after discounts — below minimum
+                        <div style={{ fontSize: 10, color: "#d97706", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 3, lineHeight: 1.4 }}>
+                          Sells for {fmt(effective)} after discounts — {fmt(pc.phone.minSellingPrice - effective)} under minimum. Allowed with a reason.
                         </div>
                       )}
                     </div>
@@ -1801,6 +1809,28 @@ export default function MobileSales() {
           </div>
         )}
 
+        {/* ── Below-minimum: allowed, but with a reason on the record ── */}
+        {belowMin && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10, padding: 12, borderRadius: 9, border: "1px solid rgba(245,158,11,0.45)", background: "rgba(245,158,11,0.07)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "#d97706" }}>
+              <span>Selling below minimum price</span>
+              <span>{fmt(belowMinShortfall)} under</span>
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
+              This amount is booked to the <b>Below-Minimum Sales</b> account and shows in Reports → Below Min.
+            </div>
+            <div>
+              <label style={labelStyle}>Reason *</label>
+              <input
+                value={belowMinReason}
+                onChange={e => setBelowMinReason(e.target.value)}
+                placeholder="e.g. Regular customer, old stock, price match…"
+                style={inputStyle}
+              />
+            </div>
+          </div>
+        )}
+
         {/* ── Cash: what was handed over, and how any shortfall is settled ── */}
         {isCash && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 10, padding: 12, borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg-card)" }}>
@@ -1907,8 +1937,8 @@ export default function MobileSales() {
             ? "Scan a device first"
             : missingPrice
             ? "Enter a selling price"
-            : belowMin
-            ? "Price below minimum"
+            : !belowMinReady
+            ? "Give a reason for the below-minimum price"
             : !customerReady
             ? "Enter customer name & phone"
             : !paymentMethod

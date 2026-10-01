@@ -242,7 +242,7 @@ function TableHead() {
   const th: React.CSSProperties = { color: "#fff", fontWeight: 800, fontSize: 7.5, padding: "4px 5px", textAlign: "left", whiteSpace: "nowrap" };
   return (
     <thead>
-      <tr style={{ background: "#c0392b" }}>
+      <tr style={{ background: "#c0392b", printColorAdjust: "exact", WebkitPrintColorAdjust: "exact" }}>
         {COLS.map((c, i) => (
           <th key={c} style={{ ...th, width: COL_WIDTHS[i], textAlign: c === "Final Amount" ? "right" : "left" }}>{c}</th>
         ))}

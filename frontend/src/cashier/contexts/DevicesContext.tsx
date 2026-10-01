@@ -64,7 +64,7 @@ interface DevicesContextType {
    *  invoice number — atomically, see sell_mobile_sale(). Throws (selling
    *  nothing) if any device was sold elsewhere or priced below its minimum.
    *  Refetches afterwards so the list is the database's. */
-  sellSale: (devices: { id: number; price: number }[], accessories: { id: number; qty: number }[]) => Promise<string>;
+  sellSale: (devices: { id: number; price: number }[], accessories: { id: number; qty: number }[], belowMinReason?: string) => Promise<string>;
 
   loading: boolean;
   error: string | null;
@@ -118,8 +118,9 @@ export function DevicesProvider({ children }: { children: ReactNode }) {
   const sellSale = useCallback(async (
     lines: { id: number; price: number }[],
     accessories: { id: number; qty: number }[],
+    belowMinReason?: string,
   ) => {
-    const invoiceNo = await sellMobileSale(lines, accessories);
+    const invoiceNo = await sellMobileSale(lines, accessories, belowMinReason);
     try { setDevices(await fetchDevices()); } catch { /* next reload corrects it */ }
     return invoiceNo;
   }, []);
