@@ -29,6 +29,8 @@ export interface AgentTransfer {
   jobId: string;
   agentId: number;
   agentName: string | null;
+  /** The agent's phone/contact, for whoever has to chase the device. */
+  agentContact?: string | null;
   status: TransferStatus;
   reason: string | null;
   expectedReturn: string | null;
@@ -158,7 +160,7 @@ interface TransferRow {
   agreed_cost: number | string | null; actual_cost: number | string | null;
   sent_at: string; sent_by: string | null; returned_at: string | null;
   return_notes: string | null; received_by: string | null;
-  repair_agents: { name: string } | { name: string }[] | null;
+  repair_agents: { name: string; contact?: string | null } | { name: string; contact?: string | null }[] | null;
 }
 
 const rowToTransfer = (r: TransferRow): AgentTransfer => {
@@ -168,6 +170,7 @@ const rowToTransfer = (r: TransferRow): AgentTransfer => {
     jobId: r.job_id,
     agentId: r.agent_id,
     agentName: a?.name ?? null,
+    agentContact: a?.contact || null,
     status: r.status,
     reason: r.reason,
     expectedReturn: r.expected_return,
@@ -181,7 +184,7 @@ const rowToTransfer = (r: TransferRow): AgentTransfer => {
   };
 };
 
-const TRANSFER_SELECT = "id, job_id, agent_id, status, reason, expected_return, agreed_cost, actual_cost, sent_at, sent_by, returned_at, return_notes, received_by, repair_agents (name)";
+const TRANSFER_SELECT = "id, job_id, agent_id, status, reason, expected_return, agreed_cost, actual_cost, sent_at, sent_by, returned_at, return_notes, received_by, repair_agents (name, contact)";
 
 /** Every transfer still out at an agent, newest first. */
 export async function fetchOpenTransfers(): Promise<AgentTransfer[]> {

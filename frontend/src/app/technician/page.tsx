@@ -244,7 +244,7 @@ function TechPageInner() {
    * nobody else: a plain Cashier or Accounts login on a technician's bench
    * would be able to finish jobs they cannot even see the parts for.
    */
-  const { isAdminCashier, loading: permsLoading } = useMyPermissions();
+  const { isAdminCashier, isWholeShopTechnician, loading: permsLoading } = useMyPermissions();
   const mayDrive = profile?.role === "Admin" || isAdminCashier;
 
   // If a name was passed in the URL, accept it once the roster has loaded.
@@ -258,7 +258,12 @@ function TechPageInner() {
   // On the whole-shop bench the "technician" the shell runs as is the person
   // at the keyboard, so nothing downstream records a blank actor; the bench
   // itself never lists by that name.
-  const adminBench = wantsAdminBench && !sessionTech && mayDrive;
+  //
+  // A technician switched to "whole shop" in Permissions gets the same bench
+  // from their own login — every job listed, any job actionable — while still
+  // being themselves: the job they finish defaults to whoever it is assigned to,
+  // and their own work is recorded as theirs.
+  const adminBench = (wantsAdminBench && !sessionTech && mayDrive) || (!!sessionTech && isWholeShopTechnician);
   const techName = sessionTech || (adminBench ? (profile?.fullName || "").trim() || "Admin" : picked);
 
   if (!techName) {
@@ -278,13 +283,13 @@ function TechPageInner() {
     <WarrantyProvider>
     <PartsProvider>
     <TechProvider technicianName={techName} adminBench={adminBench}>
-      <TabTitle role="Technician" name={adminBench ? "Admin technician" : techName} />
+      <TabTitle role="Technician" name={adminBench ? (sessionTech ? `${techName} · Whole shop` : "Admin technician") : techName} />
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
 
         <TechSidebar
           activePage={activePage}
           onNavigate={setActivePage}
-          techName={adminBench ? `Admin technician · ${techName}` : techName}
+          techName={adminBench ? (sessionTech ? `Whole shop · ${techName}` : `Admin technician · ${techName}`) : techName}
           onLogout={() => { void signOut().then(() => window.location.assign("/")); }}
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}

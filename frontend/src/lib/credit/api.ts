@@ -261,6 +261,37 @@ async function addEntry(e: {
 export const recordPayment = (accountId: string, amount: number, method: string, note?: string) =>
   addEntry({ accountId, kind: "Payment", amount, method, note });
 
+/**
+ * One payment, split across the invoices it settles — one Payment entry per
+ * invoice, all written in a single insert so the split lands whole or not at
+ * all. Each line names its invoice, so per-invoice balances (the dealer
+ * portal, the statement) drop as they are paid instead of only the account
+ * total. Any part that settles no particular invoice is booked without one.
+ */
+export async function recordAllocatedPayment(
+  accountId: string,
+  parts: { invoiceNo: string | null; amount: number }[],
+  method: string,
+  note?: string,
+): Promise<void> {
+  const lines = parts.filter(p => p.amount > 0.005);
+  if (lines.length === 0) return;
+  const total = Math.round(lines.reduce((s, p) => s + p.amount, 0) * 100) / 100;
+  const sb = getSupabaseBrowserClient();
+  const { data: { user } } = await sb.auth.getUser();
+  const shared = note?.trim();
+  const { error } = await sb.from("credit_entries").insert(lines.map(p => ({
+    account_id: accountId,
+    kind: "Payment",
+    amount: Math.round(p.amount * 100) / 100,
+    method,
+    note: [shared, lines.length > 1 ? `Part of a Rs. ${total.toLocaleString()} payment` : null].filter(Boolean).join(" · ") || null,
+    invoice_no: p.invoiceNo,
+    created_by: user?.id ?? null,
+  })));
+  if (error) throw new Error(explain(error.message, error.code));
+}
+
 /** Put something on account by hand — a sale, or a correction. */
 export const addCharge = (accountId: string, amount: number, note?: string, invoiceNo?: string) =>
   addEntry({ accountId, kind: "Charge", amount, note, invoiceNo });

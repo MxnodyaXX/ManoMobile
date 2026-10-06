@@ -266,6 +266,16 @@ export default function TechnicianPermissions() {
                 <YesNo value={rule.canUsePartsWithoutApproval} disabled={saving} onChange={v => apply({ ...rule, canUsePartsWithoutApproval: v })} />
               </div>
 
+              {/* Grants rather than restricts — the whole shop's bench from
+                  their own login. Migration 20261006000065. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <span style={{ ...label, flex: 1, minWidth: 190 }}>
+                  Whole-shop technician
+                  <span style={{ color: "var(--text-muted)", fontSize: 11 }}> · sees every job and can work on any of them</span>
+                </span>
+                <YesNo value={rule.isWholeShopTechnician} disabled={saving} onChange={v => apply({ ...rule, isWholeShopTechnician: v })} />
+              </div>
+
               <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                 <span style={{ ...label, flex: 1, minWidth: 190 }}>
                   Main technician
@@ -367,6 +377,9 @@ export default function TechnicianPermissions() {
               {effective.canTransferToAgent ? "can send devices out" : "cannot send devices out"},{" "}
               {effective.requireStartBeforeFinish ? "must start a job before finishing it" : "can finish a job without starting it"}, and{" "}
               {effective.canUsePartsWithoutApproval ? "can pull repair parts without approval" : "needs Admin approval to use repair parts"}.{" "}
+              {rule.isWholeShopTechnician && (
+                <><strong style={{ color: "var(--text-secondary)" }}>Works the whole shop&apos;s bench</strong> — sees and can act on every job.{" "}</>
+              )}
               Their charge box starts at{" "}
               <strong style={{ color: "var(--text-secondary)" }}>
                 {describeRate(effective.labourCostMode, effective.labourCostValue).toLowerCase()}

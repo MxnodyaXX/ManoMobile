@@ -8,15 +8,15 @@ import {
   History, Plus, Sparkles, Loader2, Undo2, RotateCcw, FileText, ChevronDown, MessageSquare,
 } from "lucide-react";
 import {
-  useCreditAccounts, useCreditEntries, openCreditAccount, recordPayment, writeOff,
+  useCreditAccounts, useCreditEntries, openCreditAccount, writeOff,
   groupCreditEntries, STATUS_COLOURS, isOverLimit,
   type CreditAccount, type CreditStatus, type HolderKind, type CreditEntryGroup,
 } from "@/lib/credit/api";
 import { sendSms } from "@/lib/sms/client";
 import {
   renderCreditReminder, CREDIT_REMINDER_PURPOSE,
-  renderCreditAccountOpened, renderCreditPaymentRecorded,
-  CREDIT_OPENED_PURPOSE, CREDIT_PAYMENT_PURPOSE,
+  renderCreditAccountOpened,
+  CREDIT_OPENED_PURPOSE,
 } from "@/lib/sms/creditReminders";
 import InvoiceDetail from "@/cashier/components/sales/InvoiceDetail";
 import { useInvoiceCategories } from "@/lib/sales/api";
@@ -42,6 +42,7 @@ import { recordDealerCashReturn } from "@/lib/accounts/cashReturns";
 import { useTableSort, SortHeader } from "@/lib/ui/useTableSort";
 import { cleanPhone, phoneIssue, FieldWarning } from "@/lib/ui/identifiers";
 import RecordCreditModal from "./RecordCreditModal";
+import RecordPaymentModal from "./RecordPaymentModal";
 
 /**
  * Credit accounts — who owes the shop money.
@@ -338,116 +339,7 @@ function CashReturnModal({ account, onClose, onDone }: {
   );
 }
 
-// ─── Record Payment ───────────────────────────────────────────────────────────
-
-function RecordPaymentModal({ account, onClose, onDone }: {
-  account: CreditAccount;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const toast = useToast();
-  const [amount, setAmount] = useState("");
-  const [method, setMethod] = useState("Cash");
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const amt = parseFloat(amount) || 0;
-  const over = amt > account.balance;
-  const newBal = Math.max(0, account.balance - amt);
-  const canSave = amt > 0 && !over && !busy;
-
-  const save = async () => {
-    setBusy(true); setError(null);
-    try {
-      await recordPayment(account.id, amt, method, note);
-      // Best-effort: the payment is already recorded, so a failed text
-      // should not read as a failed payment.
-      if (account.phone) {
-        void sendSms({
-          to: account.phone,
-          message: renderCreditPaymentRecorded({ name: account.name }, amt, newBal),
-          accountId: account.id, purpose: CREDIT_PAYMENT_PURPOSE,
-        }).catch(() => {});
-      }
-      toast.success(`${rs(amt)} recorded against ${account.name}`);
-      onDone();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal onClose={onClose}>
-      <ModalHead title="Record Payment" sub={`${account.name} · ${account.holderKind}`} onClose={onClose} />
-
-      <div style={{ margin: "14px 18px 0", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-        {[
-          { label: "Total Charged", val: rs(account.totalCharged), color: "var(--text-primary)" },
-          { label: "Total Paid",    val: rs(account.totalPaid),    color: "var(--success)" },
-          { label: "Balance Due",   val: rs(account.balance),      color: "var(--danger)" },
-        ].map(r => (
-          <div key={r.label} style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", borderRadius: 9, padding: "9px 12px", textAlign: "center" }}>
-            <p style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.07em", textTransform: "uppercase", fontFamily: ff, marginBottom: 4 }}>{r.label}</p>
-            <p style={{ fontSize: 13, fontWeight: 700, color: r.color }}>{r.val}</p>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div>
-            <label style={labelSt}>Payment Amount (Rs.)</label>
-            <input
-              type="number" min={1} step="0.01" autoFocus
-              value={amount} onChange={e => setAmount(e.target.value)}
-              placeholder={`Max ${rs(account.balance)}`}
-              style={{ ...inputSt, border: over ? "1px solid var(--danger)" : "1px solid var(--border)" }}
-            />
-            {over && <p style={{ fontSize: 10.5, color: "var(--danger)", marginTop: 4 }}>More than the outstanding balance</p>}
-          </div>
-          <div>
-            <label style={labelSt}>Payment Method</label>
-            <select value={method} onChange={e => setMethod(e.target.value)} style={{ ...inputSt, cursor: "pointer" }}>
-              {["Cash", "Bank Transfer", "Card", "Cheque", "Online"].map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <label style={labelSt}>Note (optional)</label>
-          <input value={note} onChange={e => setNote(e.target.value)} placeholder="Reference, cheque number…" style={inputSt} />
-        </div>
-
-        {/* Who recorded it used to be a free-text box anyone could type any name
-            into. It is the signed-in person now, taken from the session. */}
-        {amt > 0 && !over && (
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", borderRadius: 9, background: newBal === 0 ? "rgba(74,222,128,0.07)" : "rgba(96,165,250,0.07)", border: `1px solid ${newBal === 0 ? "rgba(74,222,128,0.3)" : "rgba(96,165,250,0.25)"}` }}>
-            <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff }}>
-              {newBal === 0 ? "Account will be fully settled" : "Remaining balance after payment"}
-            </span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: newBal === 0 ? "var(--success)" : "var(--accent)" }}>
-              {newBal === 0 ? "SETTLED ✓" : rs(newBal)}
-            </span>
-          </div>
-        )}
-
-        {error && (
-          <p style={{ fontSize: 11.5, color: "var(--danger)", lineHeight: 1.5, fontFamily: ff }}>{error}</p>
-        )}
-      </div>
-
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "12px 18px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
-        <button onClick={onClose} style={{ padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: ff }}>Cancel</button>
-        <button onClick={save} disabled={!canSave}
-          style={{ padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--accent-fg)", cursor: canSave ? "pointer" : "not-allowed", opacity: canSave ? 1 : 0.45, fontFamily: ff }}>
-          {busy ? "Recording…" : "Record Payment"}
-        </button>
-      </div>
-    </Modal>
-  );
-}
+// Record Payment lives in ./RecordPaymentModal.tsx
 
 // ─── Write off ────────────────────────────────────────────────────────────────
 

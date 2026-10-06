@@ -8,6 +8,7 @@ import { useTechnicianRates } from "@/lib/settings/staffRules";
 import { useWorkRules } from "@/lib/settings/workRules";
 import { isUnassigned, claimRepairJob } from "@/lib/repair/api";
 import { useTech } from "@/technician/contexts/TechContext";
+import { useAuth } from "@/lib/auth/AuthContext";
 import { useParts } from "@/cashier/contexts/PartsContext";
 import BenchCard, { type BenchAction } from "@/technician/components/bench/BenchCard";
 import BenchTable from "@/technician/components/bench/BenchTable";
@@ -77,6 +78,7 @@ const COLUMNS: {
 export default function MyBench() {
   const { jobs, updateJob, refresh } = useRepair();
   const { technicianName, actorName, onBehalf, adminBench, jobMeta, setJobMeta, partRequests, addActivity } = useTech();
+  const { profile } = useAuth();
   /**
    * "by A-Cashier" on every activity line the counter writes for the
    * technician. Empty when the technician is doing their own work, so the
@@ -503,7 +505,7 @@ export default function MyBench() {
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", marginBottom: 3 }}>
-            {adminBench ? "Admin technician — the whole shop" : shopWide ? "The whole shop" : `${technicianName}'s bench`}
+            {adminBench ? (profile?.role === "Technician" ? `The whole shop — ${technicianName}` : "Admin technician — the whole shop") : shopWide ? "The whole shop" : `${technicianName}'s bench`}
           </h1>
           <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
             {inProgress.length > 0

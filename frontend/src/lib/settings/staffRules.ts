@@ -47,6 +47,9 @@ export interface StaffRuleOverride {
   canViewRevenue: boolean;
   /** Correct a booked-in job's details. Needs the admin-cashier tick too. */
   canEditJobs: boolean;
+  /** A technician who works the whole shop's bench — every job, any action.
+   *  Grants rather than restricts, so it defaults off. Migration 20261006000065. */
+  isWholeShopTechnician: boolean;
 }
 
 /** The counter permissions, with the wording the admin screen shows. */
@@ -117,6 +120,7 @@ export const blankOverride = (profileId: string): StaffRuleOverride => ({
   canManageCatalogue: true,
   canViewRevenue: true,
   canEditJobs: true,
+  isWholeShopTechnician: false,
 });
 
 interface RuleRow {
@@ -137,6 +141,8 @@ interface RuleRow {
   can_manage_catalogue: boolean;
   can_view_revenue: boolean;
   can_edit_jobs: boolean;
+  /** Absent until migration 20261006000065 has run. */
+  is_whole_shop_technician?: boolean;
 }
 
 const rowToOverride = (r: RuleRow): StaffRuleOverride => ({
@@ -158,6 +164,7 @@ const rowToOverride = (r: RuleRow): StaffRuleOverride => ({
   canManageCatalogue: r.can_manage_catalogue ?? true,
   canViewRevenue: r.can_view_revenue ?? true,
   canEditJobs: r.can_edit_jobs ?? true,
+  isWholeShopTechnician: !!r.is_whole_shop_technician,
 });
 
 /**
@@ -180,6 +187,7 @@ function migrationHint(message: string): string {
     ["can_manage_catalogue",           "20260830000007_cashier_permissions.sql"],
     ["can_view_revenue",               "20260830000007_cashier_permissions.sql"],
     ["can_edit_jobs",                  "20260901000015_edit_jobs_permission.sql"],
+    ["is_whole_shop_technician",       "20261006000065_whole_shop_technician.sql"],
   ];
   const hit = byColumn.find(([col]) => message.includes(col));
   if (hit) return ` — run migration ${hit[1]}.`;
@@ -192,7 +200,10 @@ function migrationHint(message: string): string {
 export async function fetchStaffRules(): Promise<StaffRuleOverride[]> {
   const { data, error } = await getSupabaseBrowserClient()
     .from("staff_work_rules")
-    .select("profile_id, allow_multiple_active_jobs, max_active_jobs, require_start_before_finish, can_claim_unassigned, can_transfer_to_agent, can_use_parts_without_approval, labour_cost_mode, labour_cost_value, is_default_technician, is_admin_cashier, can_cancel_jobs, can_discount, can_approve_parts, can_manage_catalogue, can_view_revenue, can_edit_jobs");
+    // "*" rather than a column list, so a column added by a newer migration
+    // (is_whole_shop_technician) is read when present and its absence never
+    // stops every other permission loading.
+    .select("*");
 
   if (error) throw new Error(`Could not load technician permissions: ${error.message}${migrationHint(error.message)}`);
   return (data as RuleRow[]).map(rowToOverride);
@@ -200,9 +211,7 @@ export async function fetchStaffRules(): Promise<StaffRuleOverride[]> {
 
 export async function saveStaffRule(rule: StaffRuleOverride): Promise<void> {
   const { data: { user } } = await getSupabaseBrowserClient().auth.getUser();
-  const { error } = await getSupabaseBrowserClient()
-    .from("staff_work_rules")
-    .upsert({
+  const row: Record<string, unknown> = {
       profile_id: rule.profileId,
       allow_multiple_active_jobs: rule.allowMultipleActiveJobs,
       max_active_jobs: rule.maxActiveJobs,
@@ -219,11 +228,27 @@ export async function saveStaffRule(rule: StaffRuleOverride): Promise<void> {
       can_manage_catalogue: rule.canManageCatalogue,
       can_view_revenue: rule.canViewRevenue,
       can_edit_jobs: rule.canEditJobs,
+      is_whole_shop_technician: rule.isWholeShopTechnician,
       // is_default_technician is deliberately absent: writing it here could
       // leave two rows true, which the unique index rejects. It moves only
       // through setDefaultTechnician().
       updated_by: user?.id ?? null,
-    });
+  };
+  const upsert = (r: Record<string, unknown>) =>
+    getSupabaseBrowserClient().from("staff_work_rules").upsert(r);
+
+  let { error } = await upsert(row);
+  // Before migration 20261006000065 the whole-shop column does not exist.
+  // Every other permission must still save, so retry without it — unless the
+  // save was specifically to switch it on, which then has to say why it can't.
+  if (error && /is_whole_shop_technician/.test(error.message)) {
+    if (rule.isWholeShopTechnician) {
+      throw new Error("The whole-shop technician setting needs migration 20261006000065_whole_shop_technician.sql.");
+    }
+    const { is_whole_shop_technician: _drop, ...rest } = row;
+    void _drop;
+    ({ error } = await upsert(rest));
+  }
 
   if (error) {
     throw new Error(
@@ -454,6 +479,8 @@ export async function setDefaultTechnician(profileId: string | null): Promise<vo
 export function useMyPermissions(): {
   can: (key: CashierPermissionKey) => boolean;
   isAdminCashier: boolean;
+  /** A technician switched to the whole shop's bench. False while loading. */
+  isWholeShopTechnician: boolean;
   loading: boolean;
 } {
   const [rule, setRule] = useState<StaffRuleOverride | null>(null);
@@ -499,6 +526,7 @@ export function useMyPermissions(): {
   return {
     can,
     isAdminCashier: role === "Admin" || !!rule?.isAdminCashier,
+    isWholeShopTechnician: role === "Technician" && !!rule?.isWholeShopTechnician,
     loading,
   };
 }

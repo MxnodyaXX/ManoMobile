@@ -10,6 +10,7 @@ import type { JobStatus, RepairJob, RepairView } from "@/cashier/contexts/Repair
 export type { JobStatus, RepairJob } from "@/cashier/contexts/RepairContext";
 import { createPortal } from "react-dom";
 import JobReceiptPrintable from "./JobReceiptPrintable";
+import JobTimeline, { useJobTimeline } from "./JobTimeline";
 import JobIssuePrintable, { type IssueInvoiceData } from "./JobIssuePrintable";
 import DealerInvoicePrintable, { type InvoiceRepairLine } from "@/cashier/components/sales/DealerInvoicePrintable";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
@@ -29,7 +30,7 @@ import {
   Truck, Ban, FileText, Package, Tag, Info, Save, Pencil, BellRing, RotateCcw,
   Briefcase, User, Smartphone, Wallet, ClipboardList, Building2,
 } from "lucide-react";
-import { fetchOpenTransfers, type AgentTransfer } from "@/lib/repair/agents";
+import { fetchOpenTransfers, transferCost, type AgentTransfer } from "@/lib/repair/agents";
 import AgentsOutPanel from "@/lib/repair/AgentsOutPanel";
 import { notifyJobEvent } from "@/lib/sms/notify";
 import { useToast } from "@/lib/ui/toast";
@@ -1132,6 +1133,9 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
   // Typed by hand it was not: a job assigned to "Wijaya kumar" belongs to
   // nobody, because a queue is jobs.filter(j => j.technician === me).
   const { technicians } = useTechnicians();
+  // Who accepted, started, paused, sent it to an agent, finished and issued it
+  // — from the status-change log, agent transfers and the handover record.
+  const timeline = useJobTimeline(job);
 
   /**
    * Correcting what was booked in.
@@ -1342,6 +1346,12 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
   // Read through the draft so it moves while the two figures above it are
   // being corrected. Off the saved row it would contradict them.
   const balance = Number(val("estimatedCost") ?? 0) - Number(val("advancePaid") ?? 0);
+
+  // Outside-agent trips for this job (cancelled ones cost nothing). The cost
+  // is what was charged once it came back, or the quote while it is still out.
+  const agentTrips = timeline.transfers.filter(t => t.status !== "Cancelled");
+  const agentCostTotal = agentTrips.reduce((s, t) => s + transferCost(t), 0);
+  const agentMargin = (finished ? Number(val("estimatedCost") ?? 0) : quoted) - agentCostTotal;
 
   const d = new Date(job.createdAt);
   const dayName   = d.toLocaleDateString("en-US", { weekday: "long" });
@@ -1605,12 +1615,13 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                 <label style={lab}>Accepted date</label>
                 <div style={{ ...readSt, color: "var(--text-primary)" }}>{dayName}, {monthName} {d.getDate()}, {d.getFullYear()}</div>
               </div>
-              {/* Not editable, and not because it is protected: nothing is
-                  stored behind it. repair_jobs records created_by as a uuid
-                  with no display name resolved anywhere. */}
+              {/* From the "Job created" status event, which records the
+                  signed-in person who booked it in. */}
               <div>
                 <label style={lab}>Accepted by</label>
-                <div style={{ ...readSt, color: "var(--text-muted)", fontStyle: "italic" }}>—</div>
+                {timeline.acceptedBy
+                  ? <div style={{ ...readSt, color: "var(--text-primary)" }}>{timeline.acceptedBy}</div>
+                  : <div style={{ ...readSt, color: "var(--text-muted)", fontStyle: "italic" }}>{timeline.loading ? "…" : "—"}</div>}
               </div>
 
               {/* Read as a promise kept or broken, not as a raw date string. */}
@@ -1622,6 +1633,8 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
               )}
               {field("Repair warranty", "jobWarranty")}
             </>)}
+
+            <JobTimeline steps={timeline.steps} loading={timeline.loading} />
 
             {job.cancelReason && (
               <div style={{ padding: "11px 14px", borderRadius: 12, background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.25)" }}>
@@ -1791,6 +1804,63 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                   {rs(Math.abs(balance))}
                 </span>
               </div>
+
+              {/* Sent to an outside agent: what that cost the shop, and who has
+                  (or had) the device — so the price above can be read against
+                  it without opening the agents screen. */}
+              {agentTrips.length > 0 && (
+                <div style={{ gridColumn: "1 / -1", borderRadius: 8, border: "1px solid rgba(167,139,250,0.35)", background: "rgba(167,139,250,0.06)", overflow: "hidden", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 13px", borderBottom: "1px solid rgba(167,139,250,0.25)" }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "#a78bfa" }}>
+                      Agent cost
+                    </span>
+                    <span style={{ fontSize: 14.5, fontWeight: 800, color: "#a78bfa" }}>{rs(agentCostTotal)}</span>
+                  </div>
+                  {agentTrips.map(t => {
+                    const cost = transferCost(t);
+                    const settled = t.actualCost != null;
+                    return (
+                      <div key={t.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "9px 13px", borderBottom: "1px solid var(--border)" }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
+                            {t.agentName ?? `Agent #${t.agentId}`}
+                            <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 700, padding: "1px 7px", borderRadius: 10, background: t.status === "Sent" ? "rgba(245,158,11,0.15)" : "rgba(34,197,94,0.12)", color: t.status === "Sent" ? "#d97706" : "#16a34a" }}>
+                              {t.status === "Sent" ? "With agent" : "Returned"}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2, lineHeight: 1.5 }}>
+                            {[
+                              t.agentContact,
+                              `Sent ${new Date(t.sentAt).toLocaleDateString("en-LK", { day: "numeric", month: "short" })}${t.sentBy ? ` by ${t.sentBy}` : ""}`,
+                              t.returnedAt
+                                ? `Back ${new Date(t.returnedAt).toLocaleDateString("en-LK", { day: "numeric", month: "short" })}`
+                                : t.expectedReturn ? `Expected ${new Date(`${t.expectedReturn}T00:00:00`).toLocaleDateString("en-LK", { day: "numeric", month: "short" })}` : null,
+                            ].filter(Boolean).join(" · ")}
+                          </div>
+                          {t.reason && <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginTop: 1 }}>{t.reason}</div>}
+                        </div>
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>{cost > 0 ? rs(cost) : "—"}</div>
+                          <div style={{ fontSize: 10.5, color: "var(--text-muted)" }}>
+                            {settled
+                              ? (t.agreedCost != null && t.agreedCost !== t.actualCost ? `charged · agreed ${rs(t.agreedCost)}` : "charged")
+                              : t.agreedCost != null ? "agreed" : "not quoted"}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {/* What is left for the shop once the agent is paid. */}
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "9px 13px" }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-muted)" }}>
+                      {finished ? "Final price less agent cost" : "Estimate less agent cost"}
+                    </span>
+                    <span style={{ fontSize: 13.5, fontWeight: 800, color: agentMargin < 0 ? "#ef4444" : "#16a34a" }}>
+                      {agentMargin < 0 ? `− ${rs(-agentMargin)}` : rs(agentMargin)}
+                    </span>
+                  </div>
+                </div>
+              )}
             </>)}
 
             {/* Written by the bench, so shown when there is something to show

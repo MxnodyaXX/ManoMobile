@@ -726,32 +726,43 @@ export interface JobEvent {
 }
 
 export async function fetchJobEvents(jobId: string): Promise<JobEvent[]> {
-  const { data, error } = await getSupabaseBrowserClient()
+  const sb = getSupabaseBrowserClient();
+  // No embedded profiles:changed_by (full_name) join: changed_by references
+  // auth.users, not profiles, so PostgREST has no relationship to follow and
+  // the whole request failed — every job's history came back empty. The names
+  // are looked up separately instead (profiles is readable by all staff).
+  const { data, error } = await sb
     .from("repair_job_events")
-    .select("id, job_id, from_status, to_status, note, changed_at, profiles:changed_by (full_name)")
+    .select("id, job_id, from_status, to_status, note, changed_at, changed_by")
     .eq("job_id", jobId)
     .order("changed_at", { ascending: false });
 
   if (error) throw new Error(`Could not load history for ${jobId}: ${error.message}`);
 
-  return (data ?? []).map((r: unknown) => {
-    const row = r as {
-      id: number; job_id: string;
-      from_status: RepairJob["status"] | null; to_status: RepairJob["status"];
-      note: string | null; changed_at: string;
-      profiles: { full_name: string } | { full_name: string }[] | null;
-    };
-    const p = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-    return {
-      id: row.id,
-      jobId: row.job_id,
-      fromStatus: row.from_status,
-      toStatus: row.to_status,
-      note: row.note,
-      changedAt: row.changed_at,
-      changedByName: p?.full_name ?? null,
-    };
-  });
+  const rows = (data ?? []) as {
+    id: number; job_id: string;
+    from_status: RepairJob["status"] | null; to_status: RepairJob["status"];
+    note: string | null; changed_at: string; changed_by: string | null;
+  }[];
+
+  const ids = [...new Set(rows.map(r => r.changed_by).filter((v): v is string => !!v))];
+  const names = new Map<string, string>();
+  if (ids.length > 0) {
+    const { data: people } = await sb.from("profiles").select("id, full_name").in("id", ids);
+    for (const p of (people ?? []) as { id: string; full_name: string | null }[]) {
+      if (p.full_name) names.set(p.id, p.full_name);
+    }
+  }
+
+  return rows.map(row => ({
+    id: row.id,
+    jobId: row.job_id,
+    fromStatus: row.from_status,
+    toStatus: row.to_status,
+    note: row.note,
+    changedAt: row.changed_at,
+    changedByName: row.changed_by ? names.get(row.changed_by) ?? null : null,
+  }));
 }
 
 // ─── Intake photos (Storage) ─────────────────────────────────────────────────
