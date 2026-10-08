@@ -43,7 +43,16 @@ const section: React.CSSProperties = { display: "flex", flexDirection: "column",
 const deviceLine = (d: DeviceRecord) =>
   [d.storage, d.color].filter(Boolean).join(" · ");
 
-export default function ReplaceDeviceModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
+export default function ReplaceDeviceModal({ tx, onClose, presetDeviceId, presetReason, onReplaced }: {
+  tx: SaleTx;
+  onClose: () => void;
+  /** Opened from a warranty claim: the phone that came back is already known. */
+  presetDeviceId?: number;
+  /** …and so is what is wrong with it. */
+  presetReason?: string;
+  /** Told once the swap has gone through, so the claim can be closed with it. */
+  onReplaced?: (rec: DeviceReplacement) => void;
+}) {
   const { devices, reload: reloadDevices } = useDevices();
   const { addSale } = useSales();
   const { addEntry } = useCashRegister();
@@ -51,9 +60,9 @@ export default function ReplaceDeviceModal({ tx, onClose }: { tx: SaleTx; onClos
 
   const soldOnInvoice = devices.filter(d => d.status === "sold" && d.soldInvoiceNo === tx.invoiceNo);
 
-  const [returnedId, setReturnedId]   = useState<number | null>(null);
-  const [reason, setReason]           = useState("");
-  const [otherReason, setOtherReason] = useState("");
+  const [returnedId, setReturnedId]   = useState<number | null>(presetDeviceId ?? null);
+  const [reason, setReason]           = useState(presetReason ? "Other" : "");
+  const [otherReason, setOtherReason] = useState(presetReason ?? "");
   const [disposition, setDisposition] = useState<ReplacementDisposition | "">("");
   const [query, setQuery]             = useState("");
   const [replacementId, setReplacementId] = useState<number | null>(null);
@@ -149,6 +158,7 @@ export default function ReplaceDeviceModal({ tx, onClose }: { tx: SaleTx; onClos
       }
 
       setDone(rec);
+      onReplaced?.(rec);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

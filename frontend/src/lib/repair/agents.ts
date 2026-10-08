@@ -49,10 +49,35 @@ export interface AgentTransfer {
   returnedAt: string | null;
   returnNotes: string | null;
   receivedBy: string | null;
+  /** How the agent's repair ended — see migration 20261006000067. */
+  outcome?: AgentOutcome | null;
 }
 
 /** What this transfer cost, as best as it is known. */
 export const transferCost = (t: AgentTransfer) => t.actualCost ?? t.agreedCost ?? 0;
+
+/**
+ * How an agent's repair ended, in the shop's own words — the same three a
+ * completion uses. "Return" here means could-not-repair, never "came back":
+ * a transfer's status already says it came back.
+ */
+export type AgentOutcome = "Normal" | "FOC" | "Return";
+
+export const AGENT_OUTCOMES: { id: AgentOutcome; label: string; blurb: string; color: string; bg: string }[] = [
+  { id: "Normal", label: "Normal", blurb: "Repaired, and charged for", color: "#16a34a", bg: "rgba(34,197,94,0.12)" },
+  { id: "FOC",    label: "FOC",    blurb: "Repaired free of charge",   color: "#2563eb", bg: "rgba(59,130,246,0.12)" },
+  { id: "Return", label: "Return", blurb: "Could not be repaired",     color: "#dc2626", bg: "rgba(239,68,68,0.12)" },
+];
+
+/** The outcome of a transfer that is back — the stored one, or read from the
+ *  note older receipts wrote ("Repaired" / "Returned unrepaired"). */
+export function transferOutcome(t: AgentTransfer): AgentOutcome | null {
+  if (t.status !== "Returned") return null;
+  if (t.outcome) return t.outcome;
+  if (/^Returned unrepaired/i.test(t.returnNotes ?? "")) return "Return";
+  if (t.actualCost === 0) return "FOC";
+  return "Normal";
+}
 
 interface AgentRow {
   id: number; name: string; contact: string; address: string;
@@ -160,6 +185,7 @@ interface TransferRow {
   agreed_cost: number | string | null; actual_cost: number | string | null;
   sent_at: string; sent_by: string | null; returned_at: string | null;
   return_notes: string | null; received_by: string | null;
+  outcome?: AgentOutcome | null;
   repair_agents: { name: string; contact?: string | null } | { name: string; contact?: string | null }[] | null;
 }
 
@@ -181,10 +207,13 @@ const rowToTransfer = (r: TransferRow): AgentTransfer => {
     returnedAt: r.returned_at,
     returnNotes: r.return_notes,
     receivedBy: r.received_by,
+    outcome: r.outcome ?? null,
   };
 };
 
-const TRANSFER_SELECT = "id, job_id, agent_id, status, reason, expected_return, agreed_cost, actual_cost, sent_at, sent_by, returned_at, return_notes, received_by, repair_agents (name, contact)";
+// "*" for the transfer's own columns, so outcome (migration 20261006000067)
+// is read when it exists and its absence never empties the agents screens.
+const TRANSFER_SELECT = "*, repair_agents (name, contact)";
 
 /** Every transfer still out at an agent, newest first. */
 export async function fetchOpenTransfers(): Promise<AgentTransfer[]> {
@@ -291,6 +320,7 @@ export interface TransferReceipt {
   actualCost?: number | null;
   notes?: string;
   receivedBy?: string;
+  outcome?: AgentOutcome;
 }
 
 /**
@@ -301,16 +331,25 @@ export interface TransferReceipt {
  * cost is entered a week later is a repair that was priced without it.
  */
 export async function markTransferReturned(transferId: number, receipt: TransferReceipt = {}): Promise<void> {
-  const { error } = await getSupabaseBrowserClient()
-    .from("repair_agent_transfers")
-    .update({
-      status: "Returned",
-      returned_at: new Date().toISOString(),
-      return_notes: receipt.notes?.trim() || null,
-      actual_cost: receipt.actualCost ?? null,
-      received_by: receipt.receivedBy ?? null,
-    })
-    .eq("id", transferId);
+  const row: Record<string, unknown> = {
+    status: "Returned",
+    returned_at: new Date().toISOString(),
+    return_notes: receipt.notes?.trim() || null,
+    actual_cost: receipt.actualCost ?? null,
+    received_by: receipt.receivedBy ?? null,
+    outcome: receipt.outcome ?? null,
+  };
+  const update = (r: Record<string, unknown>) =>
+    getSupabaseBrowserClient().from("repair_agent_transfers").update(r).eq("id", transferId);
+
+  let { error } = await update(row);
+  // Before migration 20261006000067 there is no outcome column; the receipt
+  // still has to go through (the outcome is in the notes as well).
+  if (error && /outcome/.test(error.message)) {
+    const { outcome: _o, ...rest } = row;
+    void _o;
+    ({ error } = await update(rest));
+  }
 
   if (error) throw new Error(`Could not mark the transfer returned: ${error.message}`);
 }

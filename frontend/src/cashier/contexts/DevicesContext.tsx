@@ -42,6 +42,22 @@ export interface DeviceRecord {
   /** Set when a customer brought this unit back — a customer return, not new stock. */
   returnedFromInvoice?: string | null;
   returnReason?: string | null;
+  /** Warranty in days from the sale date. null = the shop default for phones
+   *  (Warranty Center → Policies); 0 = sold with no warranty. */
+  warrantyDays?: number | null;
+  /** Whose warranty and any condition, e.g. "Samsung company warranty". */
+  warrantyNote?: string;
+}
+
+/** How a device's warranty reads, e.g. "1 year · Samsung company warranty". */
+export function deviceWarrantyText(d: Pick<DeviceRecord, "warrantyDays" | "warrantyNote">): string {
+  const days = d.warrantyDays;
+  const period = days == null ? "Shop default warranty"
+    : days === 0 ? "No warranty"
+    : days % 365 === 0 ? `${days / 365} year${days === 365 ? "" : "s"} warranty`
+    : days % 30 === 0 ? `${days / 30} month${days === 30 ? "" : "s"} warranty`
+    : `${days} days warranty`;
+  return [period, (d.warrantyNote ?? "").trim()].filter(Boolean).join(" · ");
 }
 
 export type DeviceStatus = "available" | "sold" | "reserved" | "supplier_return" | "returned_to_supplier";

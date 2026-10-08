@@ -6,13 +6,15 @@ import {
   Smartphone, Package, AlertTriangle, XCircle,
   Plus, Search, Edit2, Trash2, X, Check,
   BarChart3, ArrowUpCircle, ArrowDownCircle, Sliders,
-  ChevronDown, ChevronRight, ShieldAlert, Truck, Tag, CornerDownRight, Wrench, Layers, Printer,
+  ChevronDown, ChevronRight, ShieldAlert, ShieldCheck, Truck, Tag, CornerDownRight, Wrench, Layers, Printer,
 } from "lucide-react";
 import StockReceiving from "./StockReceiving";
+import DeviceWarrantyField from "./DeviceWarrantyField";
+import { setDevicesWarranty } from "@/lib/inventory/devices";
 import { useInventory, type Category, type Subcategory } from "@/cashier/contexts/InventoryContext";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
-import { useDevices, DEVICE_STATUS_LABEL, type DeviceRecord } from "@/cashier/contexts/DevicesContext";
+import { useDevices, DEVICE_STATUS_LABEL, deviceWarrantyText, type DeviceRecord } from "@/cashier/contexts/DevicesContext";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
 import { printLabelsNode } from "@/cashier/utils/printLabel";
@@ -289,6 +291,8 @@ interface ModelSpecs {
   suggestedPrice: number;
   minSellingPrice: number;
   supplier: string;
+  warrantyDays: number | null;
+  warrantyNote: string;
 }
 
 /** True when `a` was added more recently than `b` — by addedDate, tie-broken
@@ -328,6 +332,7 @@ function useModelSpecs(devices: DeviceItem[]): { options: string[]; specsByKey: 
         brand: d.brand, name: d.name, storage: d.storage, ram: d.ram, color: d.color,
         buyingPrice: d.buyingPrice, suggestedPrice: d.suggestedPrice, minSellingPrice: d.minSellingPrice,
         supplier: d.supplier,
+        warrantyDays: d.warrantyDays ?? null, warrantyNote: d.warrantyNote ?? "",
       });
     }
     options.sort((a, b) => a.localeCompare(b));
@@ -1069,6 +1074,7 @@ function AddEditDeviceModal({ device, devices, onSave, onClose }: {
     id: 0, imei: "", imei2: "", serialNumber: "", name: "", modelNumber: "", brand: "",
     storage: "", ram: "", color: "", buyingPrice: 0, minSellingPrice: 0, suggestedPrice: 0,
     supplier: "", addedDate: new Date().toISOString().slice(0, 10), status: "available", notes: "",
+    warrantyDays: null, warrantyNote: "",
   };
   const [form, setForm] = useState<DeviceItem>(device ?? blank);
   const [errors, setErrors] = useState<Partial<Record<keyof DeviceItem, string>>>({});
@@ -1117,6 +1123,8 @@ function AddEditDeviceModal({ device, devices, onSave, onClose }: {
       suggestedPrice: specs.suggestedPrice,
       minSellingPrice: specs.minSellingPrice,
       supplier: specs.supplier,
+      warrantyDays: specs.warrantyDays,
+      warrantyNote: specs.warrantyNote,
     }));
   }
 
@@ -1214,6 +1222,12 @@ function AddEditDeviceModal({ device, devices, onSave, onClose }: {
             />
             {field("Date Added", "addedDate", "date")}
           </div>
+          <DeviceWarrantyField
+            days={form.warrantyDays}
+            note={form.warrantyNote}
+            disabled={anyMismatch}
+            onChange={w => setForm(f => ({ ...f, warrantyDays: w.days, warrantyNote: w.note }))}
+          />
           <div>
             <label style={labelStyle}>Status</label>
             <select value={form.status} onChange={e => set("status", e.target.value)} disabled={anyMismatch} style={{ ...inputStyle, opacity: anyMismatch ? 0.45 : 1, cursor: anyMismatch ? "not-allowed" : undefined }}>
@@ -1300,6 +1314,7 @@ function BulkAddDevicesModal({ devices, saveDevice, onClose }: {
     name: "", modelNumber: "", brand: "", storage: "", ram: "", color: "",
     buyingPrice: 0, minSellingPrice: 0, suggestedPrice: 0,
     supplier: "", addedDate: new Date().toISOString().slice(0, 10), status: "available", notes: "",
+    warrantyDays: null, warrantyNote: "",
   };
   const [shared, setShared] = useState<BulkSharedSpecs>(blankShared);
   const [sharedErrors, setSharedErrors] = useState<Partial<Record<keyof BulkSharedSpecs, string>>>({});
@@ -1349,6 +1364,8 @@ function BulkAddDevicesModal({ devices, saveDevice, onClose }: {
       suggestedPrice: specs.suggestedPrice,
       minSellingPrice: specs.minSellingPrice,
       supplier: specs.supplier,
+      warrantyDays: specs.warrantyDays,
+      warrantyNote: specs.warrantyNote,
     }));
   }
 
@@ -1578,6 +1595,12 @@ function BulkAddDevicesModal({ devices, saveDevice, onClose }: {
             />
             {sharedField("Date Added", "addedDate", "date")}
           </div>
+          <DeviceWarrantyField
+            days={shared.warrantyDays}
+            note={shared.warrantyNote}
+            disabled={anyMismatch}
+            onChange={w => setShared(s => ({ ...s, warrantyDays: w.days, warrantyNote: w.note }))}
+          />
           <div>
             <label style={labelStyle}>Status</label>
             <select value={shared.status} onChange={e => setSharedField("status", e.target.value)} disabled={anyMismatch} style={{ ...inputStyle, opacity: anyMismatch ? 0.45 : 1, cursor: anyMismatch ? "not-allowed" : undefined }}>
@@ -2395,6 +2418,7 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
   const [deleteTarget, setDeleteTarget] = useState<DeviceItem | null>(null);
   const [labelDevice, setLabelDevice] = useState<DeviceItem | null>(null);
   const [bulkPrintGroup, setBulkPrintGroup] = useState<{ name: string; brand: string; modelNumber: string; units: DeviceItem[] } | null>(null);
+  const [warrantyGroup, setWarrantyGroup] = useState<{ name: string; units: DeviceItem[] } | null>(null);
 
   const { brands: brandList } = useInventory();
   const brands = useMemo(
@@ -2627,6 +2651,16 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
                         >
                           <Printer size={12} /> Bulk Print
                         </button>
+                        {/* Set the warranty on every unit of this model at once —
+                            sold ones too — which is how stock already in the shop
+                            gets its warranty recorded. */}
+                        <button
+                          onClick={e => { e.stopPropagation(); setWarrantyGroup({ name: g.name, units: g.units }); }}
+                          title={`Warranty for every ${g.name}: ${strUniform(g.units, u => deviceWarrantyText(u)).uniform ? deviceWarrantyText(g.units[0]) : "mixed"}`}
+                          style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-secondary)", cursor: "pointer", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", flexShrink: 0 }}
+                        >
+                          <ShieldCheck size={12} /> Warranty
+                        </button>
                         <div>
                           <div style={{ fontSize: 9.5, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Stock Value</div>
                           <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--accent)" }}>{Rs(stockValue)}</div>
@@ -2686,6 +2720,9 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
                                     </span>
                                   </div>
                                 ))}
+                                <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2, fontSize: 10.5, color: d.warrantyDays == null ? "var(--text-muted)" : d.warrantyDays === 0 ? "#dc2626" : "#16a34a" }}>
+                                  <ShieldCheck size={11} /> {deviceWarrantyText(d)}
+                                </div>
                               </div>
 
                               <div style={{ display: "flex", gap: 4, borderTop: "1px solid var(--border)", paddingTop: 7, justifyContent: "flex-end" }}>
@@ -2751,7 +2788,73 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
           onClose={() => setBulkPrintGroup(null)}
         />
       )}
+      {warrantyGroup && (
+        <GroupWarrantyModal group={warrantyGroup} onClose={() => setWarrantyGroup(null)} />
+      )}
     </div>
+  );
+}
+
+/**
+ * Set the warranty on every unit of one model in a single step — sold units
+ * included, since a phone already with a customer still needs its cover on
+ * record. The way the stock already in the shop gets filled in.
+ */
+function GroupWarrantyModal({ group, onClose }: { group: { name: string; units: DeviceItem[] }; onClose: () => void }) {
+  const { reload } = useDevices();
+  const toast = useToast();
+  const first = group.units[0];
+  const uniform = strUniform(group.units, u => `${u.warrantyDays ?? "d"}|${u.warrantyNote ?? ""}`).uniform;
+  const [days, setDays] = useState<number | null>(uniform ? first?.warrantyDays ?? null : null);
+  const [note, setNote] = useState(uniform ? first?.warrantyNote ?? "" : "");
+  const [includeSold, setIncludeSold] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const targets = group.units.filter(u => includeSold || u.status !== "sold");
+  const soldCount = group.units.filter(u => u.status === "sold").length;
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await setDevicesWarranty(targets.map(u => u.id), days, note);
+      await reload();
+      toast.success(`Warranty set on ${targets.length} ${group.name} unit${targets.length === 1 ? "" : "s"}`);
+      onClose();
+    } catch (e) {
+      toast.dialog("error", "Could not set the warranty", e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+
+  return createPortal(
+    <div onClick={e => { if (e.target === e.currentTarget && !busy) onClose(); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, width: "100%", maxWidth: 520, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+        <div style={{ padding: "18px 22px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>Warranty — {group.name}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+              {group.units.length} unit{group.units.length === 1 ? "" : "s"}{uniform ? ` · now: ${deviceWarrantyText(first)}` : " · currently mixed"}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><X size={18} /></button>
+        </div>
+        <div style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <DeviceWarrantyField days={days} note={note} onChange={w => { setDays(w.days); setNote(w.note); }} />
+          {soldCount > 0 && (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-secondary)", cursor: "pointer" }}>
+              <input type="checkbox" checked={includeSold} onChange={e => setIncludeSold(e.target.checked)} style={{ accentColor: "var(--accent)" }} />
+              Also apply to the {soldCount} unit{soldCount === 1 ? "" : "s"} already sold
+            </label>
+          )}
+        </div>
+        <div style={{ padding: "14px 22px 18px", borderTop: "1px solid var(--border)", display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button onClick={onClose} disabled={busy} style={{ padding: "9px 20px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>Cancel</button>
+          <button onClick={() => void save()} disabled={busy || targets.length === 0} style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: busy ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit", opacity: busy ? 0.6 : 1 }}>
+            {busy ? "Saving…" : `Set on ${targets.length} unit${targets.length === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 

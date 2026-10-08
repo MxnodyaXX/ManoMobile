@@ -19,6 +19,8 @@ import { exportToExcel, exportToPng, exportMultiSectionToExcel, exportReportToPd
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import BelowMinReport from "./BelowMinReport";
+import { useSales } from "@/cashier/contexts/SalesContext";
+import { useDailyReport } from "@/lib/reports/daily";
 
 type ReportTab = "Daily Report" | "Sales Report" | "Repair Report" | "Below Minimum" | "P&L Report" | "Stock Valuation" | "Cashier Performance" | "Supplier Report" | "Credit Aging" | "Repair SLA";
 
@@ -88,24 +90,23 @@ function ReportFilters({
 /* ── Daily Report ── */
 function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // From the stored ledger — see lib/reports/daily.ts. The sales come from
+  // the shared SalesContext; the lines, credit payments, cash returns and
+  // warranty refunds are read for the chosen day.
+  const { sales } = useSales();
+  const r = useDailyReport(dateFrom, sales);
 
-  const categoryData: { name: string; revenue: number; transactions: number }[] = [];
+  const categoryData = r.byCategory;
+  const hourlyData = r.hourly;
+  const comparisonData = r.hourly.map(h => ({ time: h.time, today: h.revenue, yesterday: h.yesterday }));
+  const cashFlowData = r.cashFlow;
+  const cashRows = r.cashRows;
 
-  const hourlyData: { time: string; revenue: number }[] = [];
-
-  const comparisonData: { time: string; today: number; yesterday: number }[] = [];
-
-  const cashFlowData: { label: string; cashIn: number; cashOut: number; running: number }[] = [];
-
-  const cashRows: { label: string; amount: number; type: string }[] = [];
-
-  // No sales backend yet: these are 0 rather than invented. When sales data
-  // exists they come from it, and the tiles below light up on their own.
-  const variance: number = 0;
-  const totalRevenue = 0;
-  const txCount = 0;
-  const cashCollected = 0;
-  const paymentMethods: { method: string; amount: number; pct: number; color: string }[] = [];
+  const totalRevenue = r.net;
+  const txCount = r.txCount;
+  const cashCollected = r.cashSales + r.creditPaymentsCash;
+  const paymentMethods = r.payment;
+  const vsYesterday = r.yesterdayNet > 0 ? Math.round(((r.gross - r.yesterdayNet) / r.yesterdayNet) * 100) : null;
   const drFilename = `daily-report-${dateFrom}`;
 
   const buildSections = () => [
@@ -113,11 +114,15 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
       title: "Summary",
       headers: ["Metric", "Value", "Note"],
       rows: [
-        ["Total Revenue",  fmtRs(totalRevenue), "All payment methods"],
-        ["Transactions",   String(txCount),     "Paid & collected"],
-        ["Cash Collected", fmtRs(cashCollected), "Physical cash in drawer"],
-        ["Cash Variance",  fmtRs(variance),     variance < 0 ? "Shortfall - investigate" : "Balanced"],
-        ["Period",         dateFrom === dateTo ? dateFrom : `${dateFrom} to ${dateTo}`, "Report date range"],
+        ["Gross Sales",       fmtRs(r.gross),        `${txCount} invoices`],
+        ["Returns",           fmtRs(r.returns),      "Refunded on sales"],
+        ["Cash Given Back",   fmtRs(r.cashReturned), "Advance refunds, dealer cash returns"],
+        ["Net Revenue",       fmtRs(totalRevenue),   "Gross less returns and cash given back"],
+        ["Cash Collected",    fmtRs(cashCollected),  "Cash sales + cash credit payments"],
+        ["Cash Paid Out",     fmtRs(r.cashOut),      "Cash returns and cash refunds"],
+        ["Expected in Drawer", fmtRs(r.expectedCash), "Cash in less cash out"],
+        ["Left on Credit",    fmtRs(r.onCredit),     "Not paid at the counter"],
+        ["Date",              dateFrom,              "Report day"],
       ],
     },
     {
@@ -142,22 +147,32 @@ function DailyReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
   ];
 
   const statCards = [
-    { label: "Total Revenue",  value: fmtRs(totalRevenue),  change: "", sub: "today",  pos: true  },
-    { label: "Transactions",   value: String(txCount),      change: "", sub: "today",  pos: true  },
-    { label: "Cash Collected", value: fmtRs(cashCollected), change: "", sub: "in drawer", pos: true  },
-    { label: "Cash Variance",  value: fmtRs(Math.abs(variance)), change: variance < 0 ? "Shortfall" : "Balanced", sub: "expected vs actual", pos: variance >= 0 },
+    {
+      label: "Net Revenue", value: fmtRs(totalRevenue),
+      change: vsYesterday === null ? "" : `${vsYesterday >= 0 ? "▲" : "▼"} ${Math.abs(vsYesterday)}%`,
+      sub: r.returns + r.cashReturned > 0 ? `gross ${fmtRs(r.gross)} less returns` : vsYesterday === null ? "gross sales" : "vs yesterday",
+      pos: vsYesterday === null || vsYesterday >= 0,
+    },
+    { label: "Transactions",   value: String(txCount),      change: "", sub: txCount ? `avg ${fmtRs(Math.round(r.avgTicket))} per sale` : "no sales", pos: true },
+    { label: "Cash Collected", value: fmtRs(cashCollected), change: "", sub: r.creditPaymentsCash > 0 ? `incl. ${fmtRs(r.creditPaymentsCash)} credit payments` : "cash sales", pos: true },
+    {
+      label: "Expected in Drawer", value: fmtRs(r.expectedCash),
+      change: r.cashOut > 0 ? `${fmtRs(r.cashOut)} paid out` : "",
+      sub: "cash in less cash out", pos: r.expectedCash >= 0,
+    },
   ];
-  const statIcons  = [DollarSign, FileText, DollarSign, variance < 0 ? TrendingDown : TrendingUp];
-  const statColors = ["#4ade80", "#60a5fa", "#fbbf24", variance < 0 ? "#f87171" : "#4ade80"];
+  const statIcons  = [DollarSign, FileText, DollarSign, r.expectedCash < 0 ? TrendingDown : TrendingUp];
+  const statColors = ["#4ade80", "#60a5fa", "#fbbf24", r.expectedCash < 0 ? "#f87171" : "#a78bfa"];
 
-  const topItemsToday: { item: string; category: string; revenue: number }[] = [];
+  const topItemsToday = r.topItems;
   const itemCatColors: Record<string, string> = {
     Mobile: "#a78bfa", Repair: "#34d399", Accessories: "#60a5fa", Others: "#94a3b8",
   };
 
-  const customerData: { type: string; count: number; pct: number; color: string }[] = [];
+  const customerData = r.customers;
+  const customerTotal = r.customers.reduce((s, c) => s + c.count, 0);
 
-  const txnVolumeData: { time: string; txn: number }[] = [];
+  const txnVolumeData = r.hourly.map(h => ({ time: h.time, txn: h.txn }));
 
   return (
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -401,7 +416,7 @@ onPng={() => {
           </div>
           <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff }}>Total Today</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>27 customers</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>{customerTotal} customer{customerTotal === 1 ? "" : "s"}</span>
           </div>
         </div>
       </div>
@@ -459,13 +474,11 @@ onPng={() => {
             );
           })}
         </div>
-        {variance !== 0 && (
-          <div style={{ margin: "0 14px 14px", padding: "10px 14px", borderRadius: 9, background: "rgba(248,113,113,0.07)", border: "1px solid rgba(248,113,113,0.2)" }}>
-            <p style={{ fontSize: 12, color: "#f87171", fontWeight: 600, fontFamily: ff }}>
-              Variance of {fmtRs(Math.abs(variance))} — investigate before closing shift.
-            </p>
-          </div>
-        )}
+        <p style={{ margin: "0 22px 14px", fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
+          Worked out from the recorded sales, credit payments, cash returns and refunds. Count the drawer and compare
+          with the expected figure — a difference is cash taken or paid out without being recorded.
+          {r.onCredit > 0 && <> {fmtRs(r.onCredit)} of today&apos;s sales went on credit and is not in the drawer.</>}
+        </p>
       </div>
 
     </div>

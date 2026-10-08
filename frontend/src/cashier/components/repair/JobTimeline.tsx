@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { History } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import { fetchJobEvents, type JobEvent } from "@/lib/repair/api";
-import { fetchJobTransfers, type AgentTransfer } from "@/lib/repair/agents";
+import { fetchJobTransfers, transferOutcome, AGENT_OUTCOMES, type AgentTransfer } from "@/lib/repair/agents";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 
 /**
@@ -140,10 +140,13 @@ function buildSteps(job: RepairJob, events: JobEvent[], transfers: AgentTransfer
       tone: "agent",
     });
     if (t.returnedAt) {
+      // "Back", not "Returned": in this shop a Return means could-not-repair.
+      const outcome = AGENT_OUTCOMES.find(o => o.id === transferOutcome(t));
       steps.push({
-        key: `t${t.id}-back`, at: t.returnedAt, title: `Returned from agent${t.agentName ? ` — ${t.agentName}` : ""}`,
+        key: `t${t.id}-back`, at: t.returnedAt, title: `Back from agent${t.agentName ? ` — ${t.agentName}` : ""}`,
         by: t.receivedBy,
         details: [
+          outcome ? `Outcome: ${outcome.label} — ${outcome.blurb.toLowerCase()}` : "",
           t.actualCost != null ? `Cost Rs. ${t.actualCost.toLocaleString()}` : "",
           t.returnNotes ? `Notes: ${t.returnNotes}` : "",
         ].filter(Boolean),

@@ -1,17 +1,20 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
-  PackageCheck, ShieldCheck, FileWarning, Search, Truck, Clock,
-  User, Phone, X, Printer, AlertTriangle, CheckCircle, XCircle, Wrench,
+  ShieldCheck, FileWarning, Search, Clock, ScanSearch, SlidersHorizontal,
+  X, Printer, AlertTriangle, CheckCircle, XCircle, Wrench,
 } from "lucide-react";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import {
   useWarranty, effectiveStatus, daysRemaining,
   type Warranty, type WarrantyStatus, type WarrantyClaim, type ClaimResolution,
 } from "@/cashier/contexts/WarrantyContext";
-import HandoverModal from "./HandoverModal";
+import WarrantyLookup from "./WarrantyLookup";
+import WarrantyPolicies from "./WarrantyPolicies";
+import PhoneClaimsList from "./PhoneClaimsList";
+import { fetchPolicies, type WarrantyPolicy } from "@/lib/warranty/lookup";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 const STAFF = "Cashier";
@@ -24,7 +27,10 @@ const STATUS_COLOR: Record<WarrantyStatus, string> = {
   "Claimed": "#a78bfa",
 };
 
-type Tab = "Collection" | "Warranties" | "Claims";
+// Lookup is the front door: anything the shop sold or repaired, by any number
+// the customer has. Handover lives in the checkout (Repair Sales / Issue Job),
+// which now starts the repair warranty itself — see migration 20261006000066.
+type Tab = "Lookup" | "Warranties" | "Claims" | "Policies";
 
 // ─── Warranty card (printable) ────────────────────────────────────────────────
 
@@ -122,14 +128,21 @@ function StartClaimModal({ warranty, onClose, onCreated }: { warranty: Warranty;
 export default function WarrantyCenter() {
   const { jobs, addJob } = useRepair();
   const { warranties, claims, updateClaim } = useWarranty();
-  const [tab, setTab] = useState<Tab>("Collection");
+  const [tab, setTab] = useState<Tab>("Lookup");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"All" | WarrantyStatus>("All");
-  const [handoverJob, setHandoverJob] = useState<string | null>(null);
   const [cardFor, setCardFor] = useState<Warranty | null>(null);
   const [claimFor, setClaimFor] = useState<Warranty | null>(null);
 
-  const completedJobs = jobs.filter(j => j.status === "Completed");
+  const [phoneClaimsKey, setPhoneClaimsKey] = useState(0);
+  const [policies, setPolicies] = useState<WarrantyPolicy[]>([]);
+  const [policyError, setPolicyError] = useState<string | null>(null);
+  const loadPolicies = useCallback(() => {
+    fetchPolicies()
+      .then(p => { setPolicies(p); setPolicyError(null); })
+      .catch(e => setPolicyError(e instanceof Error ? e.message : String(e)));
+  }, []);
+  useEffect(() => { loadPolicies(); }, [loadPolicies]);
   const expiringSoon = warranties.filter(w => { const d = daysRemaining(w); return effectiveStatus(w) === "Active" && d !== null && d >= 0 && d <= 7; });
 
   const filteredWarranties = useMemo(() => {
@@ -170,9 +183,10 @@ export default function WarrantyCenter() {
   };
 
   const tabs: { id: Tab; label: string; icon: any; count: number }[] = [
-    { id: "Collection", label: "Collection", icon: PackageCheck, count: completedJobs.length },
+    { id: "Lookup",     label: "Check warranty", icon: ScanSearch, count: -1 },
     { id: "Warranties", label: "Warranties", icon: ShieldCheck, count: warranties.length },
     { id: "Claims", label: "Claims", icon: FileWarning, count: openClaims.length },
+    { id: "Policies", label: "Policies", icon: SlidersHorizontal, count: -1 },
   ];
 
   return (
@@ -182,7 +196,7 @@ export default function WarrantyCenter() {
         <div>
           <h1 className="heading-xl" style={{ fontSize: 24, color: "var(--text-primary)" }}>Warranty Center</h1>
           <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 5 }}>
-            Hand over completed devices, manage warranties, and process claims.
+            Check any sale or repair for warranty, manage repair warranties and claims, and set warranty policies.
           </p>
         </div>
 
@@ -198,7 +212,7 @@ export default function WarrantyCenter() {
               cursor: "pointer", fontFamily: ff,
             }}>
               <Icon size={14} /> {t.label}
-              <span style={{ fontSize: 10.5, fontWeight: 700, padding: "1px 7px", borderRadius: 10, background: active ? "var(--accent)" : "var(--border)", color: active ? "var(--accent-fg)" : "var(--text-muted)" }}>{t.count}</span>
+              {t.count >= 0 && <span style={{ fontSize: 10.5, fontWeight: 700, padding: "1px 7px", borderRadius: 10, background: active ? "var(--accent)" : "var(--border)", color: active ? "var(--accent-fg)" : "var(--text-muted)" }}>{t.count}</span>}
             </button>
           );
         })}
@@ -207,37 +221,9 @@ export default function WarrantyCenter() {
 
       <div className="fade-up fade-up-3" style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
 
-        {/* ── Collection ── */}
-        {tab === "Collection" && (
-          completedJobs.length === 0 ? (
-            <Empty icon={PackageCheck} title="No devices awaiting collection" sub="Completed repairs appear here for handover." />
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(330px, 1fr))", gap: 14 }}>
-              {completedJobs.map(job => {
-                const balance = Math.max(0, job.estimatedCost - job.advancePaid);
-                return (
-                  <div key={job.id} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderLeft: "3px solid #a78bfa", borderRadius: 14, padding: "15px 17px", display: "flex", flexDirection: "column", gap: 11 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <div>
-                        <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>{job.brand} {job.model}</p>
-                        <p style={{ fontSize: 11.5, color: "var(--text-muted)" }}>{job.id} · {job.issue.slice(0, 40)}</p>
-                      </div>
-                      {job.warrantyId && <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: "rgba(167,139,250,0.12)", color: "#a78bfa", border: "1px solid rgba(167,139,250,0.25)" }}>{job.warrantyId}</span>}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 7 }}><User size={13} color="var(--text-muted)" /><span style={{ fontSize: 12.5, color: "var(--text-primary)", fontWeight: 600 }}>{job.customerName}</span></div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 7 }}><Phone size={13} color="var(--text-muted)" /><span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{job.phone}</span></div>
-                    <div style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
-                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Balance due</span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: balance > 0 ? "#f87171" : "#4ade80" }}>{balance > 0 ? `Rs. ${balance.toLocaleString()}` : "Paid"}</span>
-                    </div>
-                    <button onClick={() => setHandoverJob(job.id)} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "9px", borderRadius: 9, fontSize: 12.5, fontWeight: 700, border: "1px solid #a78bfa", background: "#a78bfa", color: "#fff", cursor: "pointer", fontFamily: ff }}>
-                      <Truck size={14} /> Process Handover
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )
+        {/* ── Lookup ── */}
+        {tab === "Lookup" && (
+          <WarrantyLookup policies={policies} onPrintCard={setCardFor} onClaim={setClaimFor} onPhoneClaimed={() => setPhoneClaimsKey(k => k + 1)} />
         )}
 
         {/* ── Warranties (register) ── */}
@@ -297,20 +283,34 @@ export default function WarrantyCenter() {
 
         {/* ── Claims ── */}
         {tab === "Claims" && (
-          claims.length === 0 ? (
-            <Empty icon={FileWarning} title="No warranty claims" sub="Open a claim from an active warranty in the Warranties tab." />
-          ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+            {/* Phones sold — repaired, sent to the company, replaced or refunded. */}
+            <PhoneClaimsList refreshKey={phoneClaimsKey} />
+
+            {/* Repair warranties — a repair that failed again. */}
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {claims.map(c => <ClaimCard key={c.id} claim={c} warranty={warranties.find(w => w.id === c.warrantyId)} onResolve={resolveClaim} />)}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Wrench size={16} color="var(--accent)" />
+                <span style={{ fontSize: 15, fontWeight: 800, color: "var(--text-primary)" }}>Repair claims</span>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{openClaims.length} open</span>
+              </div>
+              {claims.length === 0 ? (
+                <Empty icon={FileWarning} title="No repair warranty claims" sub="Start one from a repair's card in Check warranty." />
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {claims.map(c => <ClaimCard key={c.id} claim={c} warranty={warranties.find(w => w.id === c.warrantyId)} onResolve={resolveClaim} />)}
+                </div>
+              )}
             </div>
-          )
+          </div>
+        )}
+
+        {/* ── Policies ── */}
+        {tab === "Policies" && (
+          <WarrantyPolicies policies={policies} onChanged={loadPolicies} error={policyError} />
         )}
       </div>
 
-      {handoverJob && (() => {
-        const job = jobs.find(j => j.id === handoverJob);
-        return job ? <HandoverModal job={job} onClose={() => setHandoverJob(null)} onDone={() => setHandoverJob(null)} /> : null;
-      })()}
       {cardFor && <WarrantyCard warranty={cardFor} onClose={() => setCardFor(null)} />}
       {claimFor && <StartClaimModal warranty={claimFor} onClose={() => setClaimFor(null)} onCreated={() => { setClaimFor(null); setTab("Claims"); }} />}
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo, useEffect, forwardRef } from "react";
+import { useState, useRef, useMemo, useEffect, useCallback, forwardRef } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import ExportButtons from "@/cashier/components/shared/ExportButtons";
@@ -30,7 +30,7 @@ import {
   Truck, Ban, FileText, Package, Tag, Info, Save, Pencil, BellRing, RotateCcw,
   Briefcase, User, Smartphone, Wallet, ClipboardList, Building2,
 } from "lucide-react";
-import { fetchOpenTransfers, transferCost, type AgentTransfer } from "@/lib/repair/agents";
+import { fetchOpenTransfers, transferCost, transferOutcome, AGENT_OUTCOMES, type AgentTransfer } from "@/lib/repair/agents";
 import AgentsOutPanel from "@/lib/repair/AgentsOutPanel";
 import { notifyJobEvent } from "@/lib/sms/notify";
 import { useToast } from "@/lib/ui/toast";
@@ -1819,13 +1819,19 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                   {agentTrips.map(t => {
                     const cost = transferCost(t);
                     const settled = t.actualCost != null;
+                    // The outcome in the shop's words, not the transfer's
+                    // status: "Return" here means it could not be repaired.
+                    const outcome = AGENT_OUTCOMES.find(o => o.id === transferOutcome(t));
                     return (
                       <div key={t.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "9px 13px", borderBottom: "1px solid var(--border)" }}>
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
                             {t.agentName ?? `Agent #${t.agentId}`}
-                            <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 700, padding: "1px 7px", borderRadius: 10, background: t.status === "Sent" ? "rgba(245,158,11,0.15)" : "rgba(34,197,94,0.12)", color: t.status === "Sent" ? "#d97706" : "#16a34a" }}>
-                              {t.status === "Sent" ? "With agent" : "Returned"}
+                            <span
+                              title={outcome ? outcome.blurb : "Still at the agent"}
+                              style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 700, padding: "1px 7px", borderRadius: 10, background: outcome ? outcome.bg : "rgba(245,158,11,0.15)", color: outcome ? outcome.color : "#d97706" }}
+                            >
+                              {outcome ? outcome.label : "With agent"}
                             </span>
                           </div>
                           <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2, lineHeight: 1.5 }}>
@@ -2559,6 +2565,40 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
     }, [cols]),
   );
 
+  /**
+   * Draw the list a page at a time.
+   *
+   * Opening All Jobs used to build a full row — status badges, cost cells that
+   * each scan the parts requests, action buttons — for every job the shop has
+   * ever booked, before the first one could be seen. With hundreds of jobs that
+   * was a two-second blank. Now the first PAGE rows draw at once and the rest
+   * follow as the list is scrolled toward the bottom.
+   *
+   * Only the drawing is paged: search, filters, sorting, the footer totals and
+   * the exports all still work over every job. The count starts again whenever
+   * the list itself changes, so a new search does not inherit a long scroll.
+   */
+  const PAGE = 50;
+  const listKey = [view, search, priorityFilter, brandFilter, dealerFilter, dateFilter, lateOnly, sort?.key, sort?.dir].join("|");
+  const [shown, setShown] = useState<{ key: string; count: number }>({ key: listKey, count: PAGE });
+  const shownCount = shown.key === listKey ? shown.count : PAGE;
+  const visibleJobs = jobs.slice(0, shownCount);
+  const showMore = useCallback((all = false) => {
+    setShown(s => ({ key: listKey, count: all ? Number.MAX_SAFE_INTEGER : (s.key === listKey ? s.count : PAGE) + PAGE }));
+  }, [listKey]);
+  // The sentinel row at the bottom: when it comes near the screen, draw more.
+  // Re-attached every time more rows are added (it is keyed on the count), so
+  // a tall screen that still shows it after a page keeps loading.
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const sentinelRef = useCallback((node: HTMLTableRowElement | null) => {
+    observerRef.current?.disconnect();
+    if (!node || typeof IntersectionObserver === "undefined") return;
+    observerRef.current = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting)) showMore();
+    }, { rootMargin: "600px 0px" });
+    observerRef.current.observe(node);
+  }, [showMore]);
+
   // Column totals for the footer — only the columns currently shown that
   // actually declared a `sum`, over whatever rows are visible right now
   // (so the total tracks the search/filter/date state above it).
@@ -2876,14 +2916,14 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
             <tbody>
               {jobs.length === 0 ? (
                 <tr><td colSpan={cols.length + 1} style={{ padding: "48px 16px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No jobs found</td></tr>
-              ) : jobs.map((job, i) => {
+              ) : visibleJobs.map((job, i) => {
                 const sc = statusConfig[job.status];
                 const StatusIcon = sc.icon;
                 const label = jobLabel(job);
                 const meta = VIEW_META[label as Exclude<RepairView, "All">] ?? sc;
                 const balance = job.estimatedCost - job.advancePaid;
                 return (
-                  <tr key={job.id} style={{ borderBottom: i < jobs.length - 1 ? "1px solid var(--border)" : "none", transition: "background 0.15s" }}
+                  <tr key={job.id} style={{ borderBottom: i < visibleJobs.length - 1 || jobs.length > visibleJobs.length ? "1px solid var(--border)" : "none", transition: "background 0.15s" }}
                     onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = "var(--bg-card-hover)"}
                     onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = "transparent"}>
                     {cols.map(id => (
@@ -2945,6 +2985,19 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
                   </tr>
                 );
               })}
+              {jobs.length > visibleJobs.length && (
+                <tr key={`more-${shownCount}`} ref={sentinelRef}>
+                  <td colSpan={cols.length + 1} style={{ padding: "14px 16px", textAlign: "center", fontSize: 12.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                    Showing {visibleJobs.length} of {jobs.length} jobs · scroll for more
+                    <button
+                      onClick={() => showMore(true)}
+                      style={{ marginLeft: 10, padding: "4px 10px", borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+                    >
+                      Show all
+                    </button>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         );

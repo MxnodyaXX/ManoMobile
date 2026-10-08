@@ -398,6 +398,9 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
   const [apprChannel, setApprChannel]   = useState<ApprovalChannel>("In-store");
   const [apprRef, setApprRef]           = useState("");
   const [apprSig, setApprSig]           = useState("");
+  // The customer said yes and nobody needs a signature or a message to show
+  // for it — the counter just records that it was approved, and by whom.
+  const [apprTicked, setApprTicked]     = useState(false);
   // Nothing is charged for a Return or an FOC, whatever was quoted. The
   // original estimate stays on the job; this is the final charge.
   const chargeable   = completionType === "Normal";
@@ -449,7 +452,7 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
   const jobMargin = revisedNum - jobCost;
   const atALoss   = jobCost > 0 && jobMargin < -0.001;
   const needsLossAck = atALoss && chargeable;
-  const approvalCaptured = apprChannel === "In-store" ? apprSig.trim() !== "" : apprRef.trim().length > 2;
+  const approvalCaptured = apprTicked || (apprChannel === "In-store" ? apprSig.trim() !== "" : apprRef.trim().length > 2);
 
   /**
    * Starting a job used to pause whatever else this technician had running,
@@ -646,8 +649,14 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
       if (isManoMobileJob && revisedNum > originalEstimate + 0.001 && !job.approval) {
         approval = {
           amount: revisedNum, approvedBy: job.customerName, channel: apprChannel,
-          signature: apprChannel === "In-store" ? apprSig : undefined,
-          reference: apprChannel !== "In-store" ? apprRef : undefined,
+          signature: apprChannel === "In-store" && apprSig.trim() ? apprSig : undefined,
+          // A tick with nothing else captured is recorded as exactly that, so
+          // the job history says the approval was taken on the staff's word.
+          reference: apprChannel !== "In-store" && apprRef.trim()
+            ? apprRef
+            : apprTicked && !(apprChannel === "In-store" && apprSig.trim())
+              ? `Marked as approved by ${actorName}`
+              : undefined,
           approvedAt: now.toISOString(), recordedByStaff: actorName,
         };
         addActivity({ jobId: job.id, type: "note_added", description: `Revised estimate Rs. ${revisedNum.toLocaleString()} approved by customer (${apprChannel})` });
@@ -1323,10 +1332,25 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                       ))}
                     </div>
                     {apprChannel === "In-store" ? (
-                      <SignaturePad value={apprSig} onChange={setApprSig} height={110} label="Customer Approval Signature *" />
+                      <SignaturePad value={apprSig} onChange={setApprSig} height={110} label={apprTicked ? "Customer Approval Signature (optional)" : "Customer Approval Signature *"} />
                     ) : (
-                      <input value={apprRef} onChange={e => setApprRef(e.target.value)} placeholder={`${apprChannel} reference / note (e.g. "approved by reply at 14:32")`} style={inputStyle} />
+                      <input value={apprRef} onChange={e => setApprRef(e.target.value)} placeholder={`${apprChannel} reference / note (e.g. "approved by reply at 14:32")${apprTicked ? " — optional" : ""}`} style={inputStyle} />
                     )}
+                    {/* The quick way: the customer has agreed, mark it so. A
+                        signature or reference above is still kept if given. */}
+                    <label style={{
+                      display: "flex", alignItems: "center", gap: 9, padding: "9px 11px", borderRadius: 9, cursor: "pointer",
+                      background: apprTicked ? "rgba(34,197,94,0.10)" : "var(--bg-secondary)",
+                      border: `1px solid ${apprTicked ? "rgba(34,197,94,0.45)" : "var(--border)"}`,
+                    }}>
+                      <input
+                        type="checkbox" checked={apprTicked} onChange={e => setApprTicked(e.target.checked)}
+                        style={{ width: 16, height: 16, accentColor: "#22c55e", cursor: "pointer", flexShrink: 0 }}
+                      />
+                      <span style={{ fontSize: 12.5, fontWeight: 700, color: apprTicked ? "#16a34a" : "var(--text-primary)", fontFamily: ff }}>
+                        Customer has approved the new price of Rs. {revisedNum.toLocaleString()}
+                      </span>
+                    </label>
                   </div>
                 )}
 

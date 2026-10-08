@@ -4,7 +4,8 @@ import { useState, useRef, useMemo } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import { useSales } from "@/cashier/contexts/SalesContext";
-import { useDevices, type DeviceRecord } from "@/cashier/contexts/DevicesContext";
+import { useDevices, deviceWarrantyText, type DeviceRecord } from "@/cashier/contexts/DevicesContext";
+import { setDevicesWarranty } from "@/lib/inventory/devices";
 import { useAccessories } from "@/cashier/contexts/AccessoriesContext";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { createPortal } from "react-dom";
@@ -27,7 +28,39 @@ interface PhoneCartItem {
   phone: Phone;
   sellingPrice: string;
   discount: string;
+  /** The warranty this phone is sold with. Starts as the one it was stocked
+   *  with and can be changed for this sale; saved onto the device at checkout. */
+  warrantyDays: number | null;
+  warrantyNote: string;
 }
+
+/**
+ * The warranty a cart line is going out with. Falls back to the phone's
+ * stocked warranty when the line has none of its own — a line added before the
+ * warranty fields existed (a held sale, or a cart kept across a reload).
+ */
+function cartWarranty(pc: PhoneCartItem): { days: number | null; note: string } {
+  return {
+    days: pc.warrantyDays === undefined ? (pc.phone.warrantyDays ?? null) : pc.warrantyDays,
+    note: pc.warrantyNote ?? pc.phone.warrantyNote ?? "",
+  };
+}
+const warrantyChanged = (pc: PhoneCartItem) => {
+  const w = cartWarranty(pc);
+  return w.days !== (pc.phone.warrantyDays ?? null) || w.note.trim() !== (pc.phone.warrantyNote ?? "").trim();
+};
+
+/** Warranty choices at the counter. null = the shop's default for phones. */
+const SALE_WARRANTY_CHOICES: { days: number | null; label: string }[] = [
+  { days: null, label: "Shop default" },
+  { days: 0,    label: "No warranty" },
+  { days: 7,    label: "7 days" },
+  { days: 30,   label: "1 month" },
+  { days: 90,   label: "3 months" },
+  { days: 180,  label: "6 months" },
+  { days: 365,  label: "1 year" },
+  { days: 730,  label: "2 years" },
+];
 
 /** An accessory as the counter sees it, from accessory_products. */
 interface AccessoryBase {
@@ -462,6 +495,8 @@ function MobilePrintPreviewModal({
                       <td style={{ padding: "5px 6px 5px 0", fontWeight: 600, color: "#111827" }}>
                         {pc.phone.name}
                         <div style={{ fontSize: 8, color: "#6b7280", fontWeight: 400, marginTop: 1 }}>{pc.phone.color} · {pc.phone.storage}</div>
+                        {/* The cover the customer is buying, on their copy. */}
+                        <div style={{ fontSize: 8, color: "#111827", fontWeight: 700, marginTop: 1 }}>{deviceWarrantyText({ warrantyDays: cartWarranty(pc).days, warrantyNote: cartWarranty(pc).note })}</div>
                       </td>
                       <td style={{ padding: "5px 6px", fontFamily: "monospace", fontSize: 8.5, color: "#6b7280" }}>{pc.phone.imei}</td>
                       <td style={{ padding: "5px 6px", textAlign: "center" as const, color: "#374151" }}>1</td>
@@ -1150,7 +1185,10 @@ export default function MobileSales() {
       const existing = new Set(prev.map(pc => pc.phone.id));
       const toAdd = selected
         .filter(p => !existing.has(p.id))
-        .map(p => ({ phone: p, sellingPrice: p.suggestedPrice ? p.suggestedPrice.toString() : "", discount: "" }));
+        .map(p => ({
+          phone: p, sellingPrice: p.suggestedPrice ? p.suggestedPrice.toString() : "", discount: "",
+          warrantyDays: p.warrantyDays ?? null, warrantyNote: p.warrantyNote ?? "",
+        }));
       return [...prev, ...toAdd];
     });
   };
@@ -1193,6 +1231,8 @@ export default function MobileSales() {
     setPhoneCart(prev => prev.map(pc => pc.phone.id === id ? { ...pc, sellingPrice: val } : pc));
   const updatePhoneDiscount = (id: number, val: string) =>
     setPhoneCart(prev => prev.map(pc => pc.phone.id === id ? { ...pc, discount: val } : pc));
+  const updatePhoneWarranty = (id: number, patch: Partial<Pick<PhoneCartItem, "warrantyDays" | "warrantyNote">>) =>
+    setPhoneCart(prev => prev.map(pc => pc.phone.id === id ? { ...pc, ...patch } : pc));
   const removePhone         = (id: number) =>
     setPhoneCart(prev => prev.filter(pc => pc.phone.id !== id));
 
@@ -1324,6 +1364,19 @@ export default function MobileSales() {
       );
       setInvoiceNo(no);
       if (accessoryCart.length) void reloadAccessories();
+
+      // A warranty changed at the counter is the one this phone was sold with:
+      // write it onto the device, which is what the Warranty Center reads.
+      // After the sale, and not fatal — the sale has happened either way.
+      const changedWarranty = phoneCart.filter(warrantyChanged);
+      for (const pc of changedWarranty) {
+        try {
+          const w = cartWarranty(pc);
+          await setDevicesWarranty([pc.phone.id], w.days, w.note);
+        } catch (e) {
+          setSaveWarning(`${no} was sold, but the warranty for ${pc.phone.name} could not be saved: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
 
       // Only the cash actually kept goes in the drawer — change handed back
       // never belonged to the till.
@@ -1603,6 +1656,43 @@ export default function MobileSales() {
                       Min. price: {fmt(pc.phone.minSellingPrice)}
                     </span>
                   </div>
+
+                  {/* The warranty it goes out with — the stocked one by default,
+                      changeable for this sale. Saved onto the phone at checkout. */}
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                    <div style={{ flex: "0 0 150px" }}>
+                      <label style={{ ...labelStyle, marginBottom: 3 }}>Warranty</label>
+                      <select
+                        value={cartWarranty(pc).days === null ? "default" : SALE_WARRANTY_CHOICES.some(c => c.days === cartWarranty(pc).days) ? String(cartWarranty(pc).days) : "custom"}
+                        onChange={e => {
+                          const v = e.target.value;
+                          if (v === "custom") return;
+                          updatePhoneWarranty(pc.phone.id, { warrantyDays: v === "default" ? null : Number(v) });
+                        }}
+                        style={{ ...inputStyle, cursor: "pointer", padding: "8px 10px" }}
+                      >
+                        {SALE_WARRANTY_CHOICES.map(c => (
+                          <option key={String(c.days)} value={c.days === null ? "default" : String(c.days)}>{c.label}</option>
+                        ))}
+                        {cartWarranty(pc).days !== null && !SALE_WARRANTY_CHOICES.some(c => c.days === cartWarranty(pc).days) && (
+                          <option value="custom">{cartWarranty(pc).days} days</option>
+                        )}
+                      </select>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <input
+                        value={cartWarranty(pc).note}
+                        onChange={e => updatePhoneWarranty(pc.phone.id, { warrantyNote: e.target.value })}
+                        placeholder="Note — e.g. Company warranty"
+                        style={{ ...inputStyle, padding: "8px 10px", fontSize: 12 }}
+                      />
+                    </div>
+                  </div>
+                  {warrantyChanged(pc) && (
+                    <div style={{ fontSize: 10.5, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: -4 }}>
+                      Changed for this sale — stocked as “{deviceWarrantyText(pc.phone)}”.
+                    </div>
+                  )}
 
                   {/* Row 3: selling price + discount */}
                   <div style={{ display: "flex", gap: 10 }}>

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { X, PackageCheck, AlertCircle, Building2 } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
-import { markTransferReturned, type AgentTransfer } from "@/lib/repair/agents";
+import { markTransferReturned, AGENT_OUTCOMES, type AgentTransfer, type AgentOutcome } from "@/lib/repair/agents";
 import { useToast } from "@/lib/ui/toast";
 import { useTech } from "@/technician/contexts/TechContext";
 
@@ -35,7 +35,9 @@ export default function ReceiveFromAgentModal({
 }) {
   const [cost, setCost] = useState("");
   const [notes, setNotes] = useState("");
-  const [fixed, setFixed] = useState(true);
+  // How it ended, in the shop's words: Normal, FOC, or Return (could not repair).
+  const [outcome, setOutcome] = useState<AgentOutcome>("Normal");
+  const fixed = outcome !== "Return";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
@@ -43,7 +45,8 @@ export default function ReceiveFromAgentModal({
   // bench — not the technician the job belongs to.
   const { actorName } = useTech();
 
-  const typed = cost.trim() === "" ? null : Number(cost);
+  // FOC means the agent charged nothing, whatever is in the box.
+  const typed = outcome === "FOC" ? 0 : cost.trim() === "" ? null : Number(cost);
 
   const submit = async () => {
     if (typed !== null && (!isFinite(typed) || typed < 0)) {
@@ -58,8 +61,9 @@ export default function ReceiveFromAgentModal({
         // Whether it came back fixed belongs on the record: an unrepaired
         // return is the reason a job goes back to the bench rather than
         // straight to the counter, and it still cost whatever the agent charged.
-        notes: [fixed ? "Repaired" : "Returned unrepaired", notes.trim()].filter(Boolean).join(" — "),
+        notes: [fixed ? (outcome === "FOC" ? "Repaired (FOC)" : "Repaired") : "Returned unrepaired", notes.trim()].filter(Boolean).join(" — "),
         receivedBy: actorName || technicianName,
+        outcome,
       });
       toast.dialog(
         "success",
@@ -127,32 +131,50 @@ export default function ReceiveFromAgentModal({
             </p>
           </div>
 
+          {/* How it ended — the shop's own three words. */}
           <div>
-            <label style={label}>What the agent charged (LKR)</label>
-            <input
-              type="number"
-              min={0}
-              value={cost}
-              onChange={e => setCost(e.target.value)}
-              placeholder={transfer.agreedCost != null ? String(transfer.agreedCost) : "0.00"}
-              style={input}
-              autoFocus
-            />
-            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5, lineHeight: 1.5 }}>
-              {transfer.agreedCost != null
-                ? <>Quoted {rs(transfer.agreedCost)} when it went out. Enter what was actually charged — the quote is kept either way.</>
-                : <>No cost was agreed when it went out. Leave empty if the bill has not come yet.</>}
-            </p>
+            <label style={label}>Outcome</label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+              {AGENT_OUTCOMES.map(o => {
+                const on = outcome === o.id;
+                return (
+                  <button key={o.id} type="button" onClick={() => setOutcome(o.id)} style={{
+                    padding: "10px 8px", borderRadius: 10, cursor: "pointer", textAlign: "center", fontFamily: ff,
+                    border: `1.5px solid ${on ? o.color : "var(--border)"}`, background: on ? o.bg : "transparent",
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: on ? o.color : "var(--text-primary)" }}>{o.label}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2, lineHeight: 1.3 }}>{o.blurb}</div>
+                  </button>
+                );
+              })}
+            </div>
+            {outcome === "Return" && (
+              <p style={{ fontSize: 11.5, color: "#d97706", lineHeight: 1.5, marginTop: 6 }}>
+                Recorded as could not repair. Any charge still counts against the job.
+              </p>
+            )}
           </div>
 
-          <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer" }}>
-            <input type="checkbox" checked={fixed} onChange={e => setFixed(e.target.checked)} style={{ width: 15, height: 15, accentColor: TA, cursor: "pointer" }} />
-            <span style={{ fontSize: 12.5, color: "var(--text-primary)" }}>The agent repaired it</span>
-          </label>
-          {!fixed && (
-            <p style={{ fontSize: 11.5, color: "#fbbf24", lineHeight: 1.5, marginTop: -6 }}>
-              Recorded as returned unrepaired. The charge, if there was one, still counts against the job.
-            </p>
+          {outcome !== "FOC" ? (
+            <div>
+              <label style={label}>What the agent charged (LKR)</label>
+              <input
+                type="number"
+                min={0}
+                value={cost}
+                onChange={e => setCost(e.target.value)}
+                placeholder={transfer.agreedCost != null ? String(transfer.agreedCost) : "0.00"}
+                style={input}
+                autoFocus
+              />
+              <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5, lineHeight: 1.5 }}>
+                {transfer.agreedCost != null
+                  ? <>Quoted {rs(transfer.agreedCost)} when it went out. Enter what was actually charged — the quote is kept either way.</>
+                  : <>No cost was agreed when it went out. Leave empty if the bill has not come yet.</>}
+              </p>
+            </div>
+          ) : (
+            <p style={{ fontSize: 11.5, color: "#2563eb", lineHeight: 1.5 }}>FOC — the agent charged nothing; recorded as Rs. 0.</p>
           )}
 
           <div>

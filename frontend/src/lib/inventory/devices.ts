@@ -32,6 +32,9 @@ interface DeviceRow {
   sold_price?: number | string | null;
   returned_from_invoice?: string | null;
   return_reason?: string | null;
+  // Added by 20261006000068.
+  warranty_days?: number | null;
+  warranty_note?: string | null;
   notes: string | null;
   added_date: string;
 }
@@ -65,8 +68,13 @@ function toDevice(row: DeviceRow): DeviceRecord {
     soldPrice: row.sold_price == null ? null : Number(row.sold_price),
     returnedFromInvoice: row.returned_from_invoice ?? null,
     returnReason: row.return_reason ?? null,
+    warrantyDays: row.warranty_days == null ? null : Number(row.warranty_days),
+    warrantyNote: row.warranty_note ?? "",
   };
 }
+
+/** True when an error is only about the warranty columns (migration not run). */
+const missingWarrantyColumns = (msg: string) => /warranty_(days|note)/.test(msg);
 
 export async function fetchDevices(): Promise<DeviceRecord[]> {
   if (!isSupabaseConfigured()) return [];
@@ -81,7 +89,7 @@ export async function fetchDevices(): Promise<DeviceRecord[]> {
 
 /** Insert (id === 0) or update one device. */
 export async function saveDevice(device: DeviceRecord): Promise<DeviceRecord> {
-  const payload = {
+  const payload: Record<string, unknown> & { imei: string; imei2: string; serial_number: string } = {
     imei: device.imei.trim(),
     imei2: device.imei2.trim(),
     serial_number: device.serialNumber.trim(),
@@ -98,14 +106,27 @@ export async function saveDevice(device: DeviceRecord): Promise<DeviceRecord> {
     status: device.status,
     notes: device.notes ?? "",
     added_date: device.addedDate,
+    warranty_days: device.warrantyDays ?? null,
+    warranty_note: (device.warrantyNote ?? "").trim(),
   };
 
   const sb = getSupabaseBrowserClient();
-  const query = device.id
-    ? sb.from("mobile_devices").update(payload).eq("id", device.id)
-    : sb.from("mobile_devices").insert(payload);
+  const write = (p: Record<string, unknown>) => (device.id
+    ? sb.from("mobile_devices").update(p).eq("id", device.id)
+    : sb.from("mobile_devices").insert(p)
+  ).select(DEVICE_COLUMNS).single();
 
-  const { data, error } = await query.select(DEVICE_COLUMNS).single();
+  let { data, error } = await write(payload);
+  // Before migration 20261006000068 there are no warranty columns. The device
+  // must still save — unless a warranty was actually set, which then says why.
+  if (error && missingWarrantyColumns(error.message)) {
+    if (device.warrantyDays != null || (device.warrantyNote ?? "").trim()) {
+      throw new Error("Device warranty needs migration 20261006000068_device_warranty.sql.");
+    }
+    const { warranty_days: _d, warranty_note: _n, ...rest } = payload;
+    void _d; void _n;
+    ({ data, error } = await write(rest));
+  }
 
   if (error) {
     if (error.code === "23505") {
@@ -222,6 +243,24 @@ export async function fetchReplacements(invoiceNo: string): Promise<DeviceReplac
     .order("created_at");
   if (error) throw new Error(replacementsMissing(error.message));
   return ((data ?? []) as Record<string, unknown>[]).map(toReplacement);
+}
+
+/**
+ * Set the warranty on many devices at once — a whole model group, sold units
+ * included, which is how the stock already in the shop gets filled in.
+ * null days = the shop's default for phones.
+ */
+export async function setDevicesWarranty(ids: number[], warrantyDays: number | null, warrantyNote: string): Promise<void> {
+  if (ids.length === 0) return;
+  const { error } = await getSupabaseBrowserClient()
+    .from("mobile_devices")
+    .update({ warranty_days: warrantyDays, warranty_note: warrantyNote.trim() })
+    .in("id", ids);
+  if (error) {
+    throw new Error(missingWarrantyColumns(error.message)
+      ? "Device warranty needs migration 20261006000068_device_warranty.sql."
+      : error.message);
+  }
 }
 
 export async function deleteDevice(id: number): Promise<void> {
