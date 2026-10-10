@@ -5,21 +5,35 @@ import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/c
 /**
  * Warranty claims on phones the shop sold — migration 20261006000069.
  *
- * Four ways a claim is settled: repaired at the shop (a free warranty repair
- * job), sent to the company to repair, replaced with another unit, or the
- * full price refunded. Repair-warranty claims are a separate thing
- * (warranty_claims, WarrantyContext).
+ * Six ways a claim is settled (migration 20261010000074), each saying what
+ * happens to the faulty phone as well as to the customer. Repair-warranty
+ * claims are a separate thing (warranty_claims, WarrantyContext).
  */
 
-export type DeviceClaimResolution = "repair_shop" | "repair_company" | "replace" | "refund";
+export type DeviceClaimResolution =
+  | "repair_shop" | "company_replace" | "company_refund" | "repair_company" | "replace" | "refund";
 export type DeviceClaimStatus = "Open" | "In repair" | "At company" | "Ready" | "Completed" | "Rejected";
 
-export const RESOLUTIONS: { id: DeviceClaimResolution; label: string; blurb: string }[] = [
-  { id: "repair_shop",    label: "Repair at the shop",   blurb: "Opens a free warranty repair job for our bench." },
-  { id: "repair_company", label: "Send to the company",  blurb: "The supplier repairs it; tracked out and back." },
-  { id: "replace",        label: "Replace the phone",    blurb: "Swap it for another unit from stock." },
-  { id: "refund",         label: "Full refund",          blurb: "Hand back the full price and take the phone back." },
+/** Where each kind of claim sends the faulty phone. */
+export type ClaimGroup = "shop" | "company" | "stock";
+
+export const RESOLUTIONS: { id: DeviceClaimResolution; label: string; blurb: string; group: ClaimGroup }[] = [
+  { id: "repair_shop",     label: "Repair at the shop",            blurb: "A free warranty repair job for our bench.",                      group: "shop" },
+  { id: "company_replace", label: "Return to company · new phone", blurb: "Faulty phone goes to the company; customer gets a unit from stock now.", group: "company" },
+  { id: "company_refund",  label: "Return to company · refund",    blurb: "Faulty phone goes to the company; the price is refunded.",       group: "company" },
+  { id: "repair_company",  label: "Return to company · wait",      blurb: "The company repairs it; the customer waits for it to come back.", group: "company" },
+  { id: "replace",         label: "Replace · back in the rack",    blurb: "Customer gets another unit; the returned phone goes back into stock.", group: "stock" },
+  { id: "refund",          label: "Full cash refund",              blurb: "The price is paid back in cash; the phone goes back into stock.", group: "stock" },
 ];
+
+/** Replacement claims, and where the returned phone goes for each. */
+export const REPLACE_TO: Partial<Record<DeviceClaimResolution, "resell" | "return_to_company">> = {
+  company_replace: "return_to_company", replace: "resell",
+};
+/** Refund claims, and where the returned phone goes for each. */
+export const REFUND_TO: Partial<Record<DeviceClaimResolution, "resell" | "return_to_company">> = {
+  company_refund: "return_to_company", refund: "resell",
+};
 
 export const RESOLUTION_LABEL: Record<DeviceClaimResolution, string> = Object.fromEntries(
   RESOLUTIONS.map(r => [r.id, r.label]),
@@ -80,6 +94,22 @@ export async function fetchDeviceClaims(): Promise<DeviceClaim[]> {
   if (!isSupabaseConfigured()) return [];
   const { data, error } = await getSupabaseBrowserClient()
     .from("device_warranty_claims").select("*").order("created_at", { ascending: false }).limit(500);
+  if (error) throw new Error(explain(error.message, error.code));
+  return ((data ?? []) as Row[]).map(toClaim);
+}
+
+/** A claim still being dealt with — anything not Completed or Rejected. */
+export const isOpenClaim = (c: Pick<DeviceClaim, "status">) => c.status !== "Completed" && c.status !== "Rejected";
+
+/**
+ * Every claim ever made on these phones, newest first — for the lookup to say
+ * "already claimed" instead of offering a second claim on the same phone.
+ */
+export async function fetchClaimsForImeis(imeis: string[]): Promise<DeviceClaim[]> {
+  const list = [...new Set(imeis.map(i => i.trim()).filter(Boolean))];
+  if (!isSupabaseConfigured() || list.length === 0) return [];
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("device_warranty_claims").select("*").in("imei", list).order("created_at", { ascending: false });
   if (error) throw new Error(explain(error.message, error.code));
   return ((data ?? []) as Row[]).map(toClaim);
 }

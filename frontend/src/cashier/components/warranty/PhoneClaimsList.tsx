@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Wrench, Building2, Repeat, Banknote, Smartphone } from "lucide-react";
+import { Wrench, Building2, Repeat, Banknote, Smartphone, Truck, Undo2 } from "lucide-react";
 import { useToast } from "@/lib/ui/toast";
 import {
   fetchDeviceClaims, updateDeviceClaim, RESOLUTION_LABEL,
@@ -18,7 +18,9 @@ const ff = "'Plus Jakarta Sans', sans-serif";
 const rs = (n: number) => `Rs. ${Math.round(n).toLocaleString("en-LK")}`;
 const day = (iso: string | null) => iso ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T00:00:00` : iso).toLocaleDateString("en-LK", { day: "numeric", month: "short", year: "numeric" }) : "—";
 
-const ICON: Record<DeviceClaimResolution, typeof Wrench> = { repair_shop: Wrench, repair_company: Building2, replace: Repeat, refund: Banknote };
+const ICON: Record<DeviceClaimResolution, typeof Wrench> = {
+  repair_shop: Wrench, company_replace: Truck, company_refund: Undo2, repair_company: Building2, replace: Repeat, refund: Banknote,
+};
 const STATUS_COLOR: Record<DeviceClaimStatus, string> = {
   Open: "#d97706", "In repair": "#2563eb", "At company": "#7c3aed", Ready: "#0d9488", Completed: "#16a34a", Rejected: "#dc2626",
 };

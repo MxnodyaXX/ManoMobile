@@ -67,6 +67,9 @@ export interface CreditEntry {
   method: string | null;
   note: string | null;
   createdAt: string;
+  /** A charge from correcting a paid invoice to credit: only payments that
+   *  name its invoice settle it (migration 20261011000078). */
+  settleByNameOnly: boolean;
 }
 
 export interface NewAccount {
@@ -126,6 +129,7 @@ const toEntry = (r: AccountRow): CreditEntry => ({
   method: (r.method as string | null) ?? null,
   note: (r.note as string | null) ?? null,
   createdAt: r.created_at as string,
+  settleByNameOnly: r.settle_by_name_only === true,
 });
 
 /**
@@ -290,6 +294,22 @@ export async function recordAllocatedPayment(
     created_by: user?.id ?? null,
   })));
   if (error) throw new Error(explain(error.message, error.code));
+}
+
+/**
+ * Put money already on the account (paid without naming an invoice) against
+ * invoices — migration 20261011000079. Never happens by itself any more, so
+ * a correction to one invoice cannot move money onto another.
+ */
+export async function applyMoneyOnAccount(accountId: string, rows: { invoiceNo: string; amount: number }[]): Promise<number> {
+  const lines = rows.filter(r => r.amount > 0.005);
+  if (lines.length === 0) return 0;
+  const { data, error } = await getSupabaseBrowserClient().rpc("apply_money_on_account", {
+    p_account: accountId,
+    p_rows: lines.map(r => ({ invoice_no: r.invoiceNo, amount: Math.round(r.amount * 100) / 100 })),
+  });
+  if (error) throw new Error(explain(error.message, error.code));
+  return Number(data ?? 0);
 }
 
 /** Put something on account by hand — a sale, or a correction. */

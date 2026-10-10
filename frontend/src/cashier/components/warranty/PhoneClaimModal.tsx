@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Wrench, Building2, Repeat, Banknote, CheckCircle } from "lucide-react";
+import { X, Wrench, Building2, Repeat, Banknote, CheckCircle, Truck, Undo2, Check, PackageCheck } from "lucide-react";
 import { useRepair, IN_HOUSE_DEALER } from "@/cashier/contexts/RepairContext";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import { useDevices } from "@/cashier/contexts/DevicesContext";
@@ -11,27 +11,58 @@ import { fetchSaleByInvoiceNo } from "@/lib/sales/api";
 import type { SaleTx } from "@/cashier/contexts/SalesContext";
 import type { CoverageItem } from "@/lib/warranty/lookup";
 import {
-  RESOLUTIONS, createDeviceClaim, updateDeviceClaim, refundDeviceClaim, previewInvoiceRefund,
-  type DeviceClaim, type DeviceClaimResolution, type RefundMethod, type RefundSplit,
+  RESOLUTIONS, REPLACE_TO, REFUND_TO, createDeviceClaim, updateDeviceClaim, refundDeviceClaim, previewInvoiceRefund,
+  type DeviceClaim, type DeviceClaimResolution, type RefundMethod, type RefundSplit, type ClaimGroup,
 } from "@/lib/warranty/deviceClaims";
 import ReplaceDeviceModal from "@/cashier/components/sales/ReplaceDeviceModal";
 
 /**
  * A warranty claim on a phone the shop sold.
  *
- * The cashier records what is wrong, then picks how it is settled:
- *   Repair at the shop    — a free warranty repair job is opened for the bench
- *   Send to the company   — recorded as with the company, tracked until back
- *   Replace the phone     — the replacement flow opens with the phone and fault
- *   Full refund           — the price paid comes back out of the till and the
- *                           phone goes to resale stock or back to the company
+ * The cashier records what is wrong, then picks how it is settled. Each
+ * choice also decides where the faulty phone goes, so nobody has to answer
+ * that twice:
+ *   Repair at the shop               — a free warranty repair job for the bench
+ *   Return to company · new phone    — replacement from stock; faulty phone to the company
+ *   Return to company · refund       — price refunded; faulty phone to the company
+ *   Return to company · wait         — the company repairs it; tracked until back
+ *   Replace · back in the rack       — replacement from stock; returned phone into stock
+ *   Full cash refund                 — price paid back in cash; phone into stock
  */
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 const rs = (n: number) => `Rs. ${Math.round(n).toLocaleString("en-LK")}`;
 const ICON: Record<DeviceClaimResolution, typeof Wrench> = {
-  repair_shop: Wrench, repair_company: Building2, replace: Repeat, refund: Banknote,
+  repair_shop: Wrench, company_replace: Truck, company_refund: Undo2, repair_company: Building2, replace: Repeat, refund: Banknote,
 };
+
+const GROUPS: { id: ClaimGroup; title: string; sub: string; color: string; icon: typeof Wrench }[] = [
+  { id: "shop",    title: "Fix it here",           sub: "Our bench repairs it",                        color: "#3b82f6", icon: Wrench },
+  { id: "company", title: "Return to the company", sub: "The faulty phone goes back to the supplier",  color: "#8b5cf6", icon: Truck },
+  { id: "stock",   title: "Keep it in the shop",   sub: "The returned phone goes back into stock",     color: "#10b981", icon: PackageCheck },
+];
+
+/** Entry, hover and select motion for the claim window. Respects reduced motion. */
+const MOTION = `
+@keyframes pcIn { from { opacity: 0; transform: translateY(8px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes pcModal { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes pcPop { 0% { transform: scale(0); } 60% { transform: scale(1.25); } 100% { transform: scale(1); } }
+@keyframes pcDetail { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.pc-modal { animation: pcModal 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.pc-in { animation: pcIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.pc-opt { transition: transform 0.18s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.25s ease; }
+.pc-opt:hover { transform: translateY(-2px); border-color: var(--c) !important; box-shadow: 0 10px 24px rgba(0,0,0,0.08); }
+.pc-opt:active { transform: translateY(0) scale(0.985); }
+.pc-opt .pc-ico { transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.25s, color 0.25s; }
+.pc-opt:hover .pc-ico, .pc-on .pc-ico { transform: scale(1.08) rotate(-4deg); }
+.pc-check { animation: pcPop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.pc-detail { animation: pcDetail 0.3s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .pc-modal, .pc-in, .pc-check, .pc-detail { animation: none; }
+  .pc-opt, .pc-opt .pc-ico { transition: none; }
+  .pc-opt:hover, .pc-opt:hover .pc-ico, .pc-on .pc-ico { transform: none; }
+}
+`;
 
 const REASONS = ["No power / dead", "Display fault", "Charging fault", "Network / signal fault", "Camera fault", "Speaker / mic fault", "Battery draining fast"];
 
@@ -55,7 +86,6 @@ export default function PhoneClaimModal({ item, onClose, onDone }: {
   const [resolution, setResolution] = useState<DeviceClaimResolution | "">("");
   const [company, setCompany] = useState(device?.supplier ?? "");
   const [expectedBack, setExpectedBack] = useState("");
-  const [disposition, setDisposition] = useState<"resell" | "return_to_company">("return_to_company");
   const [notes, setNotes] = useState("");
   const [method, setMethod] = useState<RefundMethod>("Cash");
   // How the refund splits — off their credit first, the rest handed back.
@@ -68,13 +98,20 @@ export default function PhoneClaimModal({ item, onClose, onDone }: {
 
   const reported = [preset, issue.trim()].filter(Boolean).join(" — ");
   const refundAmount = item.soldPrice ?? 0;
+  // Where the faulty phone goes follows from the kind of claim.
+  const refundTo = resolution ? REFUND_TO[resolution] : undefined;
+  const replaceTo = resolution ? REPLACE_TO[resolution] : undefined;
+  const isRefund = !!refundTo;
+  // "Full cash refund" is cash by definition; a company refund can go back any way.
+  const cashOnly = resolution === "refund";
+  const payMethod: RefundMethod = cashOnly ? "Cash" : method;
 
   useEffect(() => {
-    if (resolution !== "refund" || !item.invoiceNo) return;
+    if (!isRefund || !item.invoiceNo) return;
     let live = true;
     previewInvoiceRefund(item.invoiceNo, refundAmount).then(s => { if (live) setSplit(s); });
     return () => { live = false; };
-  }, [resolution, item.invoiceNo, refundAmount]);
+  }, [isRefund, item.invoiceNo, refundAmount]);
   const creditPart = split?.credit ?? 0;
   const payoutPart = split ? split.payout : refundAmount;
   const ready = !!reported && !!resolution && !busy && (resolution !== "repair_company" || company.trim() !== "");
@@ -113,7 +150,7 @@ export default function PhoneClaimModal({ item, onClose, onDone }: {
         return;
       }
 
-      if (resolution === "replace") {
+      if (replaceTo) {
         const sale = await fetchSaleByInvoiceNo(item.invoiceNo!);
         if (!sale) throw new Error(`Invoice ${item.invoiceNo} could not be found.`);
         const claim = await createDeviceClaim({ ...base(), resolution, status: "Open" });
@@ -126,21 +163,21 @@ export default function PhoneClaimModal({ item, onClose, onDone }: {
       // cancels whatever is still owed on credit, and marks the invoice. Only
       // the part actually paid is handed back — and only cash leaves the drawer.
       const claim = await createDeviceClaim({ ...base(), resolution, status: "Open" });
-      const done = await refundDeviceClaim(claim.id, disposition, refundAmount, method);
-      if (done.payout > 0.005 && method === "Cash") {
+      const done = await refundDeviceClaim(claim.id, refundTo ?? "resell", refundAmount, payMethod);
+      if (done.payout > 0.005 && payMethod === "Cash") {
         addEntry("out", `Warranty refund — ${item.invoiceNo} (${claim.id})`, done.payout);
       }
       void reloadDevices();
       const parts = [
         done.credit > 0.005 ? `${rs(done.credit)} taken off their credit balance` : "",
         done.payout > 0.005
-          ? method === "Cash" ? `${rs(done.payout)} paid back in cash — take it from the drawer`
-            : `${rs(done.payout)} to be paid back by ${method.toLowerCase()}`
+          ? payMethod === "Cash" ? `${rs(done.payout)} paid back in cash — take it from the drawer`
+            : `${rs(done.payout)} to be paid back by ${payMethod.toLowerCase()}`
           : "",
       ].filter(Boolean);
       onDone(
-        { ...claim, status: "Completed", refundAmount, refundCreditAmount: done.credit, refundMethod: done.payout > 0.005 ? method : null },
-        `Claim ${claim.id} refunded — ${parts.join("; ")}.`,
+        { ...claim, status: "Completed", refundAmount, refundCreditAmount: done.credit, refundMethod: done.payout > 0.005 ? payMethod : null },
+        `Claim ${claim.id} refunded — ${parts.join("; ")}. The phone ${refundTo === "resell" ? "is back in stock" : "is set aside to return to the company"}.`,
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -156,6 +193,7 @@ export default function PhoneClaimModal({ item, onClose, onDone }: {
         tx={replaceFor.tx}
         presetDeviceId={item.deviceId}
         presetReason={reported}
+        presetDisposition={replaceTo}
         onReplaced={rec => {
           void updateDeviceClaim(replaceFor.claim.id, {
             status: "Completed", resolvedAt: new Date().toISOString(),
@@ -169,7 +207,8 @@ export default function PhoneClaimModal({ item, onClose, onDone }: {
 
   return createPortal(
     <div onClick={e => { if (e.target === e.currentTarget && !busy) onClose(); }} style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(8,10,14,0.62)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div style={{ width: "min(720px, calc(100vw - 24px))", maxHeight: "calc(100vh - 32px)", display: "flex", flexDirection: "column", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 18, overflow: "hidden", fontFamily: ff, boxShadow: "0 30px 80px rgba(0,0,0,0.45)" }}>
+      <style>{MOTION}</style>
+      <div className="pc-modal" style={{ width: "min(720px, calc(100vw - 24px))", maxHeight: "calc(100vh - 32px)", display: "flex", flexDirection: "column", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 18, overflow: "hidden", fontFamily: ff, boxShadow: "0 30px 80px rgba(0,0,0,0.45)" }}>
         <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "flex-start", gap: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text-primary)" }}>Warranty claim — {item.title}</div>
@@ -202,25 +241,69 @@ export default function PhoneClaimModal({ item, onClose, onDone }: {
           {/* How it is settled */}
           <div>
             <span style={label}>2 · How will it be settled? *</span>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
-              {RESOLUTIONS.map(r => {
-                const Icon = ICON[r.id];
-                const on = resolution === r.id;
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {GROUPS.map((g, gi) => {
+                const GroupIcon = g.icon;
+                const groupOn = RESOLUTIONS.some(r => r.group === g.id && r.id === resolution);
                 return (
-                  <button key={r.id} type="button" onClick={() => setResolution(r.id)} style={{
-                    textAlign: "left", padding: 12, borderRadius: 12, cursor: "pointer", fontFamily: ff,
-                    border: `1.5px solid ${on ? "var(--accent)" : "var(--border)"}`, background: on ? "var(--accent-dim)" : "transparent",
-                  }}>
-                    <Icon size={18} color={on ? "var(--accent)" : "var(--text-muted)"} />
-                    <div style={{ fontSize: 13, fontWeight: 800, color: on ? "var(--accent)" : "var(--text-primary)", marginTop: 6 }}>{r.label}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, lineHeight: 1.4 }}>{r.blurb}</div>
-                  </button>
+                  <div key={g.id} className="pc-in" style={{ animationDelay: `${gi * 70}ms` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
+                      <span style={{
+                        width: 24, height: 24, borderRadius: 7, display: "grid", placeItems: "center", flexShrink: 0,
+                        background: `${g.color}1a`, border: `1px solid ${g.color}40`, transition: "transform 0.25s",
+                        transform: groupOn ? "scale(1.08)" : undefined,
+                      }}>
+                        <GroupIcon size={13} color={g.color} />
+                      </span>
+                      <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text-primary)" }}>{g.title}</span>
+                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{g.sub}</span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 9 }}>
+                      {RESOLUTIONS.filter(r => r.group === g.id).map((r, i) => {
+                        const Icon = ICON[r.id];
+                        const on = resolution === r.id;
+                        return (
+                          <button
+                            key={r.id} type="button" onClick={() => setResolution(r.id)}
+                            className={`pc-opt pc-in${on ? " pc-on" : ""}`}
+                            aria-pressed={on}
+                            style={{
+                              ["--c" as string]: g.color,
+                              animationDelay: `${gi * 70 + (i + 1) * 45}ms`,
+                              position: "relative", display: "flex", gap: 11, alignItems: "flex-start",
+                              textAlign: "left", padding: "13px 13px 13px 12px", borderRadius: 14, cursor: "pointer", fontFamily: ff,
+                              border: `1.5px solid ${on ? g.color : "var(--border)"}`,
+                              background: on ? `linear-gradient(135deg, ${g.color}1f, ${g.color}08)` : "var(--bg-card)",
+                              boxShadow: on ? `0 8px 22px ${g.color}26, 0 0 0 3px ${g.color}1a` : "0 1px 2px rgba(0,0,0,0.04)",
+                            } as React.CSSProperties}
+                          >
+                            <span className="pc-ico" style={{
+                              width: 36, height: 36, borderRadius: 11, flexShrink: 0, display: "grid", placeItems: "center",
+                              background: on ? g.color : `${g.color}14`, color: on ? "#fff" : g.color,
+                            }}>
+                              <Icon size={17} />
+                            </span>
+                            <span style={{ flex: 1, minWidth: 0, paddingRight: 16 }}>
+                              <span style={{ display: "block", fontSize: 13, fontWeight: 800, color: on ? g.color : "var(--text-primary)", transition: "color 0.2s" }}>{r.label}</span>
+                              <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginTop: 3, lineHeight: 1.45 }}>{r.blurb}</span>
+                            </span>
+                            {on && (
+                              <span className="pc-check" style={{ position: "absolute", top: 9, right: 9, width: 18, height: 18, borderRadius: 99, background: g.color, display: "grid", placeItems: "center" }}>
+                                <Check size={11} color="#fff" strokeWidth={3} />
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 );
               })}
             </div>
           </div>
 
-          {/* Per resolution */}
+          {/* Per resolution — keyed so each choice slides its details in. */}
+          <div key={resolution || "none"} className="pc-detail" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           {resolution === "repair_shop" && (
             <div style={note("var(--accent)")}>
               A <b>free warranty repair job</b> will be opened for {item.title} (high priority, unassigned) with the fault above.
@@ -241,32 +324,21 @@ export default function PhoneClaimModal({ item, onClose, onDone }: {
             </div>
           )}
 
-          {resolution === "replace" && (
+          {replaceTo && (
             <div style={note("var(--accent)")}>
-              The replacement window opens next with this phone and fault filled in — pick the unit to hand over and
-              whether this one goes back to stock or to the company. Any price difference is handled there.
+              The replacement window opens next with this phone and fault filled in — pick the unit to hand over.
+              The faulty phone {replaceTo === "resell" ? <b>goes back into stock</b> : <b>is set aside to return to the company</b>}. Any price difference is handled there.
             </div>
           )}
 
-          {resolution === "refund" && (
+          {isRefund && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", borderRadius: 12, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)" }}>
                 <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-secondary)" }}>Full refund — the price paid</span>
                 <span style={{ fontSize: 20, fontWeight: 800, color: "#dc2626" }}>{rs(refundAmount)}</span>
               </div>
-              <div>
-                <span style={label}>The phone that comes back goes</span>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  {([["return_to_company", "Back to the company", "Set aside to return to the supplier"], ["resell", "Into resale stock", "Flagged as a customer return"]] as const).map(([v, t, s]) => (
-                    <button key={v} type="button" onClick={() => setDisposition(v)} style={{
-                      textAlign: "left", padding: 11, borderRadius: 10, cursor: "pointer", fontFamily: ff,
-                      border: `1.5px solid ${disposition === v ? "var(--accent)" : "var(--border)"}`, background: disposition === v ? "var(--accent-dim)" : "transparent",
-                    }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: disposition === v ? "var(--accent)" : "var(--text-primary)" }}>{t}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{s}</div>
-                    </button>
-                  ))}
-                </div>
+              <div style={note(refundTo === "resell" ? "#16a34a" : "#7c3aed")}>
+                The phone that comes back {refundTo === "resell" ? <b>goes back into stock</b> : <b>is set aside to return to the company</b>}.
               </div>
               {/* Where the money goes: off what they owe first, then back to them. */}
               <div style={{ borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden" }}>
@@ -282,7 +354,9 @@ export default function PhoneClaimModal({ item, onClose, onDone }: {
                 </div>
               </div>
 
-              {payoutPart > 0.005 ? (
+              {payoutPart > 0.005 && cashOnly ? (
+                <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>Paid back in cash, taken out of the cash drawer.</div>
+              ) : payoutPart > 0.005 ? (
                 <div>
                   <span style={label}>Pay it back by</span>
                   <div style={{ display: "flex", gap: 6 }}>
@@ -304,8 +378,9 @@ export default function PhoneClaimModal({ item, onClose, onDone }: {
               <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>Recorded on {item.invoiceNo} as returned.</div>
             </div>
           )}
+          </div>
 
-          {resolution && resolution !== "replace" && (
+          {resolution && !replaceTo && (
             <div>
               <span style={label}>Notes</span>
               <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Anything worth keeping — accessories received, condition…" style={input} />
@@ -319,7 +394,7 @@ export default function PhoneClaimModal({ item, onClose, onDone }: {
           <button onClick={onClose} disabled={busy} style={{ padding: "10px 18px", borderRadius: 10, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: ff }}>Cancel</button>
           <button onClick={() => void submit()} disabled={!ready} style={{
             padding: "10px 22px", borderRadius: 10, border: "none", fontSize: 13, fontWeight: 700, fontFamily: ff,
-            background: ready ? (resolution === "refund" ? "#dc2626" : "var(--accent)") : "var(--border)",
+            background: ready ? (isRefund ? "#dc2626" : "var(--accent)") : "var(--border)",
             color: ready ? "#fff" : "var(--text-muted)", cursor: ready ? "pointer" : "not-allowed",
           }}>
             {busy ? "Working…"
@@ -327,8 +402,8 @@ export default function PhoneClaimModal({ item, onClose, onDone }: {
               : !resolution ? "Choose how it is settled"
               : resolution === "repair_shop" ? "Open warranty repair job"
               : resolution === "repair_company" ? (company.trim() ? "Record as sent to company" : "Name the company")
-              : resolution === "replace" ? "Continue to replacement"
-              : payoutPart > 0.005 ? `Refund ${rs(refundAmount)} · ${rs(payoutPart)} by ${method}` : `Refund ${rs(refundAmount)} off credit`}
+              : replaceTo ? "Continue to replacement"
+              : payoutPart > 0.005 ? `Refund ${rs(refundAmount)} · ${rs(payoutPart)} by ${payMethod}` : `Refund ${rs(refundAmount)} off credit`}
           </button>
         </div>
       </div>

@@ -43,13 +43,16 @@ const section: React.CSSProperties = { display: "flex", flexDirection: "column",
 const deviceLine = (d: DeviceRecord) =>
   [d.storage, d.color].filter(Boolean).join(" · ");
 
-export default function ReplaceDeviceModal({ tx, onClose, presetDeviceId, presetReason, onReplaced }: {
+export default function ReplaceDeviceModal({ tx, onClose, presetDeviceId, presetReason, presetDisposition, onReplaced }: {
   tx: SaleTx;
   onClose: () => void;
   /** Opened from a warranty claim: the phone that came back is already known. */
   presetDeviceId?: number;
   /** …and so is what is wrong with it. */
   presetReason?: string;
+  /** …and where the returned phone goes, decided by the kind of claim. Locks
+   *  the choice so the claim and the stock cannot disagree. */
+  presetDisposition?: ReplacementDisposition;
   /** Told once the swap has gone through, so the claim can be closed with it. */
   onReplaced?: (rec: DeviceReplacement) => void;
 }) {
@@ -63,7 +66,7 @@ export default function ReplaceDeviceModal({ tx, onClose, presetDeviceId, preset
   const [returnedId, setReturnedId]   = useState<number | null>(presetDeviceId ?? null);
   const [reason, setReason]           = useState(presetReason ? "Other" : "");
   const [otherReason, setOtherReason] = useState(presetReason ?? "");
-  const [disposition, setDisposition] = useState<ReplacementDisposition | "">("");
+  const [disposition, setDisposition] = useState<ReplacementDisposition | "">(presetDisposition ?? "");
   const [query, setQuery]             = useState("");
   const [replacementId, setReplacementId] = useState<number | null>(null);
   const [price, setPrice]             = useState("");
@@ -252,12 +255,12 @@ export default function ReplaceDeviceModal({ tx, onClose, presetDeviceId, preset
 
               {/* 3 — where the returned phone goes */}
               <div style={section}>
-                <span style={label}>3 · What happens to the returned phone? *</span>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <span style={label}>3 · What happens to the returned phone? *{presetDisposition ? " — set by the warranty claim" : ""}</span>
+                <div style={{ display: "grid", gridTemplateColumns: presetDisposition ? "1fr" : "1fr 1fr", gap: 8 }}>
                   {([
                     ["resell", PackageCheck, "Keep for resale", "Goes back into stock, flagged as a customer return."],
                     ["return_to_company", Truck, "Return to company", "Set aside to send back to the supplier. Not sellable."],
-                  ] as const).map(([v, Icon, title, sub]) => (
+                  ] as const).filter(([v]) => !presetDisposition || v === presetDisposition).map(([v, Icon, title, sub]) => (
                     <button key={v} onClick={() => setDisposition(v)} style={{ ...choice(disposition === v), display: "flex", gap: 10, alignItems: "flex-start", textAlign: "left", padding: "12px" }}>
                       <Icon size={18} style={{ flexShrink: 0, marginTop: 1 }} />
                       <span>

@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { Search, ShieldCheck, ShieldX, ShieldAlert, Clock, Smartphone, Wrench, Package, Cpu, Box, User, Phone, FileText, Loader2 } from "lucide-react";
 import { useRepair } from "@/cashier/contexts/RepairContext";
-import { useWarranty, type Warranty } from "@/cashier/contexts/WarrantyContext";
+import { useWarranty, type Warranty, type WarrantyClaim } from "@/cashier/contexts/WarrantyContext";
+import { fetchClaimsForImeis, isOpenClaim, RESOLUTION_LABEL, type DeviceClaim } from "@/lib/warranty/deviceClaims";
 import { lookupWarranty, type CoverageItem, type CoverageKind, type CoverageState, type LookupResult, type WarrantyPolicy } from "@/lib/warranty/lookup";
 import { useToast } from "@/lib/ui/toast";
 import PhoneClaimModal from "./PhoneClaimModal";
@@ -34,6 +35,11 @@ const KIND_ICON: Record<CoverageKind, typeof Smartphone> = {
 const day = (iso: string | null) =>
   iso ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T00:00:00` : iso).toLocaleDateString("en-LK", { day: "numeric", month: "short", year: "numeric" }) : "—";
 
+const imeiOf = (item: CoverageItem) => item.detail.replace(/^IMEI\s*/i, "").trim();
+
+/** Repair-warranty claims still being dealt with. */
+const repairClaimOpen = (c: WarrantyClaim) => c.status !== "Resolved" && c.status !== "Rejected";
+
 const EXAMPLES = ["INV-000207", "RM-584", "IMEI", "Item code", "07X XXX XXXX"];
 
 export default function WarrantyLookup({ policies, onPrintCard, onClaim, onPhoneClaimed }: {
@@ -44,20 +50,26 @@ export default function WarrantyLookup({ policies, onPrintCard, onClaim, onPhone
   onPhoneClaimed?: () => void;
 }) {
   const { jobs } = useRepair();
-  const { warranties } = useWarranty();
+  const { warranties, claims: repairClaims } = useWarranty();
   const toast = useToast();
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<LookupResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [phoneClaim, setPhoneClaim] = useState<CoverageItem | null>(null);
+  // Claims already made on the phones found, so a phone under a claim shows
+  // that claim instead of offering a second one.
+  const [phoneClaims, setPhoneClaims] = useState<DeviceClaim[]>([]);
 
   const run = async (raw = query) => {
     const q = raw.trim();
     if (!q || busy) return;
     setBusy(true); setError(null);
     try {
-      setResult(await lookupWarranty(q, { jobs, warranties, policies }));
+      const r = await lookupWarranty(q, { jobs, warranties, policies });
+      const imeis = r.items.filter(i => i.kind === "Phone").map(imeiOf);
+      setPhoneClaims(imeis.length ? await fetchClaimsForImeis(imeis).catch(() => []) : []);
+      setResult(r);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -124,7 +136,13 @@ export default function WarrantyLookup({ policies, onPrintCard, onClaim, onPhone
               ))}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 14 }}>
-              {result.items.map(item => <CoverageCard key={item.key} item={item} onPrintCard={onPrintCard} onClaim={onClaim} onPhoneClaim={setPhoneClaim} />)}
+              {result.items.map(item => (
+                <CoverageCard
+                  key={item.key} item={item} onPrintCard={onPrintCard} onClaim={onClaim} onPhoneClaim={setPhoneClaim}
+                  phoneClaims={item.kind === "Phone" ? phoneClaims.filter(c => c.imei === imeiOf(item)) : []}
+                  openRepairClaim={item.warranty ? repairClaims.find(c => c.warrantyId === item.warranty!.id && repairClaimOpen(c)) : undefined}
+                />
+              ))}
             </div>
           </>
         )
@@ -146,9 +164,15 @@ export default function WarrantyLookup({ policies, onPrintCard, onClaim, onPhone
   );
 }
 
-function CoverageCard({ item, onPrintCard, onClaim, onPhoneClaim }: {
+function CoverageCard({ item, onPrintCard, onClaim, onPhoneClaim, phoneClaims, openRepairClaim }: {
   item: CoverageItem; onPrintCard: (w: Warranty) => void; onClaim: (w: Warranty) => void; onPhoneClaim: (i: CoverageItem) => void;
+  /** Claims already made on this phone, newest first. */
+  phoneClaims: DeviceClaim[];
+  /** An open claim on this repair warranty, if there is one. */
+  openRepairClaim?: WarrantyClaim;
 }) {
+  const openPhoneClaim = phoneClaims.find(isOpenClaim);
+  const pastPhoneClaims = phoneClaims.filter(c => !isOpenClaim(c));
   const st = STATE[item.state];
   const Icon = st.icon;
   const KindIcon = KIND_ICON[item.kind];
@@ -204,8 +228,26 @@ function CoverageCard({ item, onPrintCard, onClaim, onPhoneClaim }: {
         {item.note && item.state !== "None" && item.state !== "Void" && <div style={{ fontSize: 11.5, color: "#d97706" }}>{item.note}</div>}
       </div>
 
+      {/* Already under a claim: show it, and offer nothing new. */}
+      {openPhoneClaim && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderTop: "1px solid var(--border)", background: "rgba(124,58,237,0.07)" }}>
+          <ShieldAlert size={16} color="#7c3aed" style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0, fontSize: 12 }}>
+            <div style={{ fontWeight: 800, color: "#7c3aed" }}>Already claimed — {openPhoneClaim.id} · {openPhoneClaim.status}</div>
+            <div style={{ color: "var(--text-secondary)", marginTop: 1 }}>
+              {RESOLUTION_LABEL[openPhoneClaim.resolution]}{openPhoneClaim.companyName ? ` · ${openPhoneClaim.companyName}` : ""} · opened {day(openPhoneClaim.createdAt)}. Follow it up in Claims.
+            </div>
+          </div>
+        </div>
+      )}
+      {!openPhoneClaim && pastPhoneClaims.length > 0 && item.kind === "Phone" && (
+        <div style={{ padding: "8px 16px", borderTop: "1px solid var(--border)", fontSize: 11.5, color: "var(--text-muted)" }}>
+          Claimed before: {pastPhoneClaims.map(c => `${c.id} (${RESOLUTION_LABEL[c.resolution]}, ${c.status.toLowerCase()})`).join(" · ")}
+        </div>
+      )}
+
       {/* A phone under warranty: claim on it here. */}
-      {item.kind === "Phone" && item.claimable && item.state === "Active" && item.deviceId && (
+      {item.kind === "Phone" && item.claimable && item.state === "Active" && item.deviceId && !openPhoneClaim && (
         <div style={{ display: "flex", gap: 8, padding: "10px 16px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
           <span style={{ fontSize: 11.5, color: "var(--text-muted)", alignSelf: "center", flex: 1 }}>Repair · send to company · replace · refund</span>
           <button onClick={() => onPhoneClaim(item)} style={{ ...btn, color: "#d97706", borderColor: "rgba(245,158,11,0.45)" }}>Start claim</button>
@@ -216,7 +258,9 @@ function CoverageCard({ item, onPrintCard, onClaim, onPhoneClaim }: {
         <div style={{ display: "flex", gap: 8, padding: "10px 16px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
           <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-secondary)", alignSelf: "center", flex: 1 }}>{item.warranty.id}</span>
           <button onClick={() => onPrintCard(item.warranty!)} style={btn}>Warranty card</button>
-          {item.state === "Active" && <button onClick={() => onClaim(item.warranty!)} style={{ ...btn, color: "#d97706", borderColor: "rgba(245,158,11,0.45)" }}>Start claim</button>}
+          {item.state === "Active" && (openRepairClaim
+            ? <span style={{ fontSize: 11.5, fontWeight: 700, color: "#7c3aed", alignSelf: "center" }}>Already claimed — {openRepairClaim.id} · {openRepairClaim.status}</span>
+            : <button onClick={() => onClaim(item.warranty!)} style={{ ...btn, color: "#d97706", borderColor: "rgba(245,158,11,0.45)" }}>Start claim</button>)}
         </div>
       )}
     </div>

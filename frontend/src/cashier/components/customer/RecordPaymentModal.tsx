@@ -8,9 +8,9 @@ import { useToast } from "@/lib/ui/toast";
 import { sendSms } from "@/lib/sms/client";
 import { renderCreditPaymentRecorded, CREDIT_PAYMENT_PURPOSE } from "@/lib/sms/creditReminders";
 import {
-  useCreditEntries, recordPayment, recordAllocatedPayment, type CreditAccount,
+  useCreditEntries, recordPayment, recordAllocatedPayment, applyMoneyOnAccount, type CreditAccount,
 } from "@/lib/credit/api";
-import { openInvoices, allocatePayment, type OpenInvoice } from "@/lib/credit/allocation";
+import { openInvoices, allocatePayment, moneyOnAccount, type OpenInvoice } from "@/lib/credit/allocation";
 
 /**
  * Record a payment against a credit account — and show, invoice by invoice,
@@ -64,6 +64,26 @@ export default function RecordPaymentModal({ account, onClose, onDone }: {
 
   const open = useMemo(() => openInvoices(entries), [entries]);
   const openTotal = open.reduce((s, o) => s + o.open, 0);
+  // Paid earlier without naming an invoice. It already counts against the
+  // balance; it only clears invoices when the cashier says so.
+  const onAccount = useMemo(() => moneyOnAccount(entries), [entries]);
+  const canApply = onAccount > 0.005 && open.length > 0 && !busy;
+  const applyOnAccount = async () => {
+    if (!canApply) return;
+    const rows = allocatePayment(open, Math.min(onAccount, openTotal))
+      .filter(a => a.applied > 0.005)
+      .flatMap(a => a.invoice.invoiceNo ? [{ invoiceNo: a.invoice.invoiceNo, amount: a.applied }] : []);
+    if (rows.length === 0) return;
+    setBusy(true); setError(null);
+    try {
+      const done = await applyMoneyOnAccount(account.id, rows);
+      toast.success(`Rs. ${done.toLocaleString()} on account put against ${rows.length} invoice${rows.length === 1 ? "" : "s"}, oldest first.`);
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
   const pickedTotal = open.filter(o => picked.has(o.key)).reduce((s, o) => s + o.open, 0);
 
   const amt = Math.max(0, parseFloat(amount) || 0);
@@ -176,6 +196,27 @@ export default function RecordPaymentModal({ account, onClose, onDone }: {
                 <span>Paid {rs(account.totalPaid)}</span>
               </div>
             </div>
+
+            {/* Money paid earlier without naming an invoice. */}
+            {onAccount > 0.005 && (
+              <div style={{ borderRadius: 12, padding: "12px 14px", background: "rgba(96,165,250,0.08)", border: "1px solid rgba(96,165,250,0.35)", display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                  <span style={{ ...cap, color: "#3b82f6" }}>On account</span>
+                  <span style={{ fontSize: 16, fontWeight: 800, color: "#3b82f6" }}>{rs(onAccount)}</span>
+                </div>
+                <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                  Paid earlier without naming an invoice. It already counts against the balance, but no invoice shows it as paid until you put it against them.
+                </div>
+                {open.length > 0 && (
+                  <button onClick={() => void applyOnAccount()} disabled={!canApply} style={{
+                    padding: "8px 12px", borderRadius: 9, border: "1px solid #3b82f6", background: canApply ? "#3b82f6" : "var(--border)",
+                    color: "#fff", fontSize: 12, fontWeight: 700, cursor: canApply ? "pointer" : "not-allowed", fontFamily: ff,
+                  }}>
+                    Put {rs(Math.min(onAccount, openTotal))} against the oldest invoices
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Amount */}
             <div>

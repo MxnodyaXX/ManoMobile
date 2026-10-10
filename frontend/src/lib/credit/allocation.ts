@@ -40,6 +40,13 @@ export interface Allocation {
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
+/**
+ * The same rule as the database (migration 20261011000079): what an invoice
+ * still owes is its charges less whatever names it. Money on the account that
+ * names no invoice is NOT spread across invoices — spreading it again on every
+ * change is what made correcting one invoice turn the next one "Part paid".
+ * It still lowers the account balance; it just belongs to no invoice.
+ */
 export function openInvoices(entries: CreditEntry[]): OpenInvoice[] {
   const groups = new Map<string, OpenInvoice>();
   for (const e of entries) {
@@ -56,26 +63,15 @@ export function openInvoices(entries: CreditEntry[]): OpenInvoice[] {
     groups.set(key, g);
   }
 
-  // Step 1: reductions that name an invoice come off that invoice; whatever
-  // does not fit (or names nothing we hold) joins the unnamed pool.
-  let pool = 0;
+  // Reductions that name an invoice come off that invoice.
   for (const e of entries) {
     if (e.kind === "Charge") continue;
     const g = e.invoiceNo ? groups.get(e.invoiceNo) : undefined;
-    if (!g) { pool += e.amount; continue; }
-    const take = Math.min(g.open, e.amount);
-    g.open = r2(g.open - take);
-    pool += e.amount - take;
+    if (!g) continue;
+    g.open = r2(Math.max(0, g.open - e.amount));
   }
 
-  // Step 2: the pool, oldest invoice first.
   const list = [...groups.values()].sort((a, b) => a.date.localeCompare(b.date) || a.label.localeCompare(b.label));
-  for (const g of list) {
-    if (pool <= 0.005) break;
-    const take = Math.min(g.open, pool);
-    g.open = r2(g.open - take);
-    pool = r2(pool - take);
-  }
 
   return list.filter(g => g.open > 0.005);
 }
@@ -89,3 +85,7 @@ export function allocatePayment(open: OpenInvoice[], amount: number): Allocation
     return { invoice, applied: r2(applied), left: r2(invoice.open - applied) };
   });
 }
+
+/** Money paid onto the account without naming an invoice — still "on account". */
+export const moneyOnAccount = (entries: CreditEntry[]) =>
+  r2(entries.filter(e => e.kind === "Payment" && !e.invoiceNo).reduce((t, e) => t + e.amount, 0));
