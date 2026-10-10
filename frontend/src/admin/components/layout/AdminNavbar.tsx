@@ -12,6 +12,7 @@ const PAGE_SUBS: Record<AdminPage, string> = {
   "Dashboard":         "System overview and key metrics",
   "Analytics":         "Every figure the shop can produce, by period",
   "Business Insights": "Revenue, parts cost, technician and customer analytics",
+  "Repair Cost Backfill": "Estimated costs for repairs finished before costs were recorded",
   "Staff Management":"Manage staff accounts and roles",
   "Permissions":     "Role-based access control matrix",
   "Suppliers":       "Supplier database and contacts",

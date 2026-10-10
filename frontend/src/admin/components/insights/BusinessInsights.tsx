@@ -105,7 +105,7 @@ type KpiKind = "revenue" | "collected" | "outstanding" | "partsCost" | "grossPro
 function KpiDetailModal({ kind, insights, onClose }: {
   kind: KpiKind;
   insights: {
-    revenue: number; collected: number; outstanding: number; partsCost: number; grossProfit: number;
+    revenue: number; collected: number; outstanding: number; partsCost: number; agentCost: number; labourCost: number; grossProfit: number;
     realizedJobs: RepairJob[]; outstandingJobs: RepairJob[];
     partsCostRows: { jobId: string; jobDevice: string; partName: string; partSku: string; quantity: number; unitCost: number; lineCost: number }[];
   };
@@ -141,7 +141,9 @@ function KpiDetailModal({ kind, insights, onClose }: {
             <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "14px 16px", background: "var(--bg-secondary)", borderRadius: 10, border: "1px solid var(--border)" }}>
               {[
                 ["Revenue", insights.revenue, "var(--text-primary)"],
-                ["− Parts Cost", -insights.partsCost, PARTS],
+                ["− Parts Cost (by tag)", -insights.partsCost, PARTS],
+                ["− Agent repair cost", -insights.agentCost, PARTS],
+                ["− Technician charges", -insights.labourCost, PARTS],
               ].map(([label, val, c]) => (
                 <div key={label as string} style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
                   <span style={{ color: "var(--text-secondary)", fontFamily: ff }}>{label as string}</span>
@@ -294,7 +296,7 @@ const PERIOD_LABEL: Record<FigurePeriod, string> = {
 };
 
 export default function BusinessInsights() {
-  const { jobs } = useRepair();
+  const { jobs, agentCosts } = useRepair();
   const { parts, partRequests } = useParts();
   const [period, setPeriod] = useState<FigurePeriod>("Monthly");
   const [openKpi, setOpenKpi] = useState<KpiKind | null>(null);
@@ -331,17 +333,22 @@ export default function BusinessInsights() {
       })
       .sort((a, b) => b.lineCost - a.lineCost);
     const partsCost = partsCostRows.reduce((s, r) => s + r.lineCost, 0);
-    const grossProfit = revenue - partsCost;
+    // What else a repair costs besides parts: the agent it was sent to, and the
+    // technician charge recorded when it was finished.
+    const agentCost = realized.reduce((s, j) => s + (agentCosts[j.id] ?? 0), 0);
+    const labourCost = realized.reduce((s, j) => s + (j.labourCost ?? 0), 0);
+    const grossProfit = revenue - partsCost - agentCost - labourCost;
 
     // Technician performance — all-time per technician (not period-filtered,
     // so a slow week doesn't erase someone's whole track record).
-    const byTech = new Map<string, { jobs: number; revenue: number; partsCost: number }>();
+    const byTech = new Map<string, { jobs: number; revenue: number; partsCost: number; otherCost: number }>();
     const delivered = jobs.filter(j => j.status === "Delivered");
     for (const j of delivered) {
       const name = (j.technician || "").trim() || "Unassigned";
-      const row = byTech.get(name) ?? { jobs: 0, revenue: 0, partsCost: 0 };
+      const row = byTech.get(name) ?? { jobs: 0, revenue: 0, partsCost: 0, otherCost: 0 };
       row.jobs += 1;
       row.revenue += j.estimatedCost;
+      row.otherCost += (agentCosts[j.id] ?? 0) + (j.labourCost ?? 0);
       byTech.set(name, row);
     }
     for (const r of fulfilledRequests) {
@@ -352,7 +359,7 @@ export default function BusinessInsights() {
       if (row) row.partsCost += costOf(r);
     }
     const technicians = [...byTech.entries()]
-      .map(([name, v]) => ({ name, ...v, margin: v.revenue - v.partsCost }))
+      .map(([name, v]) => ({ name, ...v, margin: v.revenue - v.partsCost - v.otherCost }))
       .sort((a, b) => b.revenue - a.revenue);
 
     // Top parts by cost — all-time, across every fulfilled request.
@@ -382,11 +389,11 @@ export default function BusinessInsights() {
     const uniqueCustomers = byCustomer.size;
 
     return {
-      revenue, collected, outstanding, partsCost, grossProfit, totalJobs: realized.length,
+      revenue, collected, outstanding, partsCost, agentCost, labourCost, grossProfit, totalJobs: realized.length,
       technicians, topParts, lowStock, inventoryValue, topCustomers, uniqueCustomers,
       realizedJobs: realized, outstandingJobs, partsCostRows,
     };
-  }, [jobs, parts, partRequests, period]);
+  }, [jobs, agentCosts, parts, partRequests, period]);
 
   const trend = useMemo(() => last6Months(jobs), [jobs]);
   const trendMax = Math.max(1, ...trend.map(t => t.revenue));
@@ -408,7 +415,7 @@ export default function BusinessInsights() {
         <KPI icon={PiggyBank}  color={REVENUE} label="Collected" value={money(insights.collected)} sub={`Advance + settlement, ${PERIOD_LABEL[period]}`} onClick={() => setOpenKpi("collected")} />
         <KPI icon={TrendingUp} color={OUTSTAND} label="Outstanding" value={money(insights.outstanding)} sub="Owed across every job, delivered or not (all time)" onClick={() => setOpenKpi("outstanding")} />
         <KPI icon={Package}    color={PARTS}   label="Parts Cost" value={money(insights.partsCost)} sub={`Approved/issued requests, ${PERIOD_LABEL[period]}`} onClick={() => setOpenKpi("partsCost")} />
-        <KPI icon={Award}      color={REVENUE} label="Gross Profit" value={money(insights.grossProfit)} sub="Revenue minus parts cost" onClick={() => setOpenKpi("grossProfit")} />
+        <KPI icon={Award}      color={REVENUE} label="Gross Profit" value={money(insights.grossProfit)} sub="Revenue − parts − agent − technician" onClick={() => setOpenKpi("grossProfit")} />
         <KPI icon={Wrench}     color={PEOPLE}  label="Jobs Delivered" value={String(insights.totalJobs)} sub={PERIOD_LABEL[period]} onClick={() => setOpenKpi("jobsDelivered")} />
       </div>
 

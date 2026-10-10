@@ -1,11 +1,13 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Edit2, Trash2, Search, AlertCircle, Tag, X, Grid3x3, EyeOff, Save } from "lucide-react";
+import { Plus, Edit2, Trash2, Search, AlertCircle, Tag, X, Grid3x3, EyeOff, Save, ChevronRight, ChevronDown, Layers, Printer } from "lucide-react";
 import { useParts, PART_CATEGORIES, type SparePart, type PartCategory } from "@/cashier/contexts/PartsContext";
 import { useToast } from "@/lib/ui/toast";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
+import { printLabelsNode } from "@/cashier/utils/printLabel";
+import { useInventory } from "@/cashier/contexts/InventoryContext";
 import { inputStyle, labelStyle, thStyle, tdStyle, btnAccent, DeleteConfirm } from "@/admin/components/shared/adminUi";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { useMyPermissions } from "@/lib/settings/staffRules";
@@ -301,12 +303,146 @@ function RackLayoutModal({ layout, occupied, onSaved, onClose }: {
   );
 }
 
+// ─── Part name picker ─────────────────────────────────────────────────────────
+
+/**
+ * A text box that is also a list of the parts already in the catalogue.
+ *
+ * Typing filters the list (by name or SKU). Picking a part makes this a new
+ * type of it; typing a name that is not there makes a new part. Built by hand
+ * rather than as a <datalist>, which every browser draws differently and none
+ * of them can show a part's types, stock or category in.
+ */
+function PartNameCombo({ value, onChange, groups, invalid }: {
+  value: string;
+  onChange: (name: string) => void;
+  groups: SparePart[][];
+  invalid?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const q = value.trim().toUpperCase();
+  const shown = q
+    ? groups.filter(g => g[0].name.toUpperCase().includes(q) || g.some(p => p.sku.toUpperCase().includes(q)))
+    : groups;
+  const exact = groups.some(g => g[0].name.trim().toUpperCase() === q);
+  const list = shown.slice(0, 50);
+  const active = Math.min(hi, Math.max(0, list.length - 1));
+
+  const choose = (name: string) => { onChange(name); setOpen(false); };
+
+  const mark = (text: string) => {
+    if (!q) return text;
+    const i = text.toUpperCase().indexOf(q);
+    if (i < 0) return text;
+    return <>{text.slice(0, i)}<span style={{ background: "rgba(251,191,36,0.3)", borderRadius: 3 }}>{text.slice(i, i + q.length)}</span>{text.slice(i + q.length)}</>;
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <div style={{ position: "relative" }}>
+        <Search size={13} style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={e => { onChange(e.target.value); setOpen(true); setHi(0); }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          onKeyDown={e => {
+            if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHi(h => Math.min(h + 1, list.length - 1)); }
+            else if (e.key === "ArrowUp") { e.preventDefault(); setHi(h => Math.max(h - 1, 0)); }
+            else if (e.key === "Enter" && open && list[active]) { e.preventDefault(); choose(list[active][0].name); }
+            else if (e.key === "Escape") setOpen(false);
+          }}
+          placeholder="Search parts, or type a new name"
+          autoComplete="off"
+          style={{ ...inputStyle, paddingLeft: 32, paddingRight: 36, borderColor: invalid ? "#dc2626" : open ? "var(--accent)" : "var(--border)" }}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          onMouseDown={e => { e.preventDefault(); setOpen(o => !o); inputRef.current?.focus(); }}
+          style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", width: 26, height: 26, borderRadius: 6, border: "none", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+        >
+          <ChevronDown size={15} style={{ transition: "transform 0.15s", transform: open ? "rotate(180deg)" : undefined }} />
+        </button>
+      </div>
+
+      {open && (list.length > 0 || (q && !exact)) && (
+        <div
+          onMouseDown={e => e.preventDefault()}
+          style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 20, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, boxShadow: "0 16px 40px rgba(0,0,0,0.28)", overflow: "hidden" }}
+        >
+          {list.length > 0 && (
+            <div style={{ padding: "8px 12px 4px", fontSize: 9.5, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)" }}>
+              Existing parts · pick one to add another type
+            </div>
+          )}
+          <div style={{ maxHeight: 264, overflowY: "auto", padding: "2px 6px 6px" }}>
+            {list.map((g, i) => {
+              const head = g[0];
+              const stock = g.reduce((n, p) => n + p.stock, 0);
+              const on = i === active;
+              return (
+                <div
+                  key={head.id}
+                  onMouseEnter={() => setHi(i)}
+                  onClick={() => choose(head.name)}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8, cursor: "pointer", background: on ? "var(--accent-dim, rgba(96,165,250,0.12))" : "transparent" }}
+                >
+                  <div style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-secondary)", border: "1px solid var(--border)", color: g.length > 1 ? "var(--accent)" : "var(--text-muted)" }}>
+                    <Layers size={14} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mark(head.name)}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
+                      {g.map(p => (
+                        <span key={p.id} style={{ fontFamily: "monospace", fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 5, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-secondary)" }}>{mark(p.sku)}</span>
+                      ))}
+                      <span style={{ fontSize: 10.5, color: "var(--text-muted)", marginLeft: 2 }}>{head.category}</span>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: stock === 0 ? "#dc2626" : "var(--text-primary)" }}>{stock}</div>
+                    <div style={{ fontSize: 9.5, color: "var(--text-muted)" }}>in stock</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {q && !exact && (
+            <div
+              onClick={() => setOpen(false)}
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)", cursor: "pointer", fontSize: 12, color: "var(--text-secondary)" }}
+            >
+              <Plus size={13} color="var(--accent)" />
+              New part <strong style={{ color: "var(--text-primary)" }}>&ldquo;{value.trim()}&rdquo;</strong>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Repair Part Modal ────────────────────────────────────────────────────────
 
-function PartModal({ part, onSave, onClose }: { part: SparePart | null; onSave: (p: SparePart) => void; onClose: () => void }) {
+function PartModal({ part, preset, onSave, onClose }: {
+  part: SparePart | null;
+  /** A new type of an existing part: same name, category and devices, its own
+   *  SKU, stock and cost. */
+  preset?: SparePart | null;
+  onSave: (p: SparePart) => void;
+  onClose: () => void;
+}) {
   const blank: SparePart = { id: "", sku: "", name: "", category: "Screen", compatibleWith: [], stock: 0, reorderLevel: 5, costPrice: 0, location: "" };
-  const [form, setForm] = useState<SparePart>(part ?? blank);
-  const [compatText, setCompatText] = useState((part?.compatibleWith ?? []).join(", "));
+  const [form, setForm] = useState<SparePart>(part ?? (preset
+    ? { ...blank, name: preset.name, category: preset.category, compatibleWith: preset.compatibleWith, reorderLevel: preset.reorderLevel, location: preset.location }
+    : blank));
+  const [compatText, setCompatText] = useState((part?.compatibleWith ?? preset?.compatibleWith ?? []).join(", "));
 
   /**
    * How full each bay is, for the rack below.
@@ -330,6 +466,53 @@ function PartModal({ part, onSave, onClose }: { part: SparePart | null; onSave: 
 
   const set = <K extends keyof SparePart>(k: K, v: SparePart[K]) => setForm(f => ({ ...f, [k]: v }));
 
+  /**
+   * The names already in the catalogue, for the Part Name dropdown. Picking
+   * one makes this a new type of that part, listed under it, so it starts
+   * from that part's category, devices and shelf rather than a blank form.
+   */
+  const partNames = useMemo(() => {
+    const m = new Map<string, SparePart[]>();
+    for (const x of parts) {
+      if (part && x.id === part.id) continue;
+      const k = x.name.trim().toUpperCase();
+      const l = m.get(k);
+      if (l) l.push(x); else m.set(k, [x]);
+    }
+    return m;
+  }, [parts, part]);
+  const sameName = partNames.get(form.name.trim().toUpperCase()) ?? [];
+
+  const pickName = (name: string) => {
+    set("name", name);
+    setErrors(p => ({ ...p, name: undefined }));
+    const match = partNames.get(name.trim().toUpperCase());
+    // Only for a new part, and only into what has not been filled in yet.
+    // Editing an existing part, or overwriting what was just typed, would be
+    // a surprise.
+    if (part || !match) return;
+    const src = match[0];
+    setForm(f => ({
+      ...f,
+      name,
+      category: src.category,
+      reorderLevel: f.reorderLevel === blank.reorderLevel ? src.reorderLevel : f.reorderLevel,
+      location: f.location || src.location,
+    }));
+    if (!compatText.trim()) setCompatText(src.compatibleWith.join(", "));
+  };
+
+  // The shop's supplier list (Inventory → Suppliers), the same one devices and
+  // accessories pick from. A supplier since switched off still shows on a part
+  // that already names it, so editing that part does not blank it.
+  const { suppliers } = useInventory();
+  const supplierNames = useMemo(() => {
+    const names = suppliers.filter(x => x.active).map(x => x.name);
+    const cur = (form.supplier ?? "").trim();
+    if (cur && !names.some(n => n.toUpperCase() === cur.toUpperCase())) names.unshift(cur);
+    return names;
+  }, [suppliers, form.supplier]);
+
   function validate() {
     const e: typeof errors = {};
     if (!form.name.trim()) e.name = "Name is required";
@@ -349,16 +532,31 @@ function PartModal({ part, onSave, onClose }: { part: SparePart | null; onSave: 
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
         <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 1 }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{part ? "Edit Part" : "Add Repair Part"}</div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>Spare-part stock consumed on repairs — separate from retail accessories</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{part ? "Edit Part" : preset ? `Add a type of ${preset.name}` : "Add Repair Part"}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+              {preset && !part
+                ? "Same name, so it is listed under the same part. Give it its own SKU — the quality or supplier, e.g. HD+ or CROWN."
+                : "Spare-part stock consumed on repairs — separate from retail accessories. Parts with the same name are grouped as types of one part."}
+            </div>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><X size={18} /></button>
         </div>
         <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
           <div>
             <label style={labelStyle}>Part Name</label>
-            <input type="text" value={form.name} onChange={e => { set("name", e.target.value); setErrors(p => ({ ...p, name: undefined })); }} placeholder="e.g. iPhone 13 OLED Screen" style={{ ...inputStyle, borderColor: errors.name ? "#dc2626" : "var(--border)" }} />
+            {/* Type a new name, or open the list and pick an existing part to
+                add another type of it (a different supplier or quality). */}
+            <PartNameCombo value={form.name} onChange={pickName} groups={[...partNames.values()]} invalid={!!errors.name} />
             {errors.name && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{errors.name}</div>}
+            {!errors.name && sameName.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 11, color: "var(--text-muted)", marginTop: 5 }}>
+                <Layers size={11} />
+                {part ? "Grouped with" : "Will be listed as another type of this part, beside"}
+                {sameName.map(x => (
+                  <span key={x.id} style={{ fontFamily: "monospace", fontSize: 10.5, padding: "1px 6px", borderRadius: 5, border: "1px solid var(--border)", color: "var(--text-secondary)" }}>{x.sku}</span>
+                ))}
+              </div>
+            )}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <div>
@@ -377,6 +575,16 @@ function PartModal({ part, onSave, onClose }: { part: SparePart | null; onSave: 
             <label style={labelStyle}>Compatible Devices</label>
             <input type="text" value={compatText} onChange={e => setCompatText(e.target.value)} placeholder="e.g. iPhone 13, iPhone 13 Pro" style={inputStyle} />
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Comma-separated — shown to technicians when they search for a part</div>
+          </div>
+          <div>
+            <label style={labelStyle}>Supplier</label>
+            <select value={form.supplier ?? ""} onChange={e => set("supplier", e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+              <option value="">— Not recorded —</option>
+              {supplierNames.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            {supplierNames.length === 0 && (
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>No suppliers yet — add them where device and accessory suppliers are kept.</div>
+            )}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
             <div>
@@ -418,6 +626,159 @@ function PartModal({ part, onSave, onClose }: { part: SparePart | null; onSave: 
       </div>
     </div>,
     document.body
+  );
+}
+
+// ─── Bulk part labels ─────────────────────────────────────────────────────────
+
+/**
+ * Labels for many parts, or many of one part, in a single print job.
+ *
+ * A delivery of twenty displays wants twenty bin labels, and a new rack wants
+ * one for every drawer. Same mechanism as the device bulk print: each chosen
+ * part's label is rendered off-screen once, silently, its markup collected,
+ * repeated for the number of copies asked for, and the whole lot sent to the
+ * printer together, one label per page. One at a time rather than all at
+ * once, because simultaneous template lookups and auto-fit measurements step
+ * on each other.
+ */
+function BulkPartLabelsModal({ parts, onClose }: { parts: SparePart[]; onClose: () => void }) {
+  const toast = useToast();
+  const [copies, setCopies] = useState<Record<string, number>>(
+    () => Object.fromEntries(parts.map(p => [p.id, 1])),
+  );
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(parts.map(p => p.id)));
+  const [queue, setQueue] = useState<SparePart[] | null>(null);
+  const collected = useRef<{ html: string; w: number; h: number; n: number }[]>([]);
+  const [done, setDone] = useState(0);
+
+  const chosen = parts.filter(p => selected.has(p.id) && (copies[p.id] ?? 0) > 0);
+  const totalLabels = chosen.reduce((n, p) => n + (copies[p.id] ?? 0), 0);
+  const printing = queue !== null;
+  const current = queue && queue.length > 0 ? queue[0] : null;
+
+  const toggle = (id: string) => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const setAll = (f: (p: SparePart) => number) =>
+    setCopies(Object.fromEntries(parts.map(p => [p.id, f(p)])));
+
+  const start = () => {
+    if (chosen.length === 0) return;
+    collected.current = [];
+    setDone(0);
+    setQueue(chosen);
+  };
+
+  // The label on screen is always queue[0] — it is keyed by that part — so the
+  // queue this render sees is the one that label belongs to.
+  const handleReady = (html: string, w: number, h: number) => {
+    const q = queue ?? [];
+    if (q[0]) collected.current.push({ html, w, h, n: copies[q[0].id] ?? 1 });
+    setDone(d => d + 1);
+    const rest = q.slice(1);
+    if (rest.length > 0) { setQueue(rest); return; }
+
+    const items = collected.current;
+    if (items.length > 0) {
+      const htmls = items.flatMap(i => Array.from({ length: i.n }, () => i.html));
+      printLabelsNode(htmls, items[0].w, items[0].h);
+      toast.success(`Printing ${htmls.length} label${htmls.length === 1 ? "" : "s"}`);
+    }
+    setQueue(null);
+    onClose();
+  };
+
+  const chip: React.CSSProperties = { padding: "6px 12px", borderRadius: 8, fontSize: 11.5, fontWeight: 600, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" };
+
+  return (
+    <>
+      {createPortal(
+        <div
+          onClick={e => { if (e.target === e.currentTarget && !printing) onClose(); }}
+          style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+        >
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, width: "min(560px, calc(100vw - 24px))", maxHeight: "calc(100vh - 40px)", display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
+              <div>
+                <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>Bulk Print Part Labels</p>
+                <p style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>Tick the parts and set how many labels each one needs</p>
+              </div>
+              {!printing && (
+                <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={14} /></button>
+              )}
+            </div>
+
+            {printing ? (
+              <div style={{ padding: 28, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+                <Printer size={22} color="var(--accent)" />
+                <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Preparing part {Math.min(done + 1, chosen.length)} of {chosen.length}…</p>
+                <p style={{ fontSize: 11.5, color: "var(--text-muted)", textAlign: "center" }}>All {totalLabels} labels print together as one job.</p>
+              </div>
+            ) : (
+              <>
+                <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button style={chip} onClick={() => setSelected(new Set(parts.map(p => p.id)))}>All ({parts.length})</button>
+                    <button style={chip} onClick={() => setSelected(new Set())}>None</button>
+                    <button style={chip} onClick={() => setAll(() => 1)} title="One label per part, e.g. for the bins">1 each</button>
+                    <button style={chip} onClick={() => setAll(p => Math.max(1, p.stock))} title="One label for every piece in stock">One per piece in stock</button>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 340, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 10, padding: 6 }}>
+                    {parts.map(p => {
+                      const on = selected.has(p.id);
+                      return (
+                        <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 8px", borderRadius: 7, background: on ? "var(--accent-dim)" : "transparent" }}>
+                          <input type="checkbox" checked={on} onChange={() => toggle(p.id)} style={{ cursor: "pointer" }} />
+                          <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => toggle(p.id)}>
+                            <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                              <span style={{ fontFamily: "monospace" }}>{p.sku}</span>{p.supplier ? ` · ${p.supplier}` : ""} · {p.stock} in stock
+                            </div>
+                          </div>
+                          <input
+                            type="number" min={0} max={500}
+                            value={copies[p.id] ?? 0}
+                            disabled={!on}
+                            onChange={e => setCopies(c => ({ ...c, [p.id]: Math.min(500, Math.max(0, Math.round(Number(e.target.value) || 0))) }))}
+                            title="Labels to print"
+                            style={{ ...inputStyle, width: 64, padding: "6px 8px", textAlign: "center", opacity: on ? 1 : 0.4 }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "12px 18px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
+                  <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>{chosen.length} part{chosen.length === 1 ? "" : "s"} · {totalLabels} label{totalLabels === 1 ? "" : "s"}</span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={onClose} style={{ padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer" }}>Cancel</button>
+                    <button onClick={start} disabled={totalLabels === 0} style={{ ...btnAccent, padding: "8px 18px", opacity: totalLabels === 0 ? 0.45 : 1, cursor: totalLabels === 0 ? "not-allowed" : "pointer" }}>
+                      <Printer size={13} /> Print {totalLabels || ""} Label{totalLabels === 1 ? "" : "s"}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )}
+      {current && (
+        <BarcodeLabelModal
+          key={current.id}
+          variant="part"
+          code={current.sku}
+          title={current.name}
+          subtitle={current.category}
+          silent
+          onReady={handleReady}
+          onClose={() => {}}
+        />
+      )}
+    </>
   );
 }
 
@@ -465,6 +826,126 @@ function PartsManager() {
     return true;
   });
 
+  /**
+   * One part, several types of it.
+   *
+   * "M02 Display" from two suppliers is two rows in the catalogue — different
+   * SKU, different cost, different quality (HD+, CROWN), counted separately —
+   * but it is one part to whoever is looking for it. So rows that share a name
+   * are drawn as a single part with its types underneath. The name is the
+   * grouping, so no type is ever orphaned by a missing link.
+   */
+  const groups = useMemo(() => {
+    const m = new Map<string, SparePart[]>();
+    for (const p of filtered) {
+      const key = p.name.trim().toUpperCase();
+      const list = m.get(key);
+      if (list) list.push(p); else m.set(key, [p]);
+    }
+    return [...m.entries()].map(([key, items]) => ({
+      key,
+      items: items.slice().sort((a, b) => a.sku.localeCompare(b.sku)),
+    }));
+  }, [filtered]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleGroup = (key: string) =>
+    setCollapsed(c => {
+      const n = new Set(c);
+      if (n.has(key)) n.delete(key); else n.add(key);
+      return n;
+    });
+  const [addTypeOf, setAddTypeOf] = useState<SparePart | null>(null);
+  const [bulkParts, setBulkParts] = useState<SparePart[] | null>(null);
+
+  const stockCell = (stock: number, reorder: number) => {
+    const low = stock > 0 && stock <= reorder;
+    return (
+      <>
+        <span style={{ fontWeight: 700, color: stock === 0 ? "#dc2626" : low ? "#b45309" : "#16a34a" }}>{stock}</span>
+        {low && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#fef3c7", color: "#b45309" }}>LOW</span>}
+        {stock === 0 && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#fee2e2", color: "#dc2626" }}>OUT</span>}
+      </>
+    );
+  };
+
+  const iconBtn: React.CSSProperties = { background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 };
+
+  const partRow = (p: SparePart, asType: boolean) => (
+    <tr key={p.id} style={asType ? { background: "var(--bg-secondary)" } : undefined}>
+      <td style={tdStyle}>
+        {asType ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, paddingLeft: 22 }}>
+            <span style={{ width: 8, height: 8, borderLeft: "1.5px solid var(--border)", borderBottom: "1.5px solid var(--border)", marginTop: -6 }} />
+            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.03em", padding: "3px 8px", borderRadius: 6, background: "var(--accent-dim, rgba(96,165,250,0.12))", color: "var(--accent)", border: "1px solid var(--border)" }}>{p.sku}</span>
+          </span>
+        ) : (
+          <span style={{ fontWeight: 600 }}>{p.name}</span>
+        )}
+      </td>
+      <td style={tdStyle}>
+        <div style={{ fontFamily: "monospace", fontSize: 12 }}>{p.sku}</div>
+        {p.supplier && <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }}>{p.supplier}</div>}
+      </td>
+      <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-secondary)" }}>{p.category}</td>
+      <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-secondary)", maxWidth: 220 }}>{p.compatibleWith.length ? p.compatibleWith.join(", ") : "—"}</td>
+      <td style={tdStyle}>{stockCell(p.stock, p.reorderLevel)}</td>
+      <td style={tdStyle}>Rs. {p.costPrice.toLocaleString()}</td>
+      <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: 12, color: "var(--text-secondary)" }}>{p.location || "—"}</td>
+      <td style={tdStyle}>
+        <div style={{ display: "flex", gap: 4 }}>
+          {!asType && <button onClick={() => setAddTypeOf(p)} title="Add another type of this part (a different supplier or quality)" style={iconBtn}><Layers size={14} /></button>}
+          <button onClick={() => setLabelPart(p)} title="Print part label" style={iconBtn}><Tag size={14} /></button>
+          <button onClick={() => setModal(p)} title="Edit" style={iconBtn}><Edit2 size={14} /></button>
+          <button onClick={() => setDeleteTarget(p)} title="Delete" style={{ ...iconBtn, color: "#dc2626" }}><Trash2 size={14} /></button>
+        </div>
+      </td>
+    </tr>
+  );
+
+  const groupRows = (g: { key: string; items: SparePart[] }) => {
+    const head = g.items[0];
+    const open = !collapsed.has(g.key);
+    const total = g.items.reduce((n, p) => n + p.stock, 0);
+    const reorder = Math.max(...g.items.map(p => p.reorderLevel));
+    const costs = g.items.map(p => p.costPrice);
+    const lo = Math.min(...costs), hi = Math.max(...costs);
+    const cats = [...new Set(g.items.map(p => p.category))];
+    const compat = [...new Set(g.items.flatMap(p => p.compatibleWith))];
+    const locs = [...new Set(g.items.map(p => p.location).filter(Boolean))];
+    return (
+      <Fragment key={g.key}>
+        <tr onClick={() => toggleGroup(g.key)} style={{ cursor: "pointer" }}>
+          <td style={tdStyle}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              {open ? <ChevronDown size={14} color="var(--text-muted)" /> : <ChevronRight size={14} color="var(--text-muted)" />}
+              <span style={{ fontWeight: 700 }}>{head.name}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}>{g.items.length} types</span>
+            </span>
+          </td>
+          <td style={tdStyle}>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {g.items.map(p => (
+                <span key={p.id} style={{ fontFamily: "monospace", fontSize: 11, padding: "2px 6px", borderRadius: 5, border: "1px solid var(--border)", color: "var(--text-secondary)" }}>{p.sku}</span>
+              ))}
+            </div>
+          </td>
+          <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-secondary)" }}>{cats.join(", ")}</td>
+          <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-secondary)", maxWidth: 220 }}>{compat.length ? compat.join(", ") : "—"}</td>
+          <td style={tdStyle} title="All types together">{stockCell(total, reorder)}</td>
+          <td style={tdStyle}>{lo === hi ? `Rs. ${lo.toLocaleString()}` : `Rs. ${lo.toLocaleString()} – ${hi.toLocaleString()}`}</td>
+          <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: 12, color: "var(--text-secondary)" }}>{locs.length ? locs.join(", ") : "—"}</td>
+          <td style={tdStyle}>
+            <div style={{ display: "flex", gap: 4 }}>
+              <button onClick={e => { e.stopPropagation(); setAddTypeOf(head); }} title="Add another type of this part" style={iconBtn}><Layers size={14} /></button>
+              <button onClick={e => { e.stopPropagation(); setBulkParts(g.items); }} title="Print labels for these types" style={iconBtn}><Printer size={14} /></button>
+            </div>
+          </td>
+        </tr>
+        {open && g.items.map(p => partRow(p, true))}
+      </Fragment>
+    );
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -485,6 +966,14 @@ function PartsManager() {
             <Grid3x3 size={13} /> Rack Layout
           </button>
         )}
+        <button
+          onClick={() => filtered.length > 0 && setBulkParts(filtered)}
+          disabled={filtered.length === 0}
+          title="Print barcode labels for the parts shown — tick which ones and how many of each"
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 15px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: filtered.length ? "pointer" : "not-allowed", opacity: filtered.length ? 1 : 0.5, fontSize: 12.5, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}
+        >
+          <Printer size={13} /> Print Labels
+        </button>
         <button onClick={() => setModal("new")} style={btnAccent}><Plus size={13} /> Add Part</button>
       </div>
 
@@ -519,35 +1008,11 @@ function PartsManager() {
               <tr><td colSpan={8} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>Loading parts…</td></tr>
             ) : filtered.length === 0 ? (
               <tr><td colSpan={8} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>{search || catFilter !== "All" ? "No parts match" : "No repair parts added yet — click “Add Part” to start the catalog"}</td></tr>
-            ) : filtered.map(p => {
-              const low = p.stock > 0 && p.stock <= p.reorderLevel;
-              return (
-                <tr key={p.id}>
-                  <td style={tdStyle}><span style={{ fontWeight: 600 }}>{p.name}</span></td>
-                  <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: 12 }}>{p.sku}</td>
-                  <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-secondary)" }}>{p.category}</td>
-                  <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-secondary)", maxWidth: 220 }}>{p.compatibleWith.length ? p.compatibleWith.join(", ") : "—"}</td>
-                  <td style={tdStyle}>
-                    <span style={{ fontWeight: 700, color: p.stock === 0 ? "#dc2626" : low ? "#b45309" : "#16a34a" }}>{p.stock}</span>
-                    {low && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#fef3c7", color: "#b45309" }}>LOW</span>}
-                    {p.stock === 0 && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#fee2e2", color: "#dc2626" }}>OUT</span>}
-                  </td>
-                  <td style={tdStyle}>Rs. {p.costPrice.toLocaleString()}</td>
-                  <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: 12, color: "var(--text-secondary)" }}>{p.location || "—"}</td>
-                  <td style={tdStyle}>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      <button onClick={() => setLabelPart(p)} title="Print part label" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><Tag size={14} /></button>
-                      <button onClick={() => setModal(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><Edit2 size={14} /></button>
-                      <button onClick={() => setDeleteTarget(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}><Trash2 size={14} /></button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
+            ) : groups.map(g => g.items.length === 1 ? partRow(g.items[0], false) : groupRows(g))}
           </tbody>
         </table>
         </div>
-        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{filtered.length} of {parts.length} parts</div>
+        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{groups.length} part{groups.length === 1 ? "" : "s"} · {filtered.length} of {parts.length} stock lines</div>
       </div>
       {modal !== null && (
         <PartModal
@@ -564,6 +1029,23 @@ function PartsManager() {
             }
           }}
           onClose={() => setModal(null)}
+        />
+      )}
+      {bulkParts && <BulkPartLabelsModal parts={bulkParts} onClose={() => setBulkParts(null)} />}
+      {addTypeOf && (
+        <PartModal
+          part={null}
+          preset={addTypeOf}
+          onSave={async p => {
+            try {
+              await savePart(p);
+              toast.dialog("success", "Type added", `${p.name} (${p.sku})`);
+              setAddTypeOf(null);
+            } catch (e) {
+              toast.dialog("error", "Could not save part", e instanceof Error ? e.message : String(e));
+            }
+          }}
+          onClose={() => setAddTypeOf(null)}
         />
       )}
       {deleteTarget && (

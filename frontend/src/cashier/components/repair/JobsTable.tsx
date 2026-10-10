@@ -34,6 +34,7 @@ import { fetchOpenTransfers, transferCost, transferOutcome, AGENT_OUTCOMES, type
 import AgentsOutPanel from "@/lib/repair/AgentsOutPanel";
 import { notifyJobEvent } from "@/lib/sms/notify";
 import { useToast } from "@/lib/ui/toast";
+import { DeviceLock } from "@/lib/repair/DeviceLock";
 import { useTableSort, SortHeader, type SortValue } from "@/lib/ui/useTableSort";
 import { useJobCashReturns, refundRepairAdvance } from "@/lib/accounts/cashReturns";
 import { useJobSlot } from "@/lib/repair/useJobSlot";
@@ -1105,12 +1106,15 @@ function PickupModal({ job, onClose, onConfirm }: {
 
 // ─── Job Details Modal ────────────────────────────────────────────────────────
 
-function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, onPickup, onPrintSlip, mayCancel = true, mayCancelAny = false, mayEdit = false, onSave }: {
+export function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, onPickup, onPrintSlip, mayCancel = true, mayCancelAny = false, mayEdit = false, onSave, readOnly = false }: {
   job: RepairJob;
   onClose: () => void;
-  onFinishJob: () => void;
-  onIssueJob: () => void;
-  onCancelJob: () => void;
+  onFinishJob?: () => void;
+  onIssueJob?: () => void;
+  onCancelJob?: () => void;
+  /** The same window, for looking only — the technician bench opens it this
+   *  way. No print, issue, finish, pickup, cancel, refund or Ctrl+E. */
+  readOnly?: boolean;
   /** False when this cashier is not permitted to cancel. Separate from the
    *  component's own canCancel, which is about the job's status: one asks
    *  whether this job CAN be cancelled, the other whether this person MAY. */
@@ -1122,8 +1126,8 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
    *  "Correct job details" permission. Ctrl+E does nothing without it. */
   mayEdit?: boolean;
   onSave?: (patch: Partial<RepairJob>) => Promise<void> | void;
-  onPickup: () => void;
-  onPrintSlip: () => void;
+  onPickup?: () => void;
+  onPrintSlip?: () => void;
 }) {
   const isMobile = useIsMobile();
   const { dealers } = useRepair();
@@ -1467,7 +1471,7 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
                 it, issuing it, cancelling it — and none of them would carry
                 the draft with them, so offering them mid-edit is offering a
                 way to lose the changes by accident. */}
-            {!editing && (<>
+            {!editing && !readOnly && (<>
             <button onClick={onPrintSlip} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 7, fontSize: 11.5, fontWeight: 600, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
               <FileText size={11} strokeWidth={2} />{job.status === "Delivered" ? "Issue Invoice" : "Intake Slip"}
             </button>
@@ -1525,7 +1529,15 @@ function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCancelJob, o
         {/* The money that came in and, where it applies, the money that went
             back. Directly under the header because on a returned device it is
             the first thing anybody opening the job needs to know. */}
-        <AdvanceRefundPanel job={job} mayRefund={mayCancelAny} />
+        <AdvanceRefundPanel job={job} mayRefund={mayCancelAny && !readOnly} />
+
+        {/* On the bench the first question is how to get into the phone, so
+            the screen lock sits at the top rather than in the Device card. */}
+        {readOnly && (job.passcodeType || job.devicePasscode) && (
+          <div style={{ padding: "12px 18px 0", flexShrink: 0 }}>
+            <DeviceLock type={job.passcodeType} code={job.devicePasscode} />
+          </div>
+        )}
 
         {/* How to unlock it, and what it means once unlocked. Shown only to
             somebody who can actually do it — telling everyone else about a
@@ -2531,8 +2543,18 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
 
   const filteredJobs = useMemo(() => allJobs.filter(j => {
     const q = search.toLowerCase();
+    // The customer's number, compared as digits only, so "077 123 4567",
+    // "0771234567" and "+94 77 123 4567" all find the same job. Matched from
+    // the end (the last 9 digits) once enough is typed to mean a phone, so the
+    // leading 0 or +94 never gets in the way.
+    const qDigits = search.replace(/\D/g, "");
+    const phoneDigits = (j.phone ?? "").replace(/\D/g, "");
+    const matchPhone = qDigits.length >= 4 && (
+      phoneDigits.includes(qDigits) ||
+      (qDigits.length >= 9 && phoneDigits.endsWith(qDigits.slice(-9)))
+    );
     const matchView     = jobMatchesView(j, view);
-    const matchSearch   = !search || j.customerName.toLowerCase().includes(q) || j.id.toLowerCase().includes(q) || (j.dealerJobNo ?? "").toLowerCase().includes(q) || j.model.toLowerCase().includes(q) || j.brand.toLowerCase().includes(q) || (findDealer(dealers, j)?.name ?? j.dealer ?? "").toLowerCase().includes(q);
+    const matchSearch   = !search || matchPhone || j.customerName.toLowerCase().includes(q) || j.id.toLowerCase().includes(q) || (j.dealerJobNo ?? "").toLowerCase().includes(q) || j.model.toLowerCase().includes(q) || j.brand.toLowerCase().includes(q) || (findDealer(dealers, j)?.name ?? j.dealer ?? "").toLowerCase().includes(q);
     const matchPriority = priorityFilter === "All" || j.priority === priorityFilter;
     const matchBrand    = brandFilter === "All" || j.brand === brandFilter;
     const matchDealer   = dealerFilter === "All" || dealerKey(dealers, j) === dealerFilter;
@@ -2756,7 +2778,7 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
             <div style={{ position: "relative", flex: 1 }}>
               <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: searchFocused ? "var(--accent)" : "var(--text-muted)", transition: "color 0.18s", pointerEvents: "none" }} />
               <input value={search} onChange={(e) => setSearch(e.target.value)} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
-                placeholder="Job no., dealer no., name, device…"
+                placeholder="Job no., dealer no., name, phone, device…"
                 style={{ width: "100%", background: "var(--bg-card)", border: `1px solid ${searchFocused ? "var(--accent)" : "var(--border)"}`, borderRadius: 10, padding: "10px 14px 10px 36px", fontSize: 13.5, color: "var(--text-primary)", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "border-color 0.18s" }} />
             </div>
             {/* Daily/Weekly/Monthly — booked-date range, Issued & Non-Issued only for now. */}

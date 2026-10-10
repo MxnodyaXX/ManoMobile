@@ -53,7 +53,7 @@ export default function CustomersTab({ window: w, previous }: TabProps) {
       <Grid>
         <Stat label="Retention" value={pct(k.retention)} sub={previous ? `of ${previous.label}'s customers came back` : "needs a comparison period"} />
         <Stat label="Repeat customer rate" value={pct(k.repeatRate)} sub="visited more than once, all time" />
-        <Stat label="Avg spend per customer" value={k.avgSpend === null ? "—" : rsK(k.avgSpend)} sub="lifetime, customers who spent" />
+        <Stat label="Avg spend per customer" value={k.avgSpend === null ? "—" : rsK(k.avgSpend)} amount={k.avgSpend ?? undefined} sub="lifetime, customers who spent" />
         <Stat label="Avg visits" value={k.avgVisits === null ? "—" : k.avgVisits.toFixed(1)} sub="per customer, all time" />
         <Stat label="Avg days between visits" value={k.avgDaysBetween === null ? "—" : k.avgDaysBetween.toFixed(0)} sub="for customers who returned" />
         <Stat label="With outstanding credit" value={String(k.withCredit)} sub="customers owing money" />

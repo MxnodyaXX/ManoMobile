@@ -59,10 +59,10 @@ export default function ProductsTab({ window: w, previous }: TabProps) {
   return (
     <>
       <Grid>
-        <Stat label="Accessory revenue" value={rsK(v.revenue)} sub={`${w.label.toLowerCase()} · from invoice lines`} />
+        <Stat label="Accessory revenue" value={rsK(v.revenue)} amount={v.revenue} sub={`${w.label.toLowerCase()} · from invoice lines`} />
         <Stat label="Units sold" value={String(v.units)} sub={`${v.sold.length} different products`} />
-        <Stat label="Product profit (est.)" value={v.profit === null ? "—" : rsK(v.profit)} sub={v.revenue && v.profit !== null ? `${pct(v.profit / v.revenue)} margin` : "needs buying prices"} />
-        <Stat label="Avg accessory bill" value={v.avgAccessoryBill === null ? "—" : rsK(v.avgAccessoryBill)} sub="accessory-only invoices" />
+        <Stat label="Product profit (est.)" value={v.profit === null ? "—" : rsK(v.profit)} amount={v.profit ?? undefined} sub={v.revenue && v.profit !== null ? `${pct(v.profit / v.revenue)} margin` : "needs buying prices"} />
+        <Stat label="Avg accessory bill" value={v.avgAccessoryBill === null ? "—" : rsK(v.avgAccessoryBill)} amount={v.avgAccessoryBill ?? undefined} sub="accessory-only invoices" />
         <Stat label="Top seller" value={v.sold[0]?.name ?? "—"} sub={v.sold[0] ? `${rs(v.sold[0].revenue)} · ${v.sold[0].qty} sold` : ""} />
         <Stat label="Sold with repairs" value={pct(v.cross.rate)} sub={`${v.cross.withProducts} of ${v.cross.repairInvoices} repair invoices`} />
       </Grid>

@@ -48,12 +48,12 @@ export default function OverviewTab({ window: w, previous }: TabProps) {
     <>
       {/* ── Money ───────────────────────────────────────────────────────── */}
       <Grid>
-        <Stat label="Total revenue" value={rsK(k.revenue.current)} delta={k.revenue} format="money" compareLabel={cmp} />
-        <Stat label="Net revenue" value={rsK(k.netRevenue.current)} delta={k.netRevenue} format="money" compareLabel={cmp} />
-        <Stat label="Gross profit (est.)" value={rsK(k.grossProfit.current)} delta={k.grossProfit} format="money" compareLabel={cmp} />
-        <Stat label="Repair revenue" value={rsK(k.repairRevenue.current)} delta={k.repairRevenue} format="money" compareLabel={cmp} />
-        <Stat label="Accessory revenue" value={rsK(k.accessoryRevenue.current)} delta={k.accessoryRevenue} format="money" compareLabel={cmp} />
-        <Stat label="Avg invoice" value={rsK(k.avgInvoice.current)} delta={k.avgInvoice} format="money" compareLabel={cmp} />
+        <Stat label="Total revenue" value={rsK(k.revenue.current)} amount={k.revenue.current} delta={k.revenue} format="money" compareLabel={cmp} />
+        <Stat label="Net revenue" value={rsK(k.netRevenue.current)} amount={k.netRevenue.current} delta={k.netRevenue} format="money" compareLabel={cmp} />
+        <Stat label="Gross profit (est.)" value={rsK(k.grossProfit.current)} amount={k.grossProfit.current} delta={k.grossProfit} format="money" compareLabel={cmp} />
+        <Stat label="Repair revenue" value={rsK(k.repairRevenue.current)} amount={k.repairRevenue.current} delta={k.repairRevenue} format="money" compareLabel={cmp} />
+        <Stat label="Accessory revenue" value={rsK(k.accessoryRevenue.current)} amount={k.accessoryRevenue.current} delta={k.accessoryRevenue} format="money" compareLabel={cmp} />
+        <Stat label="Avg invoice" value={rsK(k.avgInvoice.current)} amount={k.avgInvoice.current} delta={k.avgInvoice} format="money" compareLabel={cmp} />
       </Grid>
 
       {/* ── Work ────────────────────────────────────────────────────────── */}
@@ -68,11 +68,11 @@ export default function OverviewTab({ window: w, previous }: TabProps) {
 
       {/* ── Balances ────────────────────────────────────────────────────── */}
       <Grid>
-        <Stat label="Credit collected" value={rsK(k.creditCollected.current)} delta={k.creditCollected} format="money" compareLabel={cmp} />
-        <Stat label="Refunds" value={rsK(k.refunds.current)} delta={k.refunds} format="money" invert compareLabel={cmp} />
-        <Stat label="Outstanding customer credit" value={rsK(k.outstandingCredit)} sub="on account today" />
-        <Stat label="Supplier payments due" value={rsK(k.supplierPayables)} sub="owed to suppliers" />
-        <Stat label="Inventory value" value={rsK(k.inventoryCost)} sub={`${rsK(k.inventoryRetail)} at retail`} />
+        <Stat label="Credit collected" value={rsK(k.creditCollected.current)} amount={k.creditCollected.current} delta={k.creditCollected} format="money" compareLabel={cmp} />
+        <Stat label="Refunds" value={rsK(k.refunds.current)} amount={k.refunds.current} delta={k.refunds} format="money" invert compareLabel={cmp} />
+        <Stat label="Outstanding customer credit" value={rsK(k.outstandingCredit)} amount={k.outstandingCredit} sub="on account today" />
+        <Stat label="Supplier payments due" value={rsK(k.supplierPayables)} amount={k.supplierPayables} sub="owed to suppliers" />
+        <Stat label="Inventory value" value={rsK(k.inventoryCost)} amount={k.inventoryCost} sub={`${rsK(k.inventoryRetail)} at retail`} />
         <Stat label="Returning customers" value={k.returningRate === null ? "—" : `${(k.returningRate * 100).toFixed(0)}%`} sub="seen before this window" />
       </Grid>
 

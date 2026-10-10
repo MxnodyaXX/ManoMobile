@@ -183,6 +183,11 @@ export interface RepairJob {
   /** Labour cost recorded at completion, from the technician's rate at that
    *  moment. Absent on jobs finished before labour costing existed. */
   labourCost?: number;
+  /** An Admin's rough cost (parts + technician, never agent) for a job that
+   *  was finished with no costs recorded. Used for profit only when the job has
+   *  no issued parts and no labourCost. */
+  estimatedRepairCost?: number;
+  estimatedRepairCostAt?: string;
   techRemarks?: string;          // technician's job remarks / work summary
   futureFaults?: string;         // future faults the technician identified
 

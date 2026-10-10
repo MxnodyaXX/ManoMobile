@@ -1,7 +1,8 @@
 "use client";
 
 import type { AnalyticsData } from "./data";
-import { live, streams, refunds, creditCollected, partsCost, finishedIn, STREAMS } from "./overview";
+import type { TxCategory } from "@/cashier/contexts/SalesContext";
+import { live, streams, refunds, creditCollected, costOfSales, STREAMS } from "./overview";
 import { bucketsFor, daysSince, delta, inWindow, type Delta, type Window } from "./window";
 
 /**
@@ -10,43 +11,66 @@ import { bucketsFor, daysSince, delta, inWindow, type Delta, type Window } from 
  *
  * What the ledgers do not hold is said, not guessed: there is no expenses
  * table and no record of payments to suppliers, so net profit and supplier
- * outflow are not shown. Gross profit is an estimate wherever a part or a
- * phone has no cost recorded against it.
+ * outflow are not shown. Gross profit counts a sale as full margin only where
+ * its cost is genuinely unknown (an accessory with no buying price, a phone
+ * sold before sales were linked to a unit), and says how much that is.
  */
 
 const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
+export interface StreamProfit { revenue: number; cost: number; profit: number; margin: number | null }
+
 export interface PnL {
   gross: number; discounts: number; refunds: number; net: number;
-  cogsAccessories: number; cogsParts: number; cogsAgents: number; cogs: number;
+  cogsAccessories: number; cogsDevices: number; cogsParts: number; cogsAgents: number; cogsLabour: number; cogsEstimated: number; estimatedJobs: number; cogs: number;
   grossProfit: number; grossMargin: number | null;
+  /** Share of accessory sales with no buying price on record. */
   unknownCostShare: number | null;
+  /** Share of phone sales with no unit (and so no buying price) on record. */
+  unknownPhoneShare: number | null;
+  /** Profit per stream, before refunds. */
+  byStream: { phones: StreamProfit; accessories: StreamProfit; repairs: StreamProfit; other: StreamProfit };
+  /** Discounts given, by the kind of invoice they were given on. */
+  discountsBy: Record<TxCategory, number>;
+  /** Refunds on returned sales, and cash given back outside a sale (repair advances). */
+  refundsOnSales: number; refundsCashReturns: number; refundCount: number;
+  invoiceCount: number;
 }
 
-/** Cost of what was sold — accessory buying prices, parts, and agent fees. */
+const stream = (revenue: number, cost: number): StreamProfit =>
+  ({ revenue, cost, profit: revenue - cost, margin: revenue > 0 ? (revenue - cost) / revenue : null });
+
+/**
+ * Cost of what was sold: each phone's buying price by IMEI, each accessory
+ * tag's buying price, and on repairs the parts issued (by tag), the agent's
+ * charge and the technician's charge. See costOfSales.
+ */
 export function pnl(d: AnalyticsData, w: Window): PnL {
   const sold = live(d.sales, w);
   const gross = sold.reduce((t, s) => t + s.total, 0);
   const discounts = sold.reduce((t, s) => t + (s.discountAmount ?? 0), 0);
-  const ref = refunds(d, w).amount;
-  const nos = new Set(sold.map(s => s.invoiceNo));
-  const cost = new Map(d.products.map(p => [String(p.id), p.buyingPrice]));
-  let cogsAccessories = 0, unknown = 0, accessoryLineValue = 0;
-  for (const l of d.saleLines) {
-    if (l.kind !== "accessory" || !nos.has(l.invoiceNo)) continue;
-    accessoryLineValue += l.lineTotal;
-    const c = l.referenceId ? cost.get(l.referenceId) : undefined;
-    if (c === undefined) unknown += l.lineTotal; else cogsAccessories += c * l.qty;
-  }
-  const finished = finishedIn(d.jobs, w);
-  const cogsParts = finished.reduce((t, j) => t + partsCost(j, d), 0);
-  const cogsAgents = finished.reduce((t, j) => t + (d.agentCosts[j.id] ?? 0), 0);
-  const cogs = cogsAccessories + cogsParts + cogsAgents;
+  const r = refunds(d, w);
+  const ref = r.amount;
+  const c = costOfSales(d, w);
+  const discountsBy: Record<TxCategory, number> = { Mobile: 0, Accessories: 0, Repair: 0, Others: 0 };
+  for (const s of sold) discountsBy[s.category] = (discountsBy[s.category] ?? 0) + (s.discountAmount ?? 0);
   const net = gross - ref;
   return {
-    gross, discounts, refunds: ref, net, cogsAccessories, cogsParts, cogsAgents, cogs,
-    grossProfit: net - cogs, grossMargin: net > 0 ? (net - cogs) / net : null,
-    unknownCostShare: accessoryLineValue > 0 ? unknown / accessoryLineValue : null,
+    gross, discounts, refunds: ref, net,
+    cogsAccessories: c.accessories, cogsDevices: c.devices, cogsParts: c.parts, cogsAgents: c.agents, cogsLabour: c.labour, cogsEstimated: c.estimated, estimatedJobs: c.estimatedJobs,
+    cogs: c.total,
+    grossProfit: net - c.total, grossMargin: net > 0 ? (net - c.total) / net : null,
+    unknownCostShare: c.revenue.accessories > 0 ? c.unknownAccessorySales / c.revenue.accessories : null,
+    unknownPhoneShare: c.revenue.phones > 0 ? c.unknownPhoneSales / c.revenue.phones : null,
+    byStream: {
+      phones: stream(c.revenue.phones, c.devices),
+      accessories: stream(c.revenue.accessories, c.accessories),
+      repairs: stream(c.revenue.repairs, c.parts + c.agents + c.labour + c.estimated),
+      other: stream(c.revenue.other, 0),
+    },
+    discountsBy,
+    refundsOnSales: r.onSales, refundsCashReturns: r.cashReturns, refundCount: r.count,
+    invoiceCount: sold.length,
   };
 }
 

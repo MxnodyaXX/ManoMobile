@@ -34,9 +34,9 @@ export default function InventoryTab({ window: w }: TabProps) {
     <>
       <Grid>
         <Stat label="Products" value={String(k.products)} sub={`${k.units} units on the shelf`} />
-        <Stat label="Inventory at cost" value={rsK(k.costValue)} sub="buying prices × stock" />
-        <Stat label="Inventory at retail" value={rsK(k.retailValue)} sub="selling prices × stock" />
-        <Stat label="Potential profit" value={rsK(k.potentialProfit)} sub="if every unit sells at price" />
+        <Stat label="Inventory at cost" value={rsK(k.costValue)} amount={k.costValue} sub="buying prices × stock" />
+        <Stat label="Inventory at retail" value={rsK(k.retailValue)} amount={k.retailValue} sub="selling prices × stock" />
+        <Stat label="Potential profit" value={rsK(k.potentialProfit)} amount={k.potentialProfit} sub="if every unit sells at price" />
         <Stat label="Out of stock" value={String(k.out)} sub="nothing on the shelf" />
         <Stat label="Low stock" value={String(k.low)} sub="at or below minimum" />
       </Grid>

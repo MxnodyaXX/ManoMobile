@@ -62,9 +62,9 @@ export default function QualityTab({ window: w, previous }: TabProps) {
       {/* ── Refunds ─────────────────────────────────────────────────────── */}
       <Grid>
         <Stat label="Refunds" value={String(rk.count.current)} delta={rk.count} invert compareLabel={cmp} />
-        <Stat label="Refund amount" value={rsK(rk.amount.current)} delta={rk.amount} format="money" invert compareLabel={cmp} />
+        <Stat label="Refund amount" value={rsK(rk.amount.current)} amount={rk.amount.current} delta={rk.amount} format="money" invert compareLabel={cmp} />
         <Stat label="Of revenue" value={pct(rk.pctOfRevenue)} sub="refunded back out" />
-        <Stat label="Average refund" value={rk.avg === null ? "—" : rsK(rk.avg)} sub={w.label.toLowerCase()} />
+        <Stat label="Average refund" value={rk.avg === null ? "—" : rsK(rk.avg)} amount={rk.avg ?? undefined} sub={w.label.toLowerCase()} />
         <Stat label="Cash returns" value={String(rk.cashReturns)} sub="advance refunds + dealer cash returns" />
         <Stat label="Sale refunds" value={String(rk.saleRefunds)} sub={`${rk.accessoryReturns} accessory returns`} />
         <Stat label="Repairs returned" value={String(rk.repairReturns)} sub="handed back unrepaired" />
@@ -134,8 +134,8 @@ export default function QualityTab({ window: w, previous }: TabProps) {
         <Stat label="Warranty return rate" value={pct(wk.rate)} sub="re-jobs over repairs finished" />
         <Stat label="Avg days before return" value={dayStr(wk.avgDaysBefore)} sub="after handover" />
         <Stat label="Repeat warranty cases" value={String(wk.repeatCases)} sub="same device, more than once" />
-        <Stat label="Warranty parts + agent cost" value={rsK(wk.partsCost)} sub="spent on re-jobs" />
-        <Stat label="Revenue given up" value={rsK(wk.revenueGivenUp)} sub="re-jobs done free of charge" />
+        <Stat label="Warranty parts + agent cost" value={rsK(wk.partsCost)} amount={wk.partsCost} sub="spent on re-jobs" />
+        <Stat label="Revenue given up" value={rsK(wk.revenueGivenUp)} amount={wk.revenueGivenUp} sub="re-jobs done free of charge" />
       </Grid>
       <div className="fade-up resp-grid-2">
         <Panel title={`Warranty returns by ${warrantyByKey}`} hint="Charged to the original job's technician, brand and fault." right={<Seg value={warrantyByKey} onChange={setWarrantyByKey} options={[{ id: "technician", label: "Technician" }, { id: "brand", label: "Brand" }, { id: "model", label: "Model" }, { id: "fault", label: "Fault" }]} />}>
@@ -176,10 +176,10 @@ export default function QualityTab({ window: w, previous }: TabProps) {
       {/* ── Parts ───────────────────────────────────────────────────────── */}
       <Grid>
         <Stat label="Parts used" value={String(pk.used)} sub={`${pk.jobsWithParts} jobs used parts`} />
-        <Stat label="Parts cost" value={rsK(pk.cost)} sub="from the parts catalogue's cost prices" />
+        <Stat label="Parts cost" value={rsK(pk.cost)} amount={pk.cost} sub="from the parts catalogue's cost prices" />
         <Stat label="Parts per job" value={pk.perJob === null ? "—" : pk.perJob.toFixed(1)} sub="over repairs finished" />
         <Stat label="Parts cost vs revenue" value={pct(pk.costVsRevenue)} sub="of repair revenue" />
-        <Stat label="Profit after parts" value={rsK(pk.profitAfterParts)} sub="repair revenue minus parts" />
+        <Stat label="Profit after parts" value={rsK(pk.profitAfterParts)} amount={pk.profitAfterParts} sub="repair revenue minus parts" />
         <Stat label="Parts on warranty re-jobs" value={String(pk.onRejobs)} sub="replaced under warranty" />
       </Grid>
       <div className="fade-up resp-grid-2">

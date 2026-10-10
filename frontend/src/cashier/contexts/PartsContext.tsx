@@ -39,6 +39,8 @@ export interface SparePart {
   reorderLevel: number;
   costPrice: number;
   location: string;
+  /** Who this stock line is bought from. Blank when not recorded. */
+  supplier?: string;
 }
 
 export const PART_CATEGORIES: PartCategory[] = [

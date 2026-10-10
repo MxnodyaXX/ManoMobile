@@ -10,7 +10,7 @@ import { useCreditAccounts, type CreditAccount } from "@/lib/credit/api";
 import { useStaff, type StaffProfile } from "@/lib/staff/api";
 import { useRepair, type RepairJob, type RepairDealer } from "@/cashier/contexts/RepairContext";
 import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
-import { useParts, type SparePart } from "@/cashier/contexts/PartsContext";
+import { useParts, type SparePart, type PartRequest } from "@/cashier/contexts/PartsContext";
 import { useAdmin, type Supplier, type PurchaseOrder } from "@/admin/contexts/AdminContext";
 
 /**
@@ -74,6 +74,9 @@ export interface JobEvent {
   technicianTo: string | null;
 }
 
+/** A sold phone: the invoice it went out on and what the shop paid for it. */
+export interface SoldDevice { id: number; invoiceNo: string; buyingPrice: number; soldPrice: number | null }
+
 export interface AnalyticsData {
   sales: SaleTx[];
   saleLines: SaleLine[];
@@ -87,6 +90,10 @@ export interface AnalyticsData {
   agentCosts: Record<string, number>;
   products: AccessoryProduct[];
   parts: SparePart[];
+  /** Parts requested against jobs, by SKU (the tag), for repair parts cost. */
+  partRequests: PartRequest[];
+  /** Every phone that has been sold, with what it was bought for. */
+  soldDevices: SoldDevice[];
   suppliers: Supplier[];
   purchaseOrders: PurchaseOrder[];
   staff: StaffProfile[];
@@ -102,6 +109,18 @@ const Ctx = createContext<AnalyticsData | null>(null);
 type Row = Record<string, unknown>;
 const num = (v: unknown) => (v == null ? 0 : Number(v));
 const str = (v: unknown) => (v == null ? null : String(v));
+
+async function fetchSoldDevices(): Promise<SoldDevice[]> {
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("mobile_devices")
+    .select("id, sold_invoice_no, buying_price, sold_price")
+    .not("sold_invoice_no", "is", null);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as Row[]).map(r => ({
+    id: Number(r.id), invoiceNo: String(r.sold_invoice_no), buyingPrice: num(r.buying_price),
+    soldPrice: r.sold_price == null ? null : num(r.sold_price),
+  }));
+}
 
 async function fetchAllSaleLines(): Promise<SaleLine[]> {
   const { data, error } = await getSupabaseBrowserClient()
@@ -165,30 +184,31 @@ async function readLedgers() {
   const safe = async <T,>(name: string, p: Promise<T>, empty: T): Promise<T> => {
     try { return await p; } catch (e) { problems.push(`${name}: ${e instanceof Error ? e.message : String(e)}`); return empty; }
   };
-  const [sales, saleLines, creditEntries, cashReturns, sms, events] = await Promise.all([
+  const [sales, saleLines, creditEntries, cashReturns, sms, events, soldDevices] = await Promise.all([
     safe("sales", fetchSales(), [] as SaleTx[]),
     safe("sale lines", fetchAllSaleLines(), [] as SaleLine[]),
     safe("credit entries", fetchAllCreditEntries(), [] as CreditEntryLite[]),
     safe("cash returns", fetchCashReturns(5000), [] as CashReturn[]),
     safe("SMS log", fetchSms(), [] as SmsRecord[]),
     safe("job events", fetchEvents(), [] as JobEvent[]),
+    safe("sold phones", fetchSoldDevices(), [] as SoldDevice[]),
   ]);
-  return { data: { sales, saleLines, creditEntries, cashReturns, sms, events }, problems };
+  return { data: { sales, saleLines, creditEntries, cashReturns, sms, events, soldDevices }, problems };
 }
 
 export function AnalyticsProvider({ children }: { children: ReactNode }) {
   const configured = isSupabaseConfigured();
   const { jobs, dealers, agentCosts } = useRepair();
   const { products } = useAccessories();
-  const { parts } = useParts();
+  const { parts, partRequests } = useParts();
   const { suppliers, purchaseOrders } = useAdmin();
   const { staff } = useStaff();
   const { accounts, reload: reloadAccounts } = useCreditAccounts();
 
   // `loaded` rides with the data it describes, so there is one state write
   // per read rather than a loading flag set from inside an effect.
-  const [own, setOwn] = useState<{ loaded: boolean; sales: SaleTx[]; saleLines: SaleLine[]; creditEntries: CreditEntryLite[]; cashReturns: CashReturn[]; sms: SmsRecord[]; events: JobEvent[] }>({
-    loaded: !configured, sales: [], saleLines: [], creditEntries: [], cashReturns: [], sms: [], events: [],
+  const [own, setOwn] = useState<{ loaded: boolean; sales: SaleTx[]; saleLines: SaleLine[]; creditEntries: CreditEntryLite[]; cashReturns: CashReturn[]; sms: SmsRecord[]; events: JobEvent[]; soldDevices: SoldDevice[] }>({
+    loaded: !configured, sales: [], saleLines: [], creditEntries: [], cashReturns: [], sms: [], events: [], soldDevices: [],
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -213,8 +233,8 @@ export function AnalyticsProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AnalyticsData>(() => {
     const { loaded, ...rest } = own;
-    return { ...rest, jobs, dealers, agentCosts, products, parts, suppliers, purchaseOrders, staff, accounts, loading: !loaded, error, configured, reload };
-  }, [own, jobs, dealers, agentCosts, products, parts, suppliers, purchaseOrders, staff, accounts, error, configured, reload]);
+    return { ...rest, jobs, dealers, agentCosts, products, parts, partRequests, suppliers, purchaseOrders, staff, accounts, loading: !loaded, error, configured, reload };
+  }, [own, jobs, dealers, agentCosts, products, parts, partRequests, suppliers, purchaseOrders, staff, accounts, error, configured, reload]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

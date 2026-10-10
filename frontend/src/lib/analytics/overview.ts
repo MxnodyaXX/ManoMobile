@@ -2,7 +2,10 @@
 
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import type { SaleTx, TxCategory } from "@/cashier/contexts/SalesContext";
-import type { AnalyticsData, SaleLine } from "./data";
+import type { AnalyticsData } from "./data";
+
+/** What a repair's cost is read from — enough of AnalyticsData to use it outside Analytics. */
+export type CostSources = Pick<AnalyticsData, "parts" | "partRequests">;
 import { bucketsFor, daysSince, delta, inWindow, parseWhen, type Delta, type Window } from "./window";
 
 /**
@@ -43,53 +46,169 @@ export function streams(sales: SaleTx[], w: Window): Streams {
   return out;
 }
 
-export function refunds(d: AnalyticsData, w: Window): { count: number; amount: number } {
-  let count = 0, amount = 0;
+export function refunds(d: AnalyticsData, w: Window): { count: number; amount: number; onSales: number; cashReturns: number } {
+  let count = 0, onSales = 0, cashReturns = 0;
   for (const s of d.sales) {
-    if ((s.returnedAmount ?? 0) > 0 && inWindow(s.returnDate ?? s.date, w)) { count += 1; amount += s.returnedAmount ?? 0; }
+    if ((s.returnedAmount ?? 0) > 0 && inWindow(s.returnDate ?? s.date, w)) { count += 1; onSales += s.returnedAmount ?? 0; }
   }
   for (const c of d.cashReturns) {
-    if (inWindow(c.returnedOn, w)) { count += 1; amount += c.amount; }
+    if (inWindow(c.returnedOn, w)) { count += 1; cashReturns += c.amount; }
   }
-  return { count, amount };
+  return { count, amount: onSales + cashReturns, onSales, cashReturns };
 }
 
 export const creditCollected = (d: AnalyticsData, w: Window) =>
   d.creditEntries.filter(e => e.kind === "Payment" && inWindow(e.occurredOn, w)).reduce((t, e) => t + e.amount, 0);
 
-/** Buying price per accessory line, where the product is still known. */
-function accessoryMargin(lines: SaleLine[], d: AnalyticsData, invoiceNos: Set<string>): number {
-  const cost = new Map(d.products.map(p => [String(p.id), p.buyingPrice]));
-  let margin = 0;
-  for (const l of lines) {
-    if (l.kind !== "accessory" || !invoiceNos.has(l.invoiceNo)) continue;
-    const buy = l.referenceId ? cost.get(l.referenceId) : undefined;
-    if (buy === undefined) continue;
-    margin += l.lineTotal - buy * l.qty;
+/**
+ * What a repair's parts cost, from what was actually issued to the job.
+ *
+ * Read from the part requests, which name the exact tag (SKU) and quantity:
+ * "M02 Display" is two parts at two costs (HD+ and CROWN), and only the tag
+ * says which one went into the phone. A batch bought at a different price
+ * carries its own tag, so the tag's cost is that batch's cost.
+ *
+ * Jobs finished before parts were requested through the system have only the
+ * typed "parts used" list; those fall back to a name match, quantity included
+ * ("M02 Display ×2").
+ */
+export function partsCost(job: RepairJob, d: CostSources): number {
+  const issued = d.partRequests.filter(r => r.jobId === job.id && (r.status === "Approved" || r.status === "Issued"));
+  if (issued.length > 0) {
+    const bySku = new Map(d.parts.map(p => [p.sku.trim().toUpperCase(), p.costPrice]));
+    return issued.reduce((t, r) => t + (bySku.get(r.partSku.trim().toUpperCase()) ?? 0) * r.quantity, 0);
   }
-  return margin;
-}
-
-/** What the parts on a job cost, by name match against the parts catalogue. */
-export function partsCost(job: RepairJob, d: AnalyticsData): number {
   if (!job.partsUsed?.length) return 0;
-  const byName = new Map(d.parts.map(p => [p.name.trim().toLowerCase(), p.costPrice]));
-  return job.partsUsed.reduce((t, name) => t + (byName.get(name.trim().toLowerCase()) ?? 0), 0);
+  const byName = new Map<string, number>();
+  for (const p of d.parts) {
+    const k = p.name.trim().toLowerCase();
+    // Several tags under one name: the dearest, so an unknown type is never
+    // read as the cheaper one and profit is not flattered.
+    byName.set(k, Math.max(byName.get(k) ?? 0, p.costPrice));
+  }
+  return job.partsUsed.reduce((t, line) => {
+    const m = line.trim().match(/^(.*?)\s*[×x]\s*(\d+)$/i);
+    const name = (m ? m[1] : line).trim().toLowerCase();
+    const qty = m ? Number(m[2]) : 1;
+    return t + (byName.get(name) ?? 0) * qty;
+  }, 0);
 }
 
-export const finishedIn = (jobs: RepairJob[], w: Window) =>
-  jobs.filter(j => (j.status === "Completed" || j.status === "Delivered") && inWindow(j.completedAt, w));
+export const isFinished = (j: RepairJob) => j.status === "Completed" || j.status === "Delivered";
 
-export function grossProfit(d: AnalyticsData, w: Window): number {
+// Older jobs were sometimes finished without a finish date being stamped; they
+// fall back to the day they came in rather than dropping out of every period.
+export const finishedIn = (jobs: RepairJob[], w: Window) =>
+  jobs.filter(j => isFinished(j) && inWindow(j.completedAt ?? j.createdAt, w));
+
+/**
+ * What a finished repair cost the shop, apart from agent charges.
+ *
+ * Normally what was recorded: parts issued by tag plus the technician charge.
+ * When an Admin has entered a cost for the job (Admin → Repair Costs), that one
+ * figure IS the job's parts + technician cost, replacing what was recorded —
+ * many older jobs have a technician charge but parts that were never issued in
+ * the system, so what was recorded is only part of the story. Never both, so
+ * nothing is counted twice.
+ */
+export function repairJobCost(job: RepairJob, d: CostSources): { parts: number; labour: number; estimated: number } {
+  if (job.estimatedRepairCost != null) return { parts: 0, labour: 0, estimated: job.estimatedRepairCost };
+  return { parts: partsCost(job, d), labour: job.labourCost ?? 0, estimated: 0 };
+}
+
+/** Parts + technician cost as recorded on the job, ignoring any entered figure. */
+export const recordedRepairCost = (job: RepairJob, d: CostSources) => partsCost(job, d) + (job.labourCost ?? 0);
+
+/** A finished job with no parts or technician cost recorded — one that needs an estimate. */
+export const lacksRecordedCost = (job: RepairJob, d: CostSources) =>
+  isFinished(job) && partsCost(job, d) + (job.labourCost ?? 0) === 0;
+
+/** Cost of sales in a window, by where it came from. */
+export interface CostOfSales {
+  /** Buying price of each accessory tag sold. */
+  accessories: number;
+  /** Buying price of each phone sold, by the unit (IMEI) that went out. */
+  devices: number;
+  /** Parts issued to repairs finished in the window. */
+  parts: number;
+  /** Repair-agent charges on those repairs. */
+  agents: number;
+  /** Technician charges recorded when those repairs were finished. */
+  labour: number;
+  /** Admin estimates, on finished jobs with no parts or technician cost recorded. */
+  estimated: number;
+  estimatedJobs: number;
+  total: number;
+  /** Sales whose cost is not on record, so they count as all profit. */
+  unknownAccessorySales: number;
+  unknownPhoneSales: number;
+  /** Revenue of each stream, for per-stream margins. */
+  revenue: { accessories: number; phones: number; repairs: number; other: number };
+}
+
+export function costOfSales(d: AnalyticsData, w: Window): CostOfSales {
   const sold = live(d.sales, w);
   const invoiceNos = new Set(sold.map(s => s.invoiceNo));
-  const repairRevenue = sold.filter(s => s.category === "Repair").reduce((t, s) => t + s.total, 0);
+
+  const productCost = new Map(d.products.map(p => [String(p.id), p.buyingPrice]));
+  let accessories = 0, unknownAccessorySales = 0, accessoryRevenue = 0;
+  for (const l of d.saleLines) {
+    if (l.kind !== "accessory" || !invoiceNos.has(l.invoiceNo)) continue;
+    accessoryRevenue += l.lineTotal;
+    const c = l.referenceId ? productCost.get(l.referenceId) : undefined;
+    if (c === undefined) unknownAccessorySales += l.lineTotal; else accessories += c * l.qty;
+  }
+
+  // A phone carries the invoice it went out on. A replaced or refunded phone
+  // gives the invoice up, so each invoice holds exactly the phones the
+  // customer kept.
+  let devices = 0;
+  const phoneInvoices = new Set<string>();
+  for (const dv of d.soldDevices) {
+    if (!invoiceNos.has(dv.invoiceNo)) continue;
+    devices += dv.buyingPrice;
+    phoneInvoices.add(dv.invoiceNo);
+  }
+  let phoneRevenue = 0, unknownPhoneSales = 0;
+  for (const l of d.saleLines) {
+    if (l.kind !== "device" || !invoiceNos.has(l.invoiceNo)) continue;
+    phoneRevenue += l.lineTotal;
+    if (!phoneInvoices.has(l.invoiceNo)) unknownPhoneSales += l.lineTotal;
+  }
+  // Phone sales from before sales were linked to stock have no device lines.
+  for (const s of sold) {
+    if (s.category !== "Mobile" || phoneInvoices.has(s.invoiceNo)) continue;
+    if (d.saleLines.some(l => l.invoiceNo === s.invoiceNo && l.kind === "device")) continue;
+    phoneRevenue += s.total;
+    unknownPhoneSales += s.total;
+  }
+
   const finished = finishedIn(d.jobs, w);
-  const parts = finished.reduce((t, j) => t + partsCost(j, d), 0);
+  let parts = 0, labour = 0, estimated = 0, estimatedJobs = 0;
+  for (const j of finished) {
+    const c = repairJobCost(j, d);
+    parts += c.parts; labour += c.labour; estimated += c.estimated;
+    if (j.estimatedRepairCost != null) estimatedJobs += 1;
+  }
   const agents = finished.reduce((t, j) => t + (d.agentCosts[j.id] ?? 0), 0);
-  // Phones and other sales carry no cost here; they contribute revenue only,
-  // which overstates profit — the Finance tab says so.
-  return repairRevenue - parts - agents + accessoryMargin(d.saleLines, d, invoiceNos);
+  const repairs = sold.filter(s => s.category === "Repair").reduce((t, s) => t + s.total, 0);
+  const total = sold.reduce((t, s) => t + s.total, 0);
+
+  return {
+    accessories, devices, parts, agents, labour, estimated, estimatedJobs,
+    total: accessories + devices + parts + agents + labour + estimated,
+    unknownAccessorySales, unknownPhoneSales,
+    revenue: {
+      accessories: accessoryRevenue, phones: phoneRevenue, repairs,
+      other: Math.max(0, total - accessoryRevenue - phoneRevenue - repairs),
+    },
+  };
+}
+
+/** Sales less refunds less what everything sold cost. Expenses are not in it. */
+export function grossProfit(d: AnalyticsData, w: Window): number {
+  const net = live(d.sales, w).reduce((t, s) => t + s.total, 0) - refunds(d, w).amount;
+  return net - costOfSales(d, w).total;
 }
 
 /* ── KPIs ───────────────────────────────────────────────────────────────── */

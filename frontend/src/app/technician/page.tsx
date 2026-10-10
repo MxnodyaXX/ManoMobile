@@ -20,7 +20,7 @@ import PartsAvailability from "@/technician/components/parts/PartsAvailability";
 import MyPerformance from "@/technician/components/performance/MyPerformance";
 import ShiftTracker  from "@/technician/components/shift/ShiftTracker";
 import JobScanFab    from "@/cashier/components/shared/JobScanFab";
-import JobInfoModal  from "@/technician/components/jobs/JobInfoModal";
+import { JobDetailsModal } from "@/cashier/components/repair/JobsTable";
 import TabTitle       from "@/lib/ui/TabTitle";
 import { useAuth }    from "@/lib/auth/AuthContext";
 import { useMyPermissions } from "@/lib/settings/staffRules";
@@ -222,7 +222,7 @@ function TechPageInner() {
   const [activePage, setActivePage] = useState<TechPage>("My Bench");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // What a scan opens on this side: the read-only record. A technician may act
-  // on their own jobs from the bench and read anybody's — see JobInfoModal —
+  // on their own jobs from the bench and read anybody's — see JobDetailsModal (readOnly) —
   // so the scan panel offers the reading, not a second set of actions.
   const [scannedJob, setScannedJob] = useJobSlot();
 
@@ -323,7 +323,7 @@ function TechPageInner() {
         </div>
       </div>
       <JobScanFab onOpenJob={setScannedJob} />
-      {scannedJob && <JobInfoModal job={scannedJob} onClose={() => setScannedJob(null)} />}
+      {scannedJob && <JobDetailsModal job={scannedJob} readOnly onClose={() => setScannedJob(null)} />}
     </TechProvider>
     </PartsProvider>
     </WarrantyProvider>

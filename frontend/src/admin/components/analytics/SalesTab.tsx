@@ -41,19 +41,19 @@ export default function SalesTab({ window: w, previous }: TabProps) {
     <>
       <Grid>
         <Stat label="Transactions" value={String(k.transactions.current)} delta={k.transactions} compareLabel={cmp} />
-        <Stat label="Sales value" value={rsK(k.value.current)} delta={k.value} format="money" compareLabel={cmp} />
-        <Stat label="Average transaction" value={rsK(k.avg.current)} delta={k.avg} format="money" compareLabel={cmp} />
+        <Stat label="Sales value" value={rsK(k.value.current)} amount={k.value.current} delta={k.value} format="money" compareLabel={cmp} />
+        <Stat label="Average transaction" value={rsK(k.avg.current)} amount={k.avg.current} delta={k.avg} format="money" compareLabel={cmp} />
         <Stat label="Items per invoice" value={k.itemsPerInvoice === null ? "—" : k.itemsPerInvoice.toFixed(1)} sub="where lines were recorded" />
-        <Stat label="Highest invoice" value={k.highest ? rsK(k.highest.total) : "—"} sub={k.highest?.invoiceNo ?? ""} />
-        <Stat label="Lowest invoice" value={k.lowest ? rsK(k.lowest.total) : "—"} sub={k.lowest?.invoiceNo ?? ""} />
+        <Stat label="Highest invoice" value={k.highest ? rsK(k.highest.total) : "—"} amount={k.highest?.total} sub={k.highest?.invoiceNo ?? ""} />
+        <Stat label="Lowest invoice" value={k.lowest ? rsK(k.lowest.total) : "—"} amount={k.lowest?.total} sub={k.lowest?.invoiceNo ?? ""} />
       </Grid>
       <Grid>
-        <Stat label="Discounts given" value={rsK(k.discounts.current)} delta={k.discounts} format="money" invert compareLabel={cmp} />
+        <Stat label="Discounts given" value={rsK(k.discounts.current)} amount={k.discounts.current} delta={k.discounts} format="money" invert compareLabel={cmp} />
         <Stat label="Avg discount per sale" value={k.avgDiscount === null ? "—" : rs(k.avgDiscount)} sub={`${pct(k.discountPct)} of gross`} />
         <Stat label="With / without discount" value={`${k.withDiscount} / ${k.withoutDiscount}`} sub="invoices" />
         <Stat label="Voided" value={String(k.voided.current)} delta={k.voided} invert compareLabel={cmp} />
         <Stat label="Refunded" value={String(k.refunded.current)} delta={k.refunded} invert compareLabel={cmp} />
-        <Stat label="Left on credit" value={rsK(k.credit)} sub={`${k.creditInvoices} invoice${k.creditInvoices === 1 ? "" : "s"} part-paid`} />
+        <Stat label="Left on credit" value={rsK(k.credit)} amount={k.credit} sub={`${k.creditInvoices} invoice${k.creditInvoices === 1 ? "" : "s"} part-paid`} />
       </Grid>
 
       <div className="fade-up resp-grid-2">

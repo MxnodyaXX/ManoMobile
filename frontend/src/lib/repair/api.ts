@@ -84,6 +84,9 @@ interface JobRow {
   cancelled_by: string | null;
   parts_used: string[] | null;
   labour_cost: number | string | null;
+  /** Absent until migration 20261009000073 is applied. */
+  backfill_cost?: number | string | null;
+  backfill_cost_at?: string | null;
   tech_remarks: string | null;
   future_faults: string | null;
   received_items: string[] | null;
@@ -164,6 +167,8 @@ export function rowToJob(row: JobRow): RepairJob {
     cancelledBy: opt(row.cancelled_by),
     partsUsed: row.parts_used?.length ? row.parts_used : undefined,
     labourCost: row.labour_cost == null ? undefined : Number(row.labour_cost),
+    estimatedRepairCost: row.backfill_cost == null ? undefined : Number(row.backfill_cost),
+    estimatedRepairCostAt: row.backfill_cost_at ?? undefined,
     techRemarks: opt(row.tech_remarks),
     futureFaults: opt(row.future_faults),
     receivedItems: row.received_items?.length ? row.received_items : undefined,

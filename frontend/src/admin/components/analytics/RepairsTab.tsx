@@ -78,10 +78,10 @@ export default function RepairsTab({ window: w, previous }: TabProps) {
         <Stat label="Ready for collection" value={String(k.ready)} sub={`${rs(c.value)} to collect`} />
       </Grid>
       <Grid>
-        <Stat label="Repair revenue" value={rsK(k.revenue.current)} delta={k.revenue} format="money" compareLabel={cmp} />
-        <Stat label="Avg repair value" value={rsK(k.avgValue.current)} delta={k.avgValue} format="money" compareLabel={cmp} />
-        <Stat label="Highest repair" value={rsK(k.highest)} sub={w.label.toLowerCase()} />
-        <Stat label="Repair profit (est.)" value={rsK(k.profit.current)} delta={k.profit} format="money" compareLabel={cmp} />
+        <Stat label="Repair revenue" value={rsK(k.revenue.current)} amount={k.revenue.current} delta={k.revenue} format="money" compareLabel={cmp} />
+        <Stat label="Avg repair value" value={rsK(k.avgValue.current)} amount={k.avgValue.current} delta={k.avgValue} format="money" compareLabel={cmp} />
+        <Stat label="Highest repair" value={rsK(k.highest)} amount={k.highest} sub={w.label.toLowerCase()} />
+        <Stat label="Repair profit (est.)" value={rsK(k.profit.current)} amount={k.profit.current} delta={k.profit} format="money" compareLabel={cmp} />
         <Stat label="Repair margin" value={pct(k.margin)} sub="after parts and agent costs" />
       </Grid>
 

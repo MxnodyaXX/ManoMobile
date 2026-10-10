@@ -28,11 +28,11 @@ export default function SuppliersTab({ window: w }: TabProps) {
   return (
     <>
       <Grid>
-        <Stat label="Purchases" value={rsK(k.total)} sub={`${k.orders} order${k.orders === 1 ? "" : "s"} · ${w.label.toLowerCase()}`} />
-        <Stat label="Average order" value={k.avgOrder === null ? "—" : rsK(k.avgOrder)} sub="per purchase order" />
+        <Stat label="Purchases" value={rsK(k.total)} amount={k.total} sub={`${k.orders} order${k.orders === 1 ? "" : "s"} · ${w.label.toLowerCase()}`} />
+        <Stat label="Average order" value={k.avgOrder === null ? "—" : rsK(k.avgOrder)} amount={k.avgOrder ?? undefined} sub="per purchase order" />
         <Stat label="Items ordered" value={String(k.items)} sub={`${k.received} received`} />
         <Stat label="Orders open" value={String(k.pending)} sub="approved, sent or partly received" />
-        <Stat label="Owed to suppliers" value={rsK(k.outstanding)} sub="payables today" />
+        <Stat label="Owed to suppliers" value={rsK(k.outstanding)} amount={k.outstanding} sub="payables today" />
         <Stat label="Suppliers" value={String(k.suppliers)} sub={`${k.activeSuppliers} active`} />
       </Grid>
 

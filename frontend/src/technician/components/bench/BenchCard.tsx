@@ -46,8 +46,12 @@ const PRIORITY: Record<string, { color: string; bg: string }> = {
 };
 
 const OVERFLOW: { id: BenchAction; label: string; icon: typeof StickyNote }[] = [
-  // First, because it is the one that has to be done while the phone is in
-  // your hand — the rest can wait until it is back on the shelf.
+  // Everything about the job in one read-only view — customer, device, fault,
+  // intake condition, accessories received, history. The same view another
+  // technician's job opens with, offered on your own too.
+  { id: "info",       label: "View job details",  icon: Eye           },
+  // The one that has to be done while the phone is in your hand — the rest
+  // can wait until it is back on the shelf.
   { id: "device",     label: "Device details",    icon: Smartphone    },
   { id: "diagnostic", label: "Diagnostic",        icon: Stethoscope   },
   { id: "notes",      label: "Internal notes",    icon: StickyNote    },

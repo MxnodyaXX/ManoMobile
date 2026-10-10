@@ -28,7 +28,7 @@ import CustomerMessageModal from "@/technician/components/jobs/CustomerMessageMo
 import TransferAgentModal from "@/technician/components/jobs/TransferAgentModal";
 import { fetchOpenTransfers, type AgentTransfer } from "@/lib/repair/agents";
 import ReceiveFromAgentModal from "@/technician/components/agents/ReceiveFromAgentModal";
-import JobInfoModal from "@/technician/components/jobs/JobInfoModal";
+import { JobDetailsModal } from "@/cashier/components/repair/JobsTable";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 const TA = "#34d399";
@@ -750,7 +750,9 @@ export default function MyBench() {
         <CustomerMessageModal job={openJob} onClose={() => setModal(null)} />
       )}
       {openJob && modal?.kind === "info" && (
-        <JobInfoModal job={openJob} onClose={() => setModal(null)} />
+        // The counter's own job window, read-only: same cards, same timeline,
+        // none of the counter's actions.
+        <JobDetailsModal job={openJob} readOnly onClose={() => setModal(null)} />
       )}
       {/* Whose bench an unassigned job lands on, before it starts */}
       {assigning && (

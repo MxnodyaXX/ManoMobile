@@ -7,6 +7,7 @@ import AdminSidebar, { type AdminPage } from "@/admin/components/layout/AdminSid
 import AdminNavbar    from "@/admin/components/layout/AdminNavbar";
 import AdminDashboard from "@/admin/components/dashboard/AdminDashboard";
 import BusinessInsights from "@/admin/components/insights/BusinessInsights";
+import RepairCostBackfill from "@/admin/components/insights/RepairCostBackfill";
 import Analytics from "@/admin/components/analytics/Analytics";
 import StaffManagement from "@/admin/components/staff/StaffManagement";
 import Permissions    from "@/admin/components/permissions/Permissions";
@@ -129,6 +130,7 @@ function AdminPageInner() {
             {activePage === "Dashboard"        && <AdminDashboard />}
             {activePage === "Analytics"        && <Analytics />}
             {activePage === "Business Insights"&& <BusinessInsights />}
+            {activePage === "Repair Cost Backfill" && <RepairCostBackfill />}
             {activePage === "Staff Management" && <StaffManagement />}
             {activePage === "Permissions"      && <Permissions />}
             {activePage === "Suppliers"        && <Suppliers />}

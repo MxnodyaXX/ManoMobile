@@ -29,6 +29,8 @@ interface PartRow {
   reorder_level: number;
   cost_price: number | string;
   location: string | null;
+  /** Absent until migration 20261008000072 is applied. */
+  supplier?: string | null;
 }
 
 interface RequestRow {
@@ -60,6 +62,7 @@ function toPart(row: PartRow): SparePart {
     reorderLevel: row.reorder_level,
     costPrice: num(row.cost_price),
     location: row.location ?? "",
+    supplier: row.supplier ?? "",
   };
 }
 
@@ -80,8 +83,9 @@ function toRequest(row: RequestRow): PartRequest {
   };
 }
 
-const PART_COLUMNS =
-  "id, sku, name, category, compatible_with, stock, reorder_level, cost_price, location";
+// "*" rather than a list, so the catalogue still loads on a database that has
+// not had the supplier column (migration 20261008000072) added yet.
+const PART_COLUMNS = "*";
 
 // ─── Catalogue ───────────────────────────────────────────────────────────────
 
@@ -111,16 +115,25 @@ export async function savePart(part: SparePart): Promise<SparePart> {
     reorder_level: part.reorderLevel,
     cost_price: part.costPrice,
     location: part.location,
+    supplier: (part.supplier ?? "").trim(),
   };
 
   const sb = getSupabaseBrowserClient();
   const existingId = /^\d+$/.test(part.id) ? Number(part.id) : null;
 
-  const query = existingId === null
-    ? sb.from("repair_parts").insert(payload)
-    : sb.from("repair_parts").update(payload).eq("id", existingId);
+  const run = (body: Partial<typeof payload>) => (existingId === null
+    ? sb.from("repair_parts").insert(body)
+    : sb.from("repair_parts").update(body).eq("id", existingId)
+  ).select(PART_COLUMNS).single();
 
-  const { data, error } = await query.select(PART_COLUMNS).single();
+  let { data, error } = await run(payload);
+  // Supplier column not there yet (migration 20261008000072 not applied):
+  // save everything else rather than refuse the whole part.
+  if (error && /supplier/i.test(error.message)) {
+    const rest: Partial<typeof payload> = { ...payload };
+    delete rest.supplier;
+    ({ data, error } = await run(rest));
+  }
 
   if (error) {
     // 23505 is unique_violation — always the SKU here, and worth saying so

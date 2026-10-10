@@ -1,13 +1,14 @@
 "use client";
 
 import {
-  Palette, LayoutDashboard, Users, ShieldCheck, Truck, ShoppingCart, Smartphone, Bell, Settings, LogOut, BarChart3, LineChart } from "lucide-react";
+  Palette, LayoutDashboard, Users, ShieldCheck, Truck, ShoppingCart, Smartphone, Bell, Settings, LogOut, BarChart3, LineChart, Calculator } from "lucide-react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 
 export type AdminPage =
   | "Dashboard"
   | "Analytics"
   | "Business Insights"
+  | "Repair Cost Backfill"
   | "Staff Management"
   | "Permissions"
   | "Suppliers"
@@ -21,6 +22,7 @@ const NAV: { id: AdminPage; icon: any; label: string }[] = [
   { id: "Dashboard",        icon: LayoutDashboard, label: "Dashboard"         },
   { id: "Analytics",        icon: LineChart,       label: "Analytics"         },
   { id: "Business Insights",icon: BarChart3,       label: "Business Insights" },
+  { id: "Repair Cost Backfill", icon: Calculator,  label: "Repair Costs"      },
   { id: "Staff Management", icon: Users,           label: "Staff"             },
   { id: "Permissions",      icon: ShieldCheck,     label: "Permissions"       },
   { id: "Suppliers",        icon: Truck,           label: "Suppliers"         },
