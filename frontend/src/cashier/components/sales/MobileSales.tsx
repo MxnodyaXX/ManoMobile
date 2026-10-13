@@ -1303,11 +1303,12 @@ export default function MobileSales() {
     pc.phone.minSellingPrice > 0 && effectivePrice(pc) < pc.phone.minSellingPrice;
 
   const belowMin      = phoneCart.some(isPhoneBelowMin);
-  // Selling under the floor is allowed, with a reason: the shortfall goes to
-  // the Below-Minimum Sales account (migration 20261001000064).
+  // Selling under the floor never stops the sale: the shortfall is booked as
+  // the invoice's bad debt and listed in the Below-Minimum account (migrations
+  // 20261001000064 and 20261013000081). A reason is optional.
   const belowMinShortfall = phoneCart.reduce((s, pc) =>
     s + (isPhoneBelowMin(pc) ? pc.phone.minSellingPrice - effectivePrice(pc) : 0), 0);
-  const belowMinReady = !belowMin || belowMinReason.trim() !== "";
+  const belowMinReady = true;
   const missingPrice  = phoneCart.some(pc => !(parseFloat(pc.sellingPrice) > 0));
   const customerReady = customer.name.trim() !== "" && customer.phone.trim() !== "";
 
@@ -1706,7 +1707,7 @@ export default function MobileSales() {
                       />
                       {isBelowMin && (
                         <div style={{ fontSize: 10, color: "#d97706", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 3, lineHeight: 1.4 }}>
-                          Sells for {fmt(effective)} after discounts — {fmt(pc.phone.minSellingPrice - effective)} under minimum. Allowed with a reason.
+                          Sells for {fmt(effective)} after discounts — {fmt(pc.phone.minSellingPrice - effective)} under minimum — booked as bad debt.
                         </div>
                       )}
                     </div>
@@ -1899,7 +1900,7 @@ export default function MobileSales() {
           </div>
         )}
 
-        {/* ── Below-minimum: allowed, but with a reason on the record ── */}
+        {/* ── Below-minimum: the sale goes ahead, the shortfall is bad debt ── */}
         {belowMin && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10, padding: 12, borderRadius: 9, border: "1px solid rgba(245,158,11,0.45)", background: "rgba(245,158,11,0.07)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif", color: "#d97706" }}>
@@ -1907,10 +1908,10 @@ export default function MobileSales() {
               <span>{fmt(belowMinShortfall)} under</span>
             </div>
             <div style={{ fontSize: 11.5, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.5 }}>
-              This amount is booked to the <b>Below-Minimum Sales</b> account and shows in Reports → Below Min.
+              The sale goes ahead. This amount is booked as <b>bad debt</b> on the invoice (Invoice History → Bad Debt) and listed in Reports → Below Min.
             </div>
             <div>
-              <label style={labelStyle}>Reason *</label>
+              <label style={labelStyle}>Reason (optional)</label>
               <input
                 value={belowMinReason}
                 onChange={e => setBelowMinReason(e.target.value)}
@@ -2027,8 +2028,6 @@ export default function MobileSales() {
             ? "Scan a device first"
             : missingPrice
             ? "Enter a selling price"
-            : !belowMinReady
-            ? "Give a reason for the below-minimum price"
             : !customerReady
             ? "Enter customer name & phone"
             : !paymentMethod

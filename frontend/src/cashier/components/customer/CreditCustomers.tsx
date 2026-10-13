@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import {
   Search, CreditCard, AlertCircle, CheckCircle,
   X, DollarSign, Wallet, Store,
-  History, Plus, Sparkles, Loader2, Undo2, RotateCcw, FileText, ChevronDown, MessageSquare,
+  History, Plus, Sparkles, Loader2, Undo2, RotateCcw, FileText, ChevronDown, MessageSquare, CalendarRange,
 } from "lucide-react";
 import {
   useCreditAccounts, useCreditEntries, openCreditAccount, writeOff,
@@ -43,6 +43,7 @@ import { useTableSort, SortHeader } from "@/lib/ui/useTableSort";
 import { cleanPhone, phoneIssue, FieldWarning } from "@/lib/ui/identifiers";
 import RecordCreditModal from "./RecordCreditModal";
 import RecordPaymentModal from "./RecordPaymentModal";
+import AccountStatement, { PRESETS, rangeFor, type Preset } from "./AccountStatement";
 
 /**
  * Credit accounts — who owes the shop money.
@@ -451,6 +452,10 @@ function CreditGroupList({ groups, allCount, jobs, categories, onViewInvoice, em
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  // The dealer's own job number where there is one — the number on their
+  // slip and the one they ring up about — and ours only when they have none.
+  const jobById = new Map(jobs.map(j => [j.id, j]));
+  const jobNo = (id: string) => { const d = jobById.get(id)?.dealerJobNo; return d ? `#${d}` : id; };
 
   const PREVIEW = 5;
   const shown = showAll ? groups : groups.slice(0, PREVIEW);
@@ -518,8 +523,8 @@ function CreditGroupList({ groups, allCount, jobs, categories, onViewInvoice, em
                     {/* With an invoice number the number IS the description, so
                         the space goes to what it covered instead. */}
                     {g.invoiceNo
-                      ? (g.jobIds.join(", ") || g.note || "—")
-                      : (g.note || g.jobIds.join(", ") || "—")}
+                      ? (g.jobIds.map(jobNo).join(", ") || g.note || "—")
+                      : (g.note || g.jobIds.map(jobNo).join(", ") || "—")}
                     {g.dueOn && g.kind === "Charge" ? ` · due ${g.dueOn}` : ""}
                   </p>
                 </div>
@@ -587,8 +592,7 @@ function CreditGroupList({ groups, allCount, jobs, categories, onViewInvoice, em
                       }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                           <span style={{ fontSize: 11.5, color: "var(--text-secondary)", fontFamily: ff }}>
-                            {e.jobId ?? "—"}
-                            {job?.dealerJobNo && <span style={{ color: "var(--text-muted)" }}> · #{job.dealerJobNo}</span>}
+                            {e.jobId ? jobNo(e.jobId) : "—"}
                             {/* The whole point of grouping it here: this is the
                                 line that took the money off, said in place
                                 rather than as a separate entry somebody has to
@@ -687,12 +691,22 @@ function CreditAccountDetail({
   const [tab, setTab] = useState<DetailTab>("invoices");
   const [showInvoice, setShowInvoice] = useState<string | null>(null);
   const [showCharge, setShowCharge] = useState(false);
+  const [showStatement, setShowStatement] = useState(false);
 
   // One row per thing that happened, not per row in the ledger — see
   // groupCreditEntries. Charges and Cash Return refunds are what an invoice
   // came to ("Invoices"); payments and write-offs are how a balance stopped
   // being owed ("Settlements"). "Full History" is everything, unfiltered.
-  const allGroups = groupCreditEntries(entries);
+  // The period the lists show. "All time" by default, so nothing is hidden
+  // until somebody asks for a narrower window.
+  const [period, setPeriod] = useState<Preset>("all");
+  const [custom, setCustom] = useState(() => rangeFor("this-month", null));
+  const range = period === "custom" ? custom : rangeFor(period, account.firstChargeOn);
+  const inPeriod = period === "all" ? entries : entries.filter(e => e.occurredOn >= range.from && e.occurredOn <= range.to);
+  const periodBilled = inPeriod.filter(e => e.kind === "Charge").reduce((t, e) => t + e.amount, 0);
+  const periodPaid = inPeriod.filter(e => e.kind === "Payment").reduce((t, e) => t + e.amount, 0);
+
+  const allGroups = groupCreditEntries(inPeriod);
   const invoiceGroups = allGroups.filter(g => g.kind === "Charge" || g.kind === "Refund");
   const settlementGroups = allGroups.filter(g => g.kind === "Payment" || g.kind === "Write-off");
 
@@ -711,8 +725,9 @@ function CreditAccountDetail({
     { id: "history",     label: "Full History", count: allGroups.length },
   ];
   const groupsForTab = tab === "invoices" ? invoiceGroups : tab === "settlements" ? settlementGroups : allGroups;
-  const emptyMessage =
-    tab === "invoices" ? "No invoices or Cash Return refunds on this account."
+  const emptyMessage = period !== "all" && entries.length > 0
+    ? "Nothing of that kind on this account in this period."
+    : tab === "invoices" ? "No invoices or Cash Return refunds on this account."
     : tab === "settlements" ? "No payments or write-offs on this account."
     : "Nothing of that kind on this account.";
 
@@ -777,6 +792,35 @@ function CreditAccountDetail({
         </div>
       </div>
 
+      {/* Period — narrows every tab below, and the statement opens on it. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0, flexWrap: "wrap" }}>
+        <CalendarRange size={13} color="var(--text-muted)" style={{ marginRight: 2 }} />
+        {PRESETS.map(p => {
+          const on = period === p.id;
+          return (
+            <button key={p.id} onClick={() => { if (p.id === "custom") setCustom(range); setPeriod(p.id); }}
+              style={{ padding: "5px 11px", borderRadius: 7, fontSize: 11.5, fontWeight: on ? 700 : 500, cursor: "pointer", fontFamily: ff, whiteSpace: "nowrap",
+                border: `1px solid ${on ? "var(--accent-glow)" : "var(--border)"}`, background: on ? "var(--accent-dim)" : "transparent", color: on ? "var(--accent)" : "var(--text-secondary)" }}>
+              {p.label}
+            </button>
+          );
+        })}
+        {period === "custom" && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <input type="date" value={custom.from} max={custom.to} onChange={e => setCustom(c => ({ ...c, from: e.target.value }))}
+              style={{ padding: "5px 8px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", fontSize: 11.5, fontFamily: ff }} />
+            <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>to</span>
+            <input type="date" value={custom.to} min={custom.from} onChange={e => setCustom(c => ({ ...c, to: e.target.value }))}
+              style={{ padding: "5px 8px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", fontSize: 11.5, fontFamily: ff }} />
+          </span>
+        )}
+        {period !== "all" && (
+          <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff, whiteSpace: "nowrap" }}>
+            {fmtDate(range.from)} – {fmtDate(range.to)} · billed <b style={{ color: "var(--text-primary)" }}>{rs(periodBilled)}</b> · paid <b style={{ color: "var(--success)" }}>{rs(periodPaid)}</b>
+          </span>
+        )}
+      </div>
+
       {/* Tabs — Invoice control, Settlements, Full History. */}
       <div style={{ display: "flex", gap: 3, padding: "10px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0, flexWrap: "wrap" }}>
         {tabs.map(t => {
@@ -810,7 +854,7 @@ function CreditAccountDetail({
               </div>
             )}
             <CreditGroupList
-              key={tab}
+              key={`${tab}:${range.from}:${range.to}:${period}`}
               groups={groupsForTab}
               allCount={allGroups.length}
               jobs={jobs}
@@ -824,6 +868,11 @@ function CreditAccountDetail({
 
       {/* Actions — everything that moves this account's balance. */}
       <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, padding: "12px 18px", borderTop: "1px solid var(--border)", background: "var(--bg-secondary)", flexShrink: 0 }}>
+        {/* A statement for a chosen period — left on its own, apart from the
+            buttons that change the balance. */}
+        <button onClick={() => setShowStatement(true)} disabled={loading || entries.length === 0} title="Statement of this account for a period — print, PDF or Excel" style={{ ...pill(TONE.muted, true), gap: 5, marginRight: "auto", opacity: loading || entries.length === 0 ? 0.5 : 1 }}>
+          <CalendarRange size={11} />Statement
+        </button>
         {isAdminCashier && (
           <button onClick={() => setShowCharge(true)} title="Put a manual charge on this account" style={{ ...pill(TONE.muted, true), gap: 5 }}>
             <CreditCard size={11} />Record Charge
@@ -857,6 +906,12 @@ function CreditAccountDetail({
       </div>
 
       {showInvoice && <InvoiceDetail invoiceNo={showInvoice} onClose={() => setShowInvoice(null)} />}
+      {showStatement && (
+        <AccountStatement
+          account={account} entries={entries} onClose={() => setShowStatement(false)}
+          initialPreset={period} initialRange={period === "custom" ? custom : undefined}
+        />
+      )}
       {showCharge && (
         <RecordCreditModal
           target={{
