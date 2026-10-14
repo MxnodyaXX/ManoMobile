@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
+import { phoneMatches } from "@/lib/repair/phoneSearch";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -29,7 +30,8 @@ export default function PendingCollection() {
       j.id.toLowerCase().includes(q) ||
       j.customerName.toLowerCase().includes(q) ||
       j.model.toLowerCase().includes(q) ||
-      j.brand.toLowerCase().includes(q)
+      j.brand.toLowerCase().includes(q) ||
+      phoneMatches(search, j.phone)
     );
   });
 

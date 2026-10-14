@@ -2,6 +2,7 @@
 
 import { Search, X, LayoutGrid, Grid2x2, Rows3, Table2 } from "lucide-react";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
+import { phoneMatches } from "@/lib/repair/phoneSearch";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
@@ -50,7 +51,7 @@ export function applyBenchFilter(jobs: RepairJob[], f: BenchFilter): RepairJob[]
     if (!q) return true;
     // Everything printed on the card, plus the dealer's own number — staff are
     // as likely to be given "54000" as our own job number.
-    return [
+    return phoneMatches(f.q, j.phone) || [
       j.id, j.dealerJobNo, j.customerName, j.phone,
       deviceOf(j), j.issue, j.dealer,
     ].some(v => (v ?? "").toLowerCase().includes(q));

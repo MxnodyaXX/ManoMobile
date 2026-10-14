@@ -92,6 +92,14 @@ export interface LabelData {
   /** The unlock code left with the device, when one was. Blank otherwise —
    *  so a design that prints it prints nothing for a device without one. */
   passcode?: string;
+  /** Accessory labels: the human-readable item code (MCB-005). On those
+   *  labels {{code}} is the numeric label barcode, so this is the only way
+   *  to print the item code beside it. */
+  itemCode?: string;
+  brand?: string;
+  /** Accessory's compatible model, e.g. "iPhone 15 / Universal". */
+  model?: string;
+  category?: string;
   title?: string;
   subtitle?: string;
   date?: string;
@@ -119,7 +127,11 @@ export const LABEL_TOKENS: { token: string; label: string; layouts?: string[] }[
   { token: "{{device}}",      label: "Device brand & model", layouts: ["repair", "device"] },
   { token: "{{imei}}",        label: "IMEI", layouts: ["repair", "device"] },
   { token: "{{imeiShort}}",   label: "IMEI (last 6 digits)", layouts: ["device"] },
-  { token: "{{price}}",       label: "Selling price", layouts: ["device"] },
+  { token: "{{price}}",       label: "Selling price", layouts: ["device", "accessory"] },
+  { token: "{{itemCode}}",    label: "Item code (e.g. MCB-005)", layouts: ["accessory"] },
+  { token: "{{brand}}",       label: "Brand", layouts: ["accessory"] },
+  { token: "{{model}}",       label: "Compatible model", layouts: ["accessory"] },
+  { token: "{{category}}",    label: "Category", layouts: ["accessory"] },
   { token: "{{deviceName}}",  label: "Device name", layouts: ["device"] },
   { token: "{{modelNumber}}", label: "Model number", layouts: ["device"] },
   { token: "{{fault}}",       label: "Reported fault", layouts: ["repair"] },
@@ -153,6 +165,10 @@ export function resolveTokens(text: string, data: LabelData): string {
     imei: data.imei,
     imeiShort: data.imeiShort,
     price: data.price,
+    itemCode: data.itemCode,
+    brand: data.brand,
+    model: data.model,
+    category: data.category,
     deviceName: data.deviceName,
     modelNumber: data.modelNumber,
     fault: data.fault,

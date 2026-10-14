@@ -59,7 +59,8 @@ export default function AddProductsModal({ existing, onAdd, onClose }: {
       p.brand.toLowerCase().includes(s) ||
       p.category.toLowerCase().includes(s) ||
       p.subcategory.toLowerCase().includes(s) ||
-      p.model.toLowerCase().includes(s),
+      p.model.toLowerCase().includes(s) ||
+      p.barcodes.some(b => b.toLowerCase().includes(s)),
     ).slice(0, 40);
   }, [products, q, picked]);
 

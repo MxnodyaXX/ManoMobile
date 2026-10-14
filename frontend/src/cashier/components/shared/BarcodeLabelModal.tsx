@@ -69,6 +69,8 @@ interface BarcodeLabelModalProps {
   deviceName?: string;
   /** For the {{modelNumber}} token on a device label design. */
   modelNumber?: string;
+  /** Accessory label tokens: {{itemCode}}, {{brand}}, {{model}}, {{category}}. */
+  accessory?: { itemCode: string; brand: string; model: string; category: string };
   /** The unlock code the customer left with the device, when they did. A tag
    *  for such a device uses the PASSCODE_TEMPLATE_NAME design where one
    *  exists, and the built-in tag prints the code. */
@@ -123,7 +125,7 @@ interface BarcodeLabelModalProps {
  * until it fits. Runs for both axes since a narrower label (38mm) can
  * overflow sideways even when a wider one (50mm) had enough slack.
  */
-export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, price, deviceName, modelNumber, passcode, outsideDealer = false, silent = false, ask = false, onReady, onClose }: BarcodeLabelModalProps) {
+export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, price, deviceName, modelNumber, accessory, passcode, outsideDealer = false, silent = false, ask = false, onReady, onClose }: BarcodeLabelModalProps) {
   const hasPasscode = !!passcode && passcode.trim() !== "";
   const { barcodeSettings: s } = useInventory();
   const labelRef = useRef<HTMLDivElement>(null);
@@ -328,6 +330,10 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
           price: price ?? "",
           deviceName: deviceName ?? "",
           modelNumber: modelNumber ?? "",
+          itemCode: accessory?.itemCode ?? "",
+          brand: accessory?.brand ?? "",
+          model: accessory?.model ?? "",
+          category: accessory?.category ?? "",
           fault: fault ?? "",
           passcode: hasPasscode ? passcode!.trim() : "",
           title: title ?? "",

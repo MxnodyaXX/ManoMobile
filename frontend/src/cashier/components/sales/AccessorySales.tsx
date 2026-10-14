@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import { useSales } from "@/cashier/contexts/SalesContext";
@@ -12,6 +12,9 @@ import Barcode from "react-barcode";
 import { fetchNextInvoiceNo } from "@/lib/sales/invoiceNo";
 import InvoiceNoBadge from "@/cashier/components/sales/InvoiceNoBadge";
 import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
+import { matchScannedAccessory } from "@/lib/inventory/accessoryScan";
+import { useToast } from "@/lib/ui/toast";
+import AccessoryScanModal from "./AccessoryScanModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -534,7 +537,7 @@ function Step1({
   customer, onCustomerChange,
   payMethod, onPayMethod,
   discount, onDiscount,
-  onOpenSearch,
+  onOpenSearch, onScan, scanFocusKey,
 }: {
   products: Product[];
   cart: CartItem[];
@@ -548,10 +551,28 @@ function Step1({
   discount: string;
   onDiscount: (v: string) => void;
   onOpenSearch: () => void;
+  /** A scanned or typed code from the SCAN box. */
+  onScan: (code: string) => void;
+  /** Bumped by the parent whenever the scan box should take focus back. */
+  scanFocusKey: number;
 }) {
   const isMobile = useIsMobile();
   const [query, setQuery] = useState("");
   const [barcodeVal, setBarcodeVal] = useState("");
+  const scanRef = useRef<HTMLInputElement>(null);
+
+  // Keep the scan box focused so a hardware scanner types into it, rather
+  // than into the page — where JobScanFab would take it for a repair ticket.
+  // Not on mobile: focusing pops the on-screen keyboard over the list.
+  useEffect(() => {
+    if (!isMobile) scanRef.current?.focus();
+  }, [scanFocusKey, isMobile]);
+
+  const submitScan = () => {
+    const code = barcodeVal.trim();
+    setBarcodeVal("");
+    if (code) onScan(code);
+  };
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [revealBuying, setRevealBuying] = useState<Record<number, boolean>>({});
   const [showCartPopup, setShowCartPopup] = useState(false);
@@ -560,9 +581,20 @@ function Step1({
   const MAX_TILES = 4;
 
   const filtered = products.filter((p) => {
-    const q = query.toLowerCase();
-    return !q || p.name.toLowerCase().includes(q) || p.model.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q);
+    const q = query.trim().toLowerCase();
+    return !q || p.name.toLowerCase().includes(q) || p.model.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q)
+      || p.code.toLowerCase().includes(q) || p.labelBarcode.includes(q) || p.barcodes.some(b => b.toLowerCase().includes(q));
   });
+
+  // Enter in the name box: an exact code/barcode (a scan that landed here
+  // instead of the SCAN box) goes to the cart; anything else just filters.
+  const submitQuery = () => {
+    const code = query.trim();
+    if (code && matchScannedAccessory(products, code).length > 0) {
+      setQuery("");
+      onScan(code);
+    }
+  };
 
   const cartQty = (id: number) => cart.find((c) => c.product.id === id)?.qty ?? 0;
 
@@ -582,18 +614,21 @@ function Step1({
         <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: isMobile ? "wrap" : "nowrap" }}>
           <input
             style={{ ...inputStyle, flex: isMobile ? "1 1 120px" : "0 0 180px" }}
+            ref={scanRef}
             placeholder="SCAN Barcode"
             value={barcodeVal}
             onChange={(e) => setBarcodeVal(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitScan(); } }}
           />
           <input
             style={{ ...inputStyle, flex: 1, minWidth: isMobile ? "100%" : 200 }}
             placeholder="Enter Item Code or Name"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitQuery(); } }}
           />
           <button
-            onClick={() => {}}
+            onClick={() => (barcodeVal.trim() ? submitScan() : submitQuery())}
             style={{
               padding: "8px 18px", borderRadius: 8, border: "1px solid var(--accent)",
               background: "var(--accent)", color: "var(--accent-fg)", fontSize: 13,
@@ -1875,7 +1910,10 @@ const INITIAL_CUSTOMER: CustomerInfo = { name: "", phone: "", whatsapp: "", emai
 export default function AccessorySales() {
   const { addEntry } = useCashRegister();
   const { addSale } = useSales();
-  const { products, sellStock, loading: productsLoading, configured: productsConfigured } = useAccessories();
+  const { products, sellStock, linkBarcode, loading: productsLoading, configured: productsConfigured } = useAccessories();
+  const toast = useToast();
+  const [scanResolve, setScanResolve] = useState<{ mode: "pick" | "link"; barcode: string; matches: Product[] } | null>(null);
+  const [scanFocusKey, setScanFocusKey] = useState(0);
   const [step, setStep] = useState(1);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customer, setCustomer] = useState<CustomerInfo>(INITIAL_CUSTOMER);
@@ -1905,6 +1943,33 @@ export default function AccessorySales() {
         ? prev.map((c) => c.product.id === p.id ? { ...c, qty: c.qty + 1 } : c)
         : [...prev, { product: p, qty: 1 }];
     });
+  };
+
+  /** Adds one unit if any is left; says so if not, rather than doing nothing. */
+  const addScanned = (p: Product) => {
+    if (p.stock <= 0) toast.error(`${p.name} is out of stock`);
+    else addToCart(p);
+  };
+
+  /**
+   * A scan of the shop's own label code or a packaging barcode. One match adds
+   * it; a barcode shared across products asks which; an unknown one offers to
+   * link it, so the box scans straight through next time.
+   */
+  const handleScan = (code: string) => {
+    const matches = matchScannedAccessory(availableProducts, code);
+    // Several batches of one item share the box barcode; once the old batch
+    // has sold out there's nothing to ask about.
+    const inStock = matches.filter(p => p.stock > 0);
+    if (matches.length === 1) { addScanned(matches[0]); setScanFocusKey(k => k + 1); }
+    else if (inStock.length === 1) { addScanned(inStock[0]); setScanFocusKey(k => k + 1); }
+    else if (matches.length > 1) setScanResolve({ mode: "pick", barcode: code, matches });
+    else setScanResolve({ mode: "link", barcode: code, matches: [] });
+  };
+
+  const closeScanResolve = () => {
+    setScanResolve(null);
+    setScanFocusKey(k => k + 1);
   };
 
   const addMultipleToCart = (selected: Product[]) => {
@@ -1995,6 +2060,8 @@ export default function AccessorySales() {
             discount={discount}
             onDiscount={setDiscount}
             onOpenSearch={() => setShowSearchPopup(true)}
+            onScan={handleScan}
+            scanFocusKey={scanFocusKey}
           />
         )}
         {step === 2 && (
@@ -2111,6 +2178,22 @@ export default function AccessorySales() {
           cart={cart}
           onAddMultiple={addMultipleToCart}
           onClose={() => setShowSearchPopup(false)}
+        />
+      )}
+
+      {scanResolve && (
+        <AccessoryScanModal
+          mode={scanResolve.mode}
+          barcode={scanResolve.barcode}
+          products={scanResolve.mode === "pick" ? scanResolve.matches : availableProducts}
+          onChoose={(p) => { addScanned(p); closeScanResolve(); }}
+          onLink={async (p) => {
+            await linkBarcode(p.id, scanResolve.barcode);
+            toast.success("Barcode linked", `${scanResolve.barcode} → ${p.name}`);
+            addScanned(p);
+            closeScanResolve();
+          }}
+          onClose={closeScanResolve}
         />
       )}
     </div>

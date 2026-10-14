@@ -24,6 +24,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { rulesForTechnician, type EffectiveRules } from "@/lib/settings/staffRules";
 import { useToast } from "@/lib/ui/toast";
 import { useJobSlot } from "@/lib/repair/useJobSlot";
+import { phoneMatches } from "@/lib/repair/phoneSearch";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -304,7 +305,7 @@ export default function MyJobs() {
       if (!j.id.toLowerCase().includes(q) && !(j.dealerJobNo ?? "").toLowerCase().includes(q) &&
           !j.model.toLowerCase().includes(q) &&
           !j.brand.toLowerCase().includes(q) && !j.customerName.toLowerCase().includes(q) &&
-          !(j.imei ?? "").includes(search) &&
+          !(j.imei ?? "").includes(search) && !phoneMatches(search, j.phone) &&
           !j.issue.toLowerCase().includes(q)) return false;
     }
     return true;
@@ -327,7 +328,7 @@ export default function MyJobs() {
       if (!j.id.toLowerCase().includes(q) && !(j.dealerJobNo ?? "").toLowerCase().includes(q) &&
           !j.model.toLowerCase().includes(q) &&
           !j.brand.toLowerCase().includes(q) && !j.customerName.toLowerCase().includes(q) &&
-          !(j.imei ?? "").includes(search) &&
+          !(j.imei ?? "").includes(search) && !phoneMatches(search, j.phone) &&
           !j.issue.toLowerCase().includes(q)) return false;
     }
     return true;

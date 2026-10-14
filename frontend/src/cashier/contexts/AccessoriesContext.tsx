@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { useRealtimeTable } from "@/lib/supabase/useRealtime";
 import {
   fetchAccessoryProducts, saveAccessoryProduct as saveProductRow,
-  deleteAccessoryProduct as deleteProductRow, sellAccessoryStock,
+  deleteAccessoryProduct as deleteProductRow, sellAccessoryStock, linkAccessoryBarcode,
 } from "@/lib/inventory/accessories";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 
@@ -43,6 +43,13 @@ export interface AccessoryProduct {
   addedDate: string;
   /** Optional merchandising note shown to cashiers, e.g. "Popular add-on". */
   insight?: string;
+  /** The shop's own numeric label barcode (in-store EAN-13). Assigned by the
+   *  database on insert — never sent on save; "" on a product not yet saved.
+   *  Unique per product row, so each batch of an item scans to its own price. */
+  labelBarcode: string;
+  /** Manufacturer barcodes off the packaging (accessory_barcodes). A scan of
+   *  any of these — or of `code`, the shop's own label — finds this product. */
+  barcodes: string[];
 }
 
 interface AccessoriesContextType {
@@ -55,6 +62,8 @@ interface AccessoriesContextType {
    *  any line is short on stock. Refetches afterwards so the numbers on
    *  screen are the database's, not arithmetic guessed here. */
   sellStock: (items: { id: number; qty: number }[]) => Promise<void>;
+  /** Links a scanned packaging barcode to an existing product. */
+  linkBarcode: (productId: number, barcode: string) => Promise<void>;
 
   loading: boolean;
   error: string | null;
@@ -88,7 +97,8 @@ export function AccessoriesProvider({ children }: { children: ReactNode }) {
 
   // A sale on the other till takes stock off these rows, so the count here
   // should not stay at what it was when this screen opened.
-  useRealtimeTable("accessory_products", reload);
+  // ...and a barcode linked at the other till should scan here too.
+  useRealtimeTable(["accessory_products", "accessory_barcodes"], reload);
 
   const saveProduct = useCallback(async (product: AccessoryProduct) => {
     const saved = await saveProductRow(product);
@@ -112,8 +122,16 @@ export function AccessoriesProvider({ children }: { children: ReactNode }) {
     try { setProducts(await fetchAccessoryProducts()); } catch { /* next reload corrects it */ }
   }, []);
 
+  const linkBarcode = useCallback(async (productId: number, barcode: string) => {
+    await linkAccessoryBarcode(productId, barcode);
+    const code = barcode.trim();
+    setProducts(prev => prev.map(p =>
+      p.id === productId && !p.barcodes.includes(code) ? { ...p, barcodes: [...p.barcodes, code].sort() } : p,
+    ));
+  }, []);
+
   return (
-    <AccessoriesContext.Provider value={{ products, saveProduct, deleteProduct, sellStock, loading, error, configured, reload }}>
+    <AccessoriesContext.Provider value={{ products, saveProduct, deleteProduct, sellStock, linkBarcode, loading, error, configured, reload }}>
       {children}
     </AccessoriesContext.Provider>
   );

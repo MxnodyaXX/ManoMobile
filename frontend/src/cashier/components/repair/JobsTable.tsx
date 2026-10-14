@@ -45,6 +45,7 @@ import Combobox from "@/cashier/components/shared/Combobox";
 import { useDeviceBrands } from "@/lib/repair/brands";
 import { useDeviceModelLookup } from "@/lib/repair/deviceModels";
 import { normaliseModelNumber } from "@/cashier/data/modelNumbers";
+import { phoneMatches } from "@/lib/repair/phoneSearch";
 
 interface FinishJobData {
   actionTaken: string;
@@ -2543,16 +2544,8 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
 
   const filteredJobs = useMemo(() => allJobs.filter(j => {
     const q = search.toLowerCase();
-    // The customer's number, compared as digits only, so "077 123 4567",
-    // "0771234567" and "+94 77 123 4567" all find the same job. Matched from
-    // the end (the last 9 digits) once enough is typed to mean a phone, so the
-    // leading 0 or +94 never gets in the way.
-    const qDigits = search.replace(/\D/g, "");
-    const phoneDigits = (j.phone ?? "").replace(/\D/g, "");
-    const matchPhone = qDigits.length >= 4 && (
-      phoneDigits.includes(qDigits) ||
-      (qDigits.length >= 9 && phoneDigits.endsWith(qDigits.slice(-9)))
-    );
+    // The customer's number, digits only — see phoneMatches.
+    const matchPhone = phoneMatches(search, j.phone);
     const matchView     = jobMatchesView(j, view);
     const matchSearch   = !search || matchPhone || j.customerName.toLowerCase().includes(q) || j.id.toLowerCase().includes(q) || (j.dealerJobNo ?? "").toLowerCase().includes(q) || j.model.toLowerCase().includes(q) || j.brand.toLowerCase().includes(q) || (findDealer(dealers, j)?.name ?? j.dealer ?? "").toLowerCase().includes(q);
     const matchPriority = priorityFilter === "All" || j.priority === priorityFilter;

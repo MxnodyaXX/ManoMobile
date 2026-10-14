@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAccessories } from "@/cashier/contexts/AccessoriesContext";
+import { matchScannedAccessory } from "@/lib/inventory/accessoryScan";
 import { useSales } from "@/cashier/contexts/SalesContext";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import { useCreditAccounts, type CreditAccount } from "@/lib/credit/api";
@@ -101,12 +102,14 @@ export default function PosScreen({ cashierName, onLogout }: { cashierName: stri
 
   const filteredProducts = useMemo(() => {
     const q = query.trim().toLowerCase();
+    // A packaging barcode scanned into the search box finds its product too.
+    const scanned = new Set(q ? matchScannedAccessory(accessories.products, query).map(p => p.id) : []);
     return products.filter(p => {
       const matchesCategory = category === ALL || p.category === category;
-      const matchesQuery = !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q);
+      const matchesQuery = !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || scanned.has(p.id);
       return matchesCategory && matchesQuery;
     });
-  }, [products, query, category]);
+  }, [products, accessories.products, query, category]);
 
   /* ── Parties ─────────────────────────────────────────────────────────── */
 

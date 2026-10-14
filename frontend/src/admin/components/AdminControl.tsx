@@ -1171,6 +1171,9 @@ function BarcodeManager() {
         <ReceiptTemplateManager kind="dealerInvoice" />
       ) : (
         <LabelTemplatesPanel
+          // One panel per tab: without the key, the draft open on Barcode
+          // Labels (a repair tag) carried over into Accessories/Mobile Devices.
+          key={section}
           templates={templates}
           loading={loading}
           error={error}

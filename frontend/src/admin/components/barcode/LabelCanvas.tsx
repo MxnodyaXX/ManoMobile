@@ -40,6 +40,25 @@ const SAMPLE: LabelData = {
   shopAddress: SHOP_DETAILS.address,
 };
 
+/** Accessory labels carry a shelf item, not a job — previewing one with a
+ *  customer and a fault on it would be designing against the wrong thing. */
+const ACCESSORY_SAMPLE: LabelData = {
+  code: "2000000000014",
+  itemCode: "MCB-005",
+  title: "MICRO - MODEMCAT",
+  subtitle: "MODEMCAT · Universal",
+  brand: "MODEMCAT",
+  model: "Universal",
+  category: "Data Cable",
+  price: "Rs.850",
+  date: SAMPLE.date,
+  shopName: SHOP_DETAILS.name,
+  shopPhone: SHOP_DETAILS.phone,
+  shopAddress: SHOP_DETAILS.address,
+};
+
+const sampleFor = (layout?: string) => (layout === "accessory" ? ACCESSORY_SAMPLE : SAMPLE);
+
 /** Another template whose design can be copied onto this one. */
 export interface DesignSource {
   id: string;
@@ -288,7 +307,7 @@ export default function LabelCanvas({
             <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
               <LabelRender
                 elements={elements}
-                data={SAMPLE}
+                data={sampleFor(layout)}
                 widthMm={widthMm}
                 heightMm={heightMm}
                 format={format}

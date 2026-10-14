@@ -6,6 +6,7 @@ import { useRepair, findDealer, IN_HOUSE_DEALER, type RepairJob } from "@/cashie
 import { fetchTransfers, transferCost, type AgentTransfer } from "@/lib/repair/agents";
 import ReceiveFromAgentModal from "@/technician/components/agents/ReceiveFromAgentModal";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
+import { phoneMatches } from "@/lib/repair/phoneSearch";
 
 const TA = "#34d399";
 const AGENT = "#a78bfa";
@@ -102,7 +103,8 @@ export default function AgentJobs({ technicianName }: { technicianName: string }
           (job?.dealerJobNo ?? "").toLowerCase().includes(q) ||
           [job?.brand, job?.model].filter(Boolean).join(" ").toLowerCase().includes(q) ||
           (job?.imei ?? "").includes(search.trim()) ||
-          (job?.customerName ?? "").toLowerCase().includes(q)
+          (job?.customerName ?? "").toLowerCase().includes(q) ||
+          phoneMatches(search, job?.phone)
         );
       })
       .sort((a, b) =>

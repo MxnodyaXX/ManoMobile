@@ -17,6 +17,7 @@ import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/Access
 import { useDevices, DEVICE_STATUS_LABEL, deviceWarrantyText, type DeviceRecord } from "@/cashier/contexts/DevicesContext";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
+import { matchScannedAccessory, normalizeScanCode } from "@/lib/inventory/accessoryScan";
 import { printLabelsNode } from "@/cashier/utils/printLabel";
 import { useToast } from "@/lib/ui/toast";
 import { useTableSort, SortHeader } from "@/lib/ui/useTableSort";
@@ -1716,8 +1717,11 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
   product: AccessoryProduct | null; existingProducts: AccessoryProduct[]; onSave: (p: AccessoryProduct) => Promise<unknown>; onClose: () => void;
 }) {
   const { brands, categories, subcategories, suppliers } = useInventory();
-  const blank: AccessoryProduct = { id: 0, code: "", name: "", brand: "", category: "", subcategory: "", model: "", buyingPrice: 0, sellingPrice: 0, stock: 0, minStock: 5, supplier: "", addedDate: new Date().toISOString().slice(0, 10), insight: "" };
+  const blank: AccessoryProduct = { id: 0, code: "", name: "", brand: "", category: "", subcategory: "", model: "", buyingPrice: 0, sellingPrice: 0, stock: 0, minStock: 5, supplier: "", addedDate: new Date().toISOString().slice(0, 10), insight: "", labelBarcode: "", barcodes: [] };
   const [form, setForm] = useState<AccessoryProduct>(product ?? blank);
+  // A "New batch" arrives prefilled from an existing product but with id 0.
+  const isEdit = !!product?.id;
+  const [barcodeInput, setBarcodeInput] = useState("");
   const [errors, setErrors] = useState<Partial<Record<keyof AccessoryProduct, string>>>({});
   const [approvalReq, setApprovalReq] = useState<ApprovalRequest | null>(null);
   const [anyMismatch, setAnyMismatch] = useState(false);
@@ -1781,6 +1785,24 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
   }
   function handleBrandChange(v: string)    { setForm(f => ({ ...f, brand: v, supplier: "" })); }
 
+  /** Scanner sends Enter after the code, so a scan into the box adds it. */
+  function addBarcode() {
+    const code = barcodeInput.trim();
+    setBarcodeInput("");
+    if (!code) return;
+    const key = normalizeScanCode(code);
+    setForm(f => f.barcodes.some(b => normalizeScanCode(b) === key) ? f : { ...f, barcodes: [...f.barcodes, code] });
+  }
+
+  // Not an error — unbranded stock often shares one barcode, and the sales
+  // screen asks which product on a shared scan — but worth seeing here.
+  const sharedBarcodes = useMemo(() => {
+    const others = existingProducts.filter(p => p.id !== form.id);
+    return form.barcodes
+      .map(b => ({ barcode: b, products: matchScannedAccessory(others, b) }))
+      .filter(s => s.products.length > 0);
+  }, [existingProducts, form.id, form.barcodes]);
+
   function handleEntityAdded(entityType: ApprovalRequest["entityType"], name: string) {
     if (entityType === "category") setForm(f => ({ ...f, category: name, subcategory: "", brand: "", supplier: "" }));
     else if (entityType === "subcategory") setForm(f => ({ ...f, subcategory: name }));
@@ -1824,7 +1846,7 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
         <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 1 }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{product ? "Edit Product" : "Add New Product"}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{isEdit ? "Edit Product" : product ? "New Batch" : "Add New Product"}</div>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>Fill in the product details below</div>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><X size={18} /></button>
@@ -1890,7 +1912,63 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
                   Generated from &quot;{form.category}&quot; — editable
                 </div>
               )}
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
+                Label barcode:{" "}
+                {form.labelBarcode
+                  ? <span style={{ fontFamily: "monospace", color: "var(--text-secondary)" }}>{form.labelBarcode}</span>
+                  : "assigned automatically on save"}
+              </div>
             </div>
+          </div>
+          {/* Row 3b: Packaging barcodes */}
+          <div>
+            <label style={labelStyle}>Packaging Barcodes (optional)</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                type="text"
+                value={barcodeInput}
+                onChange={e => setBarcodeInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addBarcode(); } }}
+                placeholder="Scan the barcode on the box"
+                disabled={anyMismatch}
+                style={{ ...inputStyle, flex: 1, opacity: anyMismatch ? 0.45 : 1, cursor: anyMismatch ? "not-allowed" : "text" }}
+              />
+              <button
+                type="button"
+                onClick={addBarcode}
+                disabled={anyMismatch || !barcodeInput.trim()}
+                style={{ padding: "0 14px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: anyMismatch || !barcodeInput.trim() ? "not-allowed" : "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+              >
+                Add
+              </button>
+            </div>
+            {form.barcodes.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                {form.barcodes.map(b => (
+                  <span key={b} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 6px 3px 9px", borderRadius: 6, background: "var(--accent-dim)", color: "var(--accent)", fontSize: 12, fontFamily: "monospace" }}>
+                    {b}
+                    <button
+                      type="button"
+                      onClick={() => setForm(f => ({ ...f, barcodes: f.barcodes.filter(x => x !== b) }))}
+                      title="Remove barcode"
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, display: "flex" }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {sharedBarcodes.map(s => (
+              <div key={s.barcode} style={{ fontSize: 11, color: "#d97706", marginTop: 4 }}>
+                {s.barcode} is also on {s.products.map(p => p.name).join(", ")} — the cashier will be asked which one on scan.
+              </div>
+            ))}
+            {form.barcodes.length === 0 && (
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
+                Box has a barcode? Scan it here and skip printing a label. The item code above always scans too.
+              </div>
+            )}
           </div>
           {/* Row 4: Compatible Model */}
           {field("Compatible Model", "model", "text", "e.g. iPhone 15 / Universal")}
@@ -1918,7 +1996,11 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
                 setSaving(true);
                 setSaveError(null);
                 try {
-                  await onSave({ ...form, id: form.id || 0 });
+                  // A code typed into the barcode box but never added still counts.
+                  const pending = barcodeInput.trim();
+                  const barcodes = pending && !form.barcodes.some(b => normalizeScanCode(b) === normalizeScanCode(pending))
+                    ? [...form.barcodes, pending] : form.barcodes;
+                  await onSave({ ...form, barcodes, id: form.id || 0 });
                   onClose();
                 } catch (e) {
                   setSaveError(e instanceof Error ? e.message : String(e));
@@ -1929,7 +2011,7 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
               disabled={anyMismatch || saving}
               style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: anyMismatch || saving ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", opacity: anyMismatch || saving ? 0.5 : 1 }}
             >
-              {saving ? "Saving…" : product ? "Save Changes" : "Add Product"}
+              {saving ? "Saving…" : isEdit ? "Save Changes" : "Add Product"}
             </button>
           </div>
         </div>
@@ -2897,7 +2979,7 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
       if (stockFilter === "In Stock" && p.stock === 0) return false;
       if (stockFilter === "Low Stock" && (p.stock === 0 || p.stock >= p.minStock)) return false;
       if (stockFilter === "Out of Stock" && p.stock > 0) return false;
-      if (q && !p.code.toLowerCase().includes(q) && !p.name.toLowerCase().includes(q) && !p.brand.toLowerCase().includes(q) && !p.supplier.toLowerCase().includes(q)) return false;
+      if (q && !p.code.toLowerCase().includes(q) && !p.name.toLowerCase().includes(q) && !p.brand.toLowerCase().includes(q) && !p.supplier.toLowerCase().includes(q) && !p.labelBarcode.includes(q) && !p.barcodes.some(b => b.toLowerCase().includes(q))) return false;
       return true;
     });
   }, [accessories, search, categoryFilter, subcategoryFilter, stockFilter]);
@@ -3020,7 +3102,10 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
                 const mp = marginPct(p.buyingPrice, p.sellingPrice);
                 return (
                   <tr key={p.id} style={{ background: isOut ? "rgba(220,38,38,0.04)" : isLow ? "rgba(180,83,9,0.04)" : "transparent" }}>
-                    <td style={{ ...tdBase, fontFamily: "monospace", fontWeight: 700, fontSize: 12 }}>{p.code}</td>
+                    <td style={{ ...tdBase, fontFamily: "monospace", fontWeight: 700, fontSize: 12 }}>
+                      {p.code}
+                      {p.labelBarcode && <div style={{ fontWeight: 400, fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }}>{p.labelBarcode}</div>}
+                    </td>
                     <td style={{ ...tdBase, fontWeight: 600, whiteSpace: "nowrap" }}>{p.name}</td>
                     <td style={tdBase}>{p.brand}</td>
                     <td style={tdBase}>
@@ -3050,6 +3135,17 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
                         </button>
                         <button onClick={() => setLabelProduct(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Print barcode label"><Tag size={14} /></button>
                         <button onClick={() => setEditProduct(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Edit"><Edit2 size={14} /></button>
+                        <button
+                          onClick={() => setEditProduct({
+                            ...p, id: 0, labelBarcode: "", stock: 0,
+                            code: generateCode(p.category, accessories),
+                            addedDate: new Date().toISOString().slice(0, 10),
+                          })}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}
+                          title="New batch — same item at a new price, with its own label barcode"
+                        >
+                          <Layers size={14} />
+                        </button>
                         <button onClick={() => setDeleteTarget(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }} title="Delete"><Trash2 size={14} /></button>
                       </div>
                     </td>
@@ -3090,9 +3186,11 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
       )}
       {labelProduct && (
         <BarcodeLabelModal
-          code={labelProduct.code}
+          code={labelProduct.labelBarcode || labelProduct.code}
           title={labelProduct.name}
           subtitle={`${labelProduct.brand} · ${labelProduct.model}`}
+          price={Rs(labelProduct.sellingPrice)}
+          accessory={{ itemCode: labelProduct.code, brand: labelProduct.brand, model: labelProduct.model, category: labelProduct.category }}
           variant="accessory"
           onClose={() => setLabelProduct(null)}
         />

@@ -27,6 +27,7 @@ import { warrantyLine } from "@/lib/repair/warrantyLine";
 import { useAccessories } from "@/cashier/contexts/AccessoriesContext";
 import AddProductsModal, { extraLineTotal, type ExtraLine } from "@/cashier/components/sales/AddProductsModal";
 import type { NewSaleItem } from "@/lib/sales/saleItems";
+import { phoneMatches } from "@/lib/repair/phoneSearch";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -685,6 +686,7 @@ export default function RepairSales({ initialDealer, initialJobId }: {
       r.brand.toLowerCase().includes(q) ||
       r.model.toLowerCase().includes(q) ||
       r.imei.includes(search) ||
+      phoneMatches(search, r.phone) ||
       r.customerName.toLowerCase().includes(q))
   );
 
@@ -1420,7 +1422,7 @@ export default function RepairSales({ initialDealer, initialJobId }: {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Job no., dealer no., brand, model, IMEI, customer…"
+            placeholder="Job no., dealer no., brand, model, IMEI, customer, phone…"
             disabled={!selectedDealer}
             style={{ width: "100%", padding: "9px 14px 9px 32px", borderRadius: 8, border: "1px solid var(--border)", background: selectedDealer ? "var(--bg-primary)" : "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 12.5, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", opacity: selectedDealer ? 1 : 0.5, boxSizing: "border-box" }}
           />

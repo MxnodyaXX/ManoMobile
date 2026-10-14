@@ -25,12 +25,14 @@ interface ProductRow {
   supplier: string;
   added_date: string;
   insight: string | null;
+  label_barcode: string;
+  accessory_barcodes: { barcode: string }[] | null;
 }
 
 const num = (v: number | string) => Number(v);
 
 const PRODUCT_COLUMNS =
-  "id, code, name, brand, category, subcategory, model, buying_price, selling_price, stock, min_stock, supplier, added_date, insight";
+  "id, code, name, brand, category, subcategory, model, buying_price, selling_price, stock, min_stock, supplier, added_date, insight, label_barcode, accessory_barcodes(barcode)";
 
 function toProduct(row: ProductRow): AccessoryProduct {
   return {
@@ -48,6 +50,8 @@ function toProduct(row: ProductRow): AccessoryProduct {
     supplier: row.supplier,
     addedDate: row.added_date,
     insight: row.insight ?? "",
+    labelBarcode: row.label_barcode,
+    barcodes: (row.accessory_barcodes ?? []).map(b => b.barcode).sort(),
   };
 }
 
@@ -85,13 +89,39 @@ export async function saveAccessoryProduct(product: AccessoryProduct): Promise<A
     ? sb.from("accessory_products").update(payload).eq("id", product.id)
     : sb.from("accessory_products").insert(payload);
 
-  const { data, error } = await query.select(PRODUCT_COLUMNS).single();
+  const { data, error } = await query.select("id").single();
 
   if (error) {
     if (error.code === "23505") throw new Error(`Code "${payload.code}" is already used by another product.`);
     throw new Error(error.message);
   }
-  return toProduct(data as ProductRow);
+
+  const id = (data as { id: number }).id;
+  const { error: bcError } = await sb.rpc("set_accessory_barcodes", {
+    p_product_id: id,
+    p_barcodes: product.barcodes.map(b => b.trim()).filter(Boolean),
+  });
+  if (bcError) throw new Error(`Product saved, but its barcodes were not: ${bcError.message}`);
+
+  // Read back after the barcodes are in, so the row returned carries them.
+  const { data: row, error: readError } = await sb
+    .from("accessory_products").select(PRODUCT_COLUMNS).eq("id", id).single();
+  if (readError) throw new Error(readError.message);
+  return toProduct(row as ProductRow);
+}
+
+/**
+ * Links one manufacturer barcode to a product — the "unknown barcode, which
+ * product is this?" step at the counter. Linking a code the product already
+ * has is a no-op, not an error.
+ */
+export async function linkAccessoryBarcode(productId: number, barcode: string): Promise<void> {
+  const code = barcode.trim();
+  if (!code) return;
+  const { error } = await getSupabaseBrowserClient()
+    .from("accessory_barcodes")
+    .upsert({ product_id: productId, barcode: code }, { onConflict: "product_id,barcode", ignoreDuplicates: true });
+  if (error) throw new Error(error.message);
 }
 
 export async function deleteAccessoryProduct(id: number): Promise<void> {
