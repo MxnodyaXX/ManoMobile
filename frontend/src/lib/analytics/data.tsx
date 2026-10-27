@@ -12,6 +12,9 @@ import { useRepair, type RepairJob, type RepairDealer } from "@/cashier/contexts
 import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
 import { useParts, type SparePart, type PartRequest } from "@/cashier/contexts/PartsContext";
 import { useAdmin, type Supplier, type PurchaseOrder } from "@/admin/contexts/AdminContext";
+import { fetchPurchaseAnalytics } from "@/lib/purchasing/analytics";
+
+type PurchaseAnalytics = Awaited<ReturnType<typeof fetchPurchaseAnalytics>>;
 
 /**
  * Everything Analytics reads, loaded once and shared by every tab.
@@ -184,7 +187,7 @@ async function readLedgers() {
   const safe = async <T,>(name: string, p: Promise<T>, empty: T): Promise<T> => {
     try { return await p; } catch (e) { problems.push(`${name}: ${e instanceof Error ? e.message : String(e)}`); return empty; }
   };
-  const [sales, saleLines, creditEntries, cashReturns, sms, events, soldDevices] = await Promise.all([
+  const [sales, saleLines, creditEntries, cashReturns, sms, events, soldDevices, purchasing] = await Promise.all([
     safe("sales", fetchSales(), [] as SaleTx[]),
     safe("sale lines", fetchAllSaleLines(), [] as SaleLine[]),
     safe("credit entries", fetchAllCreditEntries(), [] as CreditEntryLite[]),
@@ -192,8 +195,11 @@ async function readLedgers() {
     safe("SMS log", fetchSms(), [] as SmsRecord[]),
     safe("job events", fetchEvents(), [] as JobEvent[]),
     safe("sold phones", fetchSoldDevices(), [] as SoldDevice[]),
+    // Supplier invoices (migration 20261021000085). Null when they can't be
+    // read; AdminContext's in-memory lists stand in.
+    safe("supplier purchases", fetchPurchaseAnalytics(), null as PurchaseAnalytics | null),
   ]);
-  return { data: { sales, saleLines, creditEntries, cashReturns, sms, events, soldDevices }, problems };
+  return { data: { sales, saleLines, creditEntries, cashReturns, sms, events, soldDevices, purchasing }, problems };
 }
 
 export function AnalyticsProvider({ children }: { children: ReactNode }) {
@@ -207,8 +213,8 @@ export function AnalyticsProvider({ children }: { children: ReactNode }) {
 
   // `loaded` rides with the data it describes, so there is one state write
   // per read rather than a loading flag set from inside an effect.
-  const [own, setOwn] = useState<{ loaded: boolean; sales: SaleTx[]; saleLines: SaleLine[]; creditEntries: CreditEntryLite[]; cashReturns: CashReturn[]; sms: SmsRecord[]; events: JobEvent[]; soldDevices: SoldDevice[] }>({
-    loaded: !configured, sales: [], saleLines: [], creditEntries: [], cashReturns: [], sms: [], events: [], soldDevices: [],
+  const [own, setOwn] = useState<{ loaded: boolean; sales: SaleTx[]; saleLines: SaleLine[]; creditEntries: CreditEntryLite[]; cashReturns: CashReturn[]; sms: SmsRecord[]; events: JobEvent[]; soldDevices: SoldDevice[]; purchasing: PurchaseAnalytics | null }>({
+    loaded: !configured, sales: [], saleLines: [], creditEntries: [], cashReturns: [], sms: [], events: [], soldDevices: [], purchasing: null,
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -232,8 +238,12 @@ export function AnalyticsProvider({ children }: { children: ReactNode }) {
   }, [configured, reloadAccounts]);
 
   const value = useMemo<AnalyticsData>(() => {
-    const { loaded, ...rest } = own;
-    return { ...rest, jobs, dealers, agentCosts, products, parts, partRequests, suppliers, purchaseOrders, staff, accounts, loading: !loaded, error, configured, reload };
+    const { loaded, purchasing, ...rest } = own;
+    return {
+      ...rest, jobs, dealers, agentCosts, products, parts, partRequests,
+      suppliers: purchasing?.suppliers ?? suppliers, purchaseOrders: purchasing?.purchaseOrders ?? purchaseOrders,
+      staff, accounts, loading: !loaded, error, configured, reload,
+    };
   }, [own, jobs, dealers, agentCosts, products, parts, partRequests, suppliers, purchaseOrders, staff, accounts, error, configured, reload]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

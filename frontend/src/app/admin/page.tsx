@@ -11,7 +11,7 @@ import RepairCostBackfill from "@/admin/components/insights/RepairCostBackfill";
 import Analytics from "@/admin/components/analytics/Analytics";
 import StaffManagement from "@/admin/components/staff/StaffManagement";
 import Permissions    from "@/admin/components/permissions/Permissions";
-import Suppliers      from "@/admin/components/suppliers/Suppliers";
+import PurchasingHub  from "@/cashier/components/purchasing/PurchasingHub";
 import PurchaseOrders from "@/admin/components/purchaseorders/PurchaseOrders";
 import DeviceRegistry from "@/admin/components/devices/DeviceRegistry";
 import Notifications  from "@/admin/components/notifications/Notifications";
@@ -133,7 +133,7 @@ function AdminPageInner() {
             {activePage === "Repair Cost Backfill" && <RepairCostBackfill />}
             {activePage === "Staff Management" && <StaffManagement />}
             {activePage === "Permissions"      && <Permissions />}
-            {activePage === "Suppliers"        && <Suppliers />}
+            {activePage === "Suppliers"        && <PurchasingHub />}
             {activePage === "Purchase Orders"  && <PurchaseOrders />}
             {activePage === "Device Registry"  && <DeviceRegistry />}
             {activePage === "Notifications"    && <Notifications />}

@@ -126,6 +126,9 @@ export async function linkAccessoryBarcode(productId: number, barcode: string): 
 
 export async function deleteAccessoryProduct(id: number): Promise<void> {
   const { error } = await getSupabaseBrowserClient().from("accessory_products").delete().eq("id", id);
+  if (error?.code === "23503") {
+    throw new Error("This product was bought on a supplier invoice, so its history has to stay — set its stock to 0 instead of deleting it.");
+  }
   if (error) throw new Error(error.message);
 }
 
@@ -134,9 +137,14 @@ export async function deleteAccessoryProduct(id: number): Promise<void> {
  * sell_accessory_stock() in the migration for why this can't be a client-side
  * read-modify-write. Throws (and sells nothing) if any line is short on stock.
  */
-export async function sellAccessoryStock(items: { id: number; qty: number }[]): Promise<void> {
+export async function sellAccessoryStock(items: { id: number; qty: number }[], saleKey?: string): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await getSupabaseBrowserClient()
-    .rpc("sell_accessory_stock", { p_items: items });
+  const sb = getSupabaseBrowserClient();
+  let { error } = await sb.rpc("sell_accessory_stock", saleKey ? { p_items: items, p_sale_key: saleKey } : { p_items: items });
+  // A database without migration 20261021000085 has only the one-argument
+  // function. Sell anyway — the key only links batch movements to the invoice.
+  if (error && saleKey && (error.code === "PGRST202" || /p_sale_key/.test(error.message))) {
+    ({ error } = await sb.rpc("sell_accessory_stock", { p_items: items }));
+  }
   if (error) throw new Error(error.message);
 }

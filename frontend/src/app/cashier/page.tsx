@@ -25,7 +25,7 @@ import ReportsManagement from "@/cashier/components/reports/ReportsManagement";
 import CashRegister from "@/cashier/components/cashregister/CashRegister";
 import InvoiceHistory from "@/cashier/components/invoicehistory/InvoiceHistory";
 import AuditLog from "@/cashier/components/audit/AuditLog";
-import JobScanFab from "@/cashier/components/shared/JobScanFab";
+import CashierScan from "@/cashier/components/shared/CashierScan";
 import { InventoryProvider } from "@/cashier/contexts/InventoryContext";
 import { AccessoriesProvider } from "@/cashier/contexts/AccessoriesContext";
 import { DevicesProvider } from "@/cashier/contexts/DevicesContext";
@@ -661,7 +661,7 @@ export default function CashierPage() {
           </main>
         </div>
       </div>
-      <JobScanFab onOpenJob={openRepairJob} onIssueJob={issueRepairJob} />
+      <CashierScan onOpenJob={openRepairJob} onIssueJob={issueRepairJob} />
       {/* Breakdown behind whichever Revenue/Sales figure was clicked. Mounted
           here rather than inside the group so it survives the group re-render
           that opening it causes. */}

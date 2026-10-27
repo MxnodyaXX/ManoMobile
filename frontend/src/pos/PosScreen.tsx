@@ -219,7 +219,8 @@ export default function PosScreen({ cashierName, onLogout }: { cashierName: stri
     try {
       // Stock first, in one transaction. If anything ran out since it was
       // added (another till sold it), this throws and nothing below runs.
-      await accessories.sellStock(lines.map(l => ({ id: l.product.id, qty: l.qty })));
+      const saleKey = crypto.randomUUID();
+      await accessories.sellStock(lines.map(l => ({ id: l.product.id, qty: l.qty })), saleKey);
       const invoiceNo = await fetchNextInvoiceNo();
 
       if (method === "cash" && paid > 0) addEntry("in", "Cash Sale — POS", paid);
@@ -241,6 +242,7 @@ export default function PosScreen({ cashierName, onLogout }: { cashierName: stri
         customerPhone: party?.phone || null,
         dealerId: party?.dealerId ?? null,
         creditAccountId: party?.accountId ?? null,
+        saleKey,
         lineItems: lines.map(l => ({ type: "accessory" as const, id: l.product.id, qty: l.qty })),
         saleItems: lines.map(l => ({
           kind: "accessory" as const, referenceId: l.product.id, description: l.product.name,

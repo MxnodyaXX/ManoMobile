@@ -278,7 +278,11 @@ begin
   --
   -- Sequences do not follow their table — that is the whole reason an emptied
   -- database still books in at RM-076.
-  perform setval('public.repair_job_no_seq', (select count(*) from public.repair_jobs));
+  -- The highest RM number, not count(*): any job that isn't RM-numbered (a
+  -- dealer's own number) would otherwise leave the counter below the end.
+  perform setval('public.repair_job_no_seq', greatest(1, (
+    select coalesce(max(substring(id from 4)::bigint), 0)
+      from public.repair_jobs where id ~ '^RM-[0-9]+$')));
 
   -- ── 8. Say what happened ─────────────────────────────────────────────────
   select string_agg(format('%s  ->  %s', key, value), chr(10) order by value)

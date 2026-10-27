@@ -137,7 +137,7 @@ export async function deletePolicy(id: number): Promise<void> {
   if (!data?.length) throw new Error("Only an Admin or Admin Cashier can change warranty policies.");
 }
 
-function policyFor(policies: WarrantyPolicy[], kind: WarrantyPolicy["kind"], category?: string | null): WarrantyPolicy | null {
+export function policyFor(policies: WarrantyPolicy[], kind: WarrantyPolicy["kind"], category?: string | null): WarrantyPolicy | null {
   const cat = (category ?? "").trim().toLowerCase();
   return (cat && policies.find(p => p.kind === kind && (p.category ?? "").toLowerCase() === cat))
     || policies.find(p => p.kind === kind && !p.category)
@@ -241,7 +241,10 @@ export async function lookupWarranty(
     const nos = [...invoiceNos];
     const [{ data: sales }, { data: lines }] = await Promise.all([
       sb.from("sales").select("invoice_no, sold_on, status, customer, customer_phone, category, items, total, job_ids").in("invoice_no", nos),
-      sb.from("sale_items").select("invoice_no, kind, reference_id, description, qty, line_total").in("invoice_no", nos),
+      // "*" rather than a column list: warranty_days/warranty_label only exist
+      // after migration 20261021000084, and naming them would fail the whole
+      // lookup on a database that hasn't had it yet.
+      sb.from("sale_items").select("*").in("invoice_no", nos),
     ]);
     const accIds = ((lines ?? []) as Row[]).filter(l => l.kind === "accessory").map(l => String(l.reference_id));
     const cats = new Map<string, { category: string; code: string }>();
@@ -290,7 +293,10 @@ export async function lookupWarranty(
         const acc = kind === "accessory" ? cats.get(String(l.reference_id)) : undefined;
         const pol = policyFor(ctx.policies, policyKind, acc?.category);
         const own = kind === "device" ? deviceCover.get(String(l.reference_id)) : undefined;
-        const ownDays = own?.days ?? null;
+        // What the counter chose on this line (Quick Sale) beats the policy;
+        // a phone's own warranty, set on the device, beats both.
+        const lineDays = l.warranty_days == null ? null : Number(l.warranty_days);
+        const ownDays = own?.days ?? lineDays;
         const days = ownDays ?? pol?.durationDays ?? 0;
         const v = verdict(soldOn, days);
         const ownLabel = ownDays === null ? null

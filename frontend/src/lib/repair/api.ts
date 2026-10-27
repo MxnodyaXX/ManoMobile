@@ -625,6 +625,11 @@ export async function insertJob(job: Omit<RepairJob, "id"> & { id?: string }): P
  * sending this value back — only the sequence can guarantee uniqueness.
  */
 export async function previewNextJobNo(): Promise<string | null> {
+  // The counter itself, read by the database (migration 20261027000087).
+  // The fallback below sorts ids as text, which goes wrong past RM-999.
+  const peek = await getSupabaseBrowserClient().rpc("peek_next_job_no");
+  if (!peek.error && typeof peek.data === "string" && peek.data) return peek.data;
+
   const { data, error } = await getSupabaseBrowserClient()
     .from("repair_jobs")
     .select("id")

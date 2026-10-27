@@ -42,6 +42,10 @@ export interface SaleExtras {
    * description a person reads. Written straight after the header lands.
    */
   saleItems?: NewSaleItem[];
+  /** The key given to sellStock() for this sale. Stored on the row so the
+   *  stock movements (and the batches they came from) get this invoice
+   *  number — migration 20261021000085. */
+  saleKey?: string;
 }
 
 type Row = Record<string, unknown>;
@@ -115,37 +119,40 @@ export async function insertSale(sale: Omit<SaleTx, "id">, extras: SaleExtras = 
   const sb = getSupabaseBrowserClient();
   const { data: { user } } = await sb.auth.getUser();
 
-  const { data, error } = await sb
-    .from("sales")
-    .insert({
-      invoice_no: sale.invoiceNo,
-      sold_on: sale.date,
-      category: sale.category,
-      status: sale.status,
-      customer: sale.customer || "Walk-in",
-      customer_phone: extras.customerPhone ?? null,
-      dealer_id: extras.dealerId ?? null,
-      credit_account_id: extras.creditAccountId ?? null,
-      items: sale.items ?? "",
-      job_ids: extras.jobIds ?? [],
-      line_items: extras.lineItems ?? null,
-      total: sale.total,
-      subtotal: sale.subtotal ?? null,
-      discount: sale.discountAmount ?? 0,
-      paid: sale.paid ?? null,
-      discount_pct: sale.discountPct ?? null,
-      tax_pct: sale.taxPct ?? null,
-      tax_amount: sale.taxAmount ?? null,
-      payment_method: sale.paymentMethod ?? null,
-      cash_amount: sale.cashAmount ?? null,
-      card_amount: sale.cardAmount ?? null,
-      card_ref: sale.cardRef ?? null,
-      cashier: sale.cashier ?? null,
-      shift_id: sale.shiftId ?? null,
-      created_by: user?.id ?? null,
-    })
-    .select("*")
-    .single();
+  const row = {
+    invoice_no: sale.invoiceNo,
+    sold_on: sale.date,
+    category: sale.category,
+    status: sale.status,
+    customer: sale.customer || "Walk-in",
+    customer_phone: extras.customerPhone ?? null,
+    dealer_id: extras.dealerId ?? null,
+    credit_account_id: extras.creditAccountId ?? null,
+    items: sale.items ?? "",
+    job_ids: extras.jobIds ?? [],
+    line_items: extras.lineItems ?? null,
+    total: sale.total,
+    subtotal: sale.subtotal ?? null,
+    discount: sale.discountAmount ?? 0,
+    paid: sale.paid ?? null,
+    discount_pct: sale.discountPct ?? null,
+    tax_pct: sale.taxPct ?? null,
+    tax_amount: sale.taxAmount ?? null,
+    payment_method: sale.paymentMethod ?? null,
+    cash_amount: sale.cashAmount ?? null,
+    card_amount: sale.cardAmount ?? null,
+    card_ref: sale.cardRef ?? null,
+    cashier: sale.cashier ?? null,
+    shift_id: sale.shiftId ?? null,
+    created_by: user?.id ?? null,
+  };
+  const insert = (payload: Record<string, unknown>) => sb.from("sales").insert(payload).select("*").single();
+  let { data, error } = await insert(extras.saleKey ? { ...row, sale_key: extras.saleKey } : row);
+  // Before migration 20261021000085 there is no sale_key column; the sale
+  // itself matters more than the batch link, so record it without.
+  if (error && extras.saleKey && (error.code === "PGRST204" || /sale_key/.test(error.message))) {
+    ({ data, error } = await insert(row));
+  }
 
   if (error) throw new Error(explain(error.message, error.code));
 

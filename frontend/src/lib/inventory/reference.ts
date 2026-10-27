@@ -163,5 +163,8 @@ export async function setAccessorySupplierActive(id: number, active: boolean): P
 
 export async function deleteAccessorySupplier(id: number): Promise<void> {
   const { error } = await getSupabaseBrowserClient().from("accessory_suppliers").delete().eq("id", id);
+  if (error?.code === "23503") {
+    throw new Error("This supplier has purchase invoices or payments on record — deactivate them instead of deleting.");
+  }
   if (error) throw new Error(error.message);
 }

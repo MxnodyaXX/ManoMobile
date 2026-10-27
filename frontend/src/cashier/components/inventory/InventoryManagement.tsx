@@ -8,7 +8,8 @@ import {
   BarChart3, ArrowUpCircle, ArrowDownCircle, Sliders,
   ChevronDown, ChevronRight, ShieldAlert, ShieldCheck, Truck, Tag, CornerDownRight, Wrench, Layers, Printer,
 } from "lucide-react";
-import StockReceiving from "./StockReceiving";
+import PurchasingHub from "@/cashier/components/purchasing/PurchasingHub";
+import ProductBatchesModal from "@/cashier/components/purchasing/ProductBatchesModal";
 import DeviceWarrantyField from "./DeviceWarrantyField";
 import { setDevicesWarranty } from "@/lib/inventory/devices";
 import { useInventory, type Category, type Subcategory } from "@/cashier/contexts/InventoryContext";
@@ -36,7 +37,7 @@ interface ApprovalRequest {
   suggestedBrandType?: "device" | "accessory";
 }
 
-type InventoryTab = "Overview" | "Mobile Devices" | "Accessories" | "Repair Parts" | "Stock Receiving";
+type InventoryTab = "Overview" | "Mobile Devices" | "Accessories" | "Repair Parts" | "Suppliers";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1719,7 +1720,6 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
   const { brands, categories, subcategories, suppliers } = useInventory();
   const blank: AccessoryProduct = { id: 0, code: "", name: "", brand: "", category: "", subcategory: "", model: "", buyingPrice: 0, sellingPrice: 0, stock: 0, minStock: 5, supplier: "", addedDate: new Date().toISOString().slice(0, 10), insight: "", labelBarcode: "", barcodes: [] };
   const [form, setForm] = useState<AccessoryProduct>(product ?? blank);
-  // A "New batch" arrives prefilled from an existing product but with id 0.
   const isEdit = !!product?.id;
   const [barcodeInput, setBarcodeInput] = useState("");
   const [errors, setErrors] = useState<Partial<Record<keyof AccessoryProduct, string>>>({});
@@ -1846,7 +1846,7 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
         <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 1 }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{isEdit ? "Edit Product" : product ? "New Batch" : "Add New Product"}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{isEdit ? "Edit Product" : "Add New Product"}</div>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>Fill in the product details below</div>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}><X size={18} /></button>
@@ -2960,6 +2960,7 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
   const [adjustProduct, setAdjustProduct] = useState<AccessoryProduct | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AccessoryProduct | null>(null);
   const [labelProduct, setLabelProduct] = useState<AccessoryProduct | null>(null);
+  const [batchesProduct, setBatchesProduct] = useState<AccessoryProduct | null>(null);
 
   const { categories: categoryList, subcategories: subcategoryList } = useInventory();
   const categories = useMemo(() => ["All", ...categoryList.map(c => c.name).sort()], [categoryList]);
@@ -3135,15 +3136,7 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
                         </button>
                         <button onClick={() => setLabelProduct(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Print barcode label"><Tag size={14} /></button>
                         <button onClick={() => setEditProduct(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Edit"><Edit2 size={14} /></button>
-                        <button
-                          onClick={() => setEditProduct({
-                            ...p, id: 0, labelBarcode: "", stock: 0,
-                            code: generateCode(p.category, accessories),
-                            addedDate: new Date().toISOString().slice(0, 10),
-                          })}
-                          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }}
-                          title="New batch — same item at a new price, with its own label barcode"
-                        >
+                        <button onClick={() => setBatchesProduct(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Purchase batches and stock history">
                           <Layers size={14} />
                         </button>
                         <button onClick={() => setDeleteTarget(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }} title="Delete"><Trash2 size={14} /></button>
@@ -3184,6 +3177,7 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
           onClose={() => setDeleteTarget(null)}
         />
       )}
+      {batchesProduct && <ProductBatchesModal product={batchesProduct} onClose={() => setBatchesProduct(null)} />}
       {labelProduct && (
         <BarcodeLabelModal
           code={labelProduct.labelBarcode || labelProduct.code}
@@ -3217,7 +3211,7 @@ export default function InventoryManagement() {
     // belongs with the other things it counts rather than filed away with the
     // reference data an admin edits once a month.
     { id: "Repair Parts",    icon: Wrench,     label: "Repair Parts" },
-    { id: "Stock Receiving", icon: Truck,      label: "Stock Receiving" },
+    { id: "Suppliers",       icon: Truck,      label: "Suppliers & Purchases" },
   ];
 
   return (
@@ -3299,7 +3293,7 @@ export default function InventoryManagement() {
         )}
         {tab === "Accessories"     && <AccessoriesTab accessories={accessories} loading={accLoading} configured={accConfigured} saveProduct={saveProduct} deleteProduct={deleteProduct} />}
         {tab === "Repair Parts"    && <RepairPartsManager />}
-        {tab === "Stock Receiving" && <StockReceiving />}
+        {tab === "Suppliers"       && <PurchasingHub />}
       </div>
     </div>
   );

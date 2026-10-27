@@ -60,8 +60,10 @@ interface AccessoriesContextType {
   deleteProduct: (id: number) => Promise<void>;
   /** Deducts stock for a whole cart atomically; throws (selling nothing) if
    *  any line is short on stock. Refetches afterwards so the numbers on
-   *  screen are the database's, not arithmetic guessed here. */
-  sellStock: (items: { id: number; qty: number }[]) => Promise<void>;
+   *  screen are the database's, not arithmetic guessed here. `saleKey` is
+   *  passed again as SaleExtras.saleKey so the batch movements get the
+   *  invoice number (migration 20261021000085). */
+  sellStock: (items: { id: number; qty: number }[], saleKey?: string) => Promise<void>;
   /** Links a scanned packaging barcode to an existing product. */
   linkBarcode: (productId: number, barcode: string) => Promise<void>;
 
@@ -115,8 +117,8 @@ export function AccessoriesProvider({ children }: { children: ReactNode }) {
     setProducts(prev => prev.filter(p => p.id !== id));
   }, []);
 
-  const sellStock = useCallback(async (items: { id: number; qty: number }[]) => {
-    await sellAccessoryStock(items);
+  const sellStock = useCallback(async (items: { id: number; qty: number }[], saleKey?: string) => {
+    await sellAccessoryStock(items, saleKey);
     // Refetch rather than subtract locally — the database's numbers, not a
     // second copy of the arithmetic that could drift from them.
     try { setProducts(await fetchAccessoryProducts()); } catch { /* next reload corrects it */ }

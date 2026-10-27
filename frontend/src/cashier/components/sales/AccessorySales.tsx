@@ -2132,7 +2132,8 @@ export default function AccessorySales() {
                 // if anything ran out since it was added (another till sold
                 // it in the meantime), this throws and nothing below runs:
                 // no invoice for stock that doesn't exist.
-                await sellStock(cart.map(c => ({ id: c.product.id, qty: c.qty })));
+                const saleKey = crypto.randomUUID();
+                await sellStock(cart.map(c => ({ id: c.product.id, qty: c.qty })), saleKey);
                 const invoiceNo = await fetchNextInvoiceNo();
                 const subtotal = cart.reduce((s, c) => s + c.product.sellingPrice * c.qty, 0);
                 const total = Math.max(0, subtotal - (parseFloat(discount) || 0));
@@ -2151,6 +2152,7 @@ export default function AccessorySales() {
                   // So a later void can restock exactly what this sale sold —
                   // see void_sale() in the migration.
                   lineItems: cart.map(c => ({ type: "accessory" as const, id: c.product.id, qty: c.qty })),
+                  saleKey,
                 });
                 setCompleted(true);
               } catch (e) {

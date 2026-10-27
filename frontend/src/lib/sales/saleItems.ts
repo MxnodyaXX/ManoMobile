@@ -25,9 +25,15 @@ export interface NewSaleItem {
   discount?: number;
   /** Stored as printed. Defaults to qty × unitPrice − discount. */
   lineTotal?: number;
+  /** Warranty given at the counter, in days (0 = none). Omitted = none chosen,
+   *  and the Warranty Center falls back to the shop's policy. Migration
+   *  20261021000084. */
+  warrantyDays?: number;
+  /** How that warranty was printed, e.g. "3 months warranty". */
+  warrantyLabel?: string;
 }
 
-export interface SaleItem extends Required<Omit<NewSaleItem, "referenceId">> {
+export interface SaleItem extends Required<Omit<NewSaleItem, "referenceId" | "warrantyDays" | "warrantyLabel">> {
   id: number;
   invoiceNo: string;
   referenceId: string | null;
@@ -80,6 +86,9 @@ export async function insertSaleItems(saleId: string, invoiceNo: string, items: 
       discount: i.discount ?? 0,
       line_total: lineTotalOf(i),
       sort_order: n,
+      // Only sent when set, so screens that never choose a warranty keep
+      // working against a database without migration 20261021000084.
+      ...(i.warrantyDays != null ? { warranty_days: i.warrantyDays, warranty_label: i.warrantyLabel ?? null } : {}),
     })));
   if (error) throw new Error(`The invoice was saved but its lines were not: ${error.message}`);
 }
