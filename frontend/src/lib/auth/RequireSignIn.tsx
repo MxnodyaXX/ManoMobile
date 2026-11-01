@@ -25,8 +25,11 @@ import { isSupabaseConfigured } from "@/lib/supabase/client";
  * the older email-and-password form, kept as a way in when someone's name is
  * not on the roster. /track is the public job lookup customers use; /dealer is
  * the dealer portal behind the QR on a dealer invoice (secret-token gated).
+ * /web is the customer website (home, shop, account) — open to everyone.
  */
-const PUBLIC_PATHS = ["/login", "/track", "/dealer", "/d", "/auth"];
+const PUBLIC_PATHS = ["/login", "/track", "/dealer", "/d", "/auth", "/web"];
+
+const CUSTOMER_PATHS = ["/web", "/track", "/dealer", "/d"];
 
 const isPublic = (pathname: string) =>
   pathname === "/" || PUBLIC_PATHS.some(p => pathname === p || pathname.startsWith(`${p}/`));
@@ -45,6 +48,13 @@ export default function RequireSignIn({ children }: { children: React.ReactNode 
     // so it was a parameter that looked like a feature and was not one.
     router.replace("/");
   }, [blocked, router]);
+
+  // Public pages need nobody signed in, so they render straight away — on the
+  // server too. Waiting for the auth check here left the customer website as
+  // an empty shell for search engines and link previews.
+  // Not "/" or /login: those decide where a signed-in person goes and must
+  // still wait to know who that is.
+  if (CUSTOMER_PATHS.some(p => pathname === p || pathname.startsWith(`${p}/`))) return <>{children}</>;
 
   // Render nothing while the answer is unknown or the redirect is in flight.
   // A flash of the till belonging to nobody is worse than a blank moment, and

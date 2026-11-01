@@ -1091,18 +1091,16 @@ function AddEditDeviceModal({ device, devices, onSave, onClose }: {
     () => brands.filter(b => b.type === "device" || b.type === "both").map(b => b.name).sort(),
     [brands]
   );
-  const selectedBrandObj = useMemo(() => brands.find(b => b.name === form.brand), [brands, form.brand]);
+  // Every active supplier — not narrowed by brand (see the accessory form).
   const deviceSuppliers = useMemo(
-    () => suppliers
-      .filter(s => !selectedBrandObj || s.brandIds.length === 0 || s.brandIds.includes(selectedBrandObj.id))
-      .map(s => s.name).sort(),
-    [suppliers, selectedBrandObj]
+    () => suppliers.filter(s => s.active).map(s => s.name).sort(),
+    [suppliers]
   );
 
-  function handleBrandChange(v: string) { setForm(f => ({ ...f, brand: v, supplier: "" })); }
+  function handleBrandChange(v: string) { setForm(f => ({ ...f, brand: v })); }
 
   function handleEntityAdded(entityType: ApprovalRequest["entityType"], name: string) {
-    if (entityType === "brand") setForm(f => ({ ...f, brand: name, supplier: "" }));
+    if (entityType === "brand") setForm(f => ({ ...f, brand: name }));
     else if (entityType === "supplier") setForm(f => ({ ...f, supplier: name }));
   }
 
@@ -1218,7 +1216,7 @@ function AddEditDeviceModal({ device, devices, onSave, onClose }: {
               options={deviceSuppliers}
               entityType="supplier"
               error={errors.supplier}
-              disabled={anyMismatch || !form.brand}
+              disabled={anyMismatch}
               onPromptChange={setAnyMismatch}
               onNewRequest={v => setApprovalReq({ entityType: "supplier", newName: v, presetBrandName: form.brand })}
             />
@@ -1334,18 +1332,16 @@ function BulkAddDevicesModal({ devices, saveDevice, onClose }: {
     () => brands.filter(b => b.type === "device" || b.type === "both").map(b => b.name).sort(),
     [brands]
   );
-  const selectedBrandObj = useMemo(() => brands.find(b => b.name === shared.brand), [brands, shared.brand]);
+  // Every active supplier — not narrowed by brand (see the accessory form).
   const deviceSuppliers = useMemo(
-    () => suppliers
-      .filter(s => !selectedBrandObj || s.brandIds.length === 0 || s.brandIds.includes(selectedBrandObj.id))
-      .map(s => s.name).sort(),
-    [suppliers, selectedBrandObj]
+    () => suppliers.filter(s => s.active).map(s => s.name).sort(),
+    [suppliers]
   );
 
-  function handleBrandChange(v: string) { setShared(s => ({ ...s, brand: v, supplier: "" })); }
+  function handleBrandChange(v: string) { setShared(s => ({ ...s, brand: v })); }
 
   function handleEntityAdded(entityType: ApprovalRequest["entityType"], name: string) {
-    if (entityType === "brand") setShared(s => ({ ...s, brand: name, supplier: "" }));
+    if (entityType === "brand") setShared(s => ({ ...s, brand: name }));
     else if (entityType === "supplier") setShared(s => ({ ...s, supplier: name }));
   }
 
@@ -1591,7 +1587,7 @@ function BulkAddDevicesModal({ devices, saveDevice, onClose }: {
               options={deviceSuppliers}
               entityType="supplier"
               error={sharedErrors.supplier}
-              disabled={anyMismatch || !shared.brand}
+              disabled={anyMismatch}
               onPromptChange={setAnyMismatch}
               onNewRequest={v => setApprovalReq({ entityType: "supplier", newName: v, presetBrandName: shared.brand })}
             />
@@ -1747,7 +1743,6 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
     () => !!selectedCatObj && subcategories.some(s => s.active && s.categoryId === selectedCatObj.id),
     [subcategories, selectedCatObj],
   );
-  const selectedBrandObj = useMemo(() => brands.find(b => b.name === form.brand), [brands, form.brand]);
 
   // Deactivated entries stay picked if a product already has one (the value
   // just won't appear for a *new* pick) — filtered here, not in the fetch,
@@ -1763,11 +1758,12 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
     [brands, selectedCatObj]
   );
 
+  // Every active supplier, whatever the brand. Filtering by the brands a
+  // supplier was tagged with hid suppliers the shop actually buys from (a
+  // category whose brands no one had tagged showed only two).
   const supplierOptions = useMemo(
-    () => suppliers
-      .filter(s => s.active && (!selectedBrandObj || s.brandIds.length === 0 || s.brandIds.includes(selectedBrandObj.id)))
-      .map(s => s.name).sort(),
-    [suppliers, selectedBrandObj]
+    () => suppliers.filter(s => s.active).map(s => s.name).sort(),
+    [suppliers]
   );
 
   /**
@@ -1780,10 +1776,11 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
     setForm(f => {
       if (f.category === cat) return { ...f, subcategory: subcat };
       const newCode = cat ? generateCode(cat, existingProducts.filter(p => p.id !== f.id)) : "";
-      return { ...f, category: cat, subcategory: subcat, brand: "", supplier: "", code: newCode };
+      return { ...f, category: cat, subcategory: subcat, brand: "", code: newCode };
     });
   }
-  function handleBrandChange(v: string)    { setForm(f => ({ ...f, brand: v, supplier: "" })); }
+  // The supplier no longer depends on the brand, so changing one keeps the other.
+  function handleBrandChange(v: string)    { setForm(f => ({ ...f, brand: v })); }
 
   /** Scanner sends Enter after the code, so a scan into the box adds it. */
   function addBarcode() {
@@ -1804,9 +1801,9 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
   }, [existingProducts, form.id, form.barcodes]);
 
   function handleEntityAdded(entityType: ApprovalRequest["entityType"], name: string) {
-    if (entityType === "category") setForm(f => ({ ...f, category: name, subcategory: "", brand: "", supplier: "" }));
+    if (entityType === "category") setForm(f => ({ ...f, category: name, subcategory: "", brand: "" }));
     else if (entityType === "subcategory") setForm(f => ({ ...f, subcategory: name }));
-    else if (entityType === "brand") setForm(f => ({ ...f, brand: name, supplier: "" }));
+    else if (entityType === "brand") setForm(f => ({ ...f, brand: name }));
     else setForm(f => ({ ...f, supplier: name }));
   }
 
@@ -1885,7 +1882,7 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
               options={supplierOptions}
               entityType="supplier"
               error={errors.supplier}
-              disabled={anyMismatch || !form.brand}
+              disabled={anyMismatch}
               onPromptChange={setAnyMismatch}
               onNewRequest={v => setApprovalReq({ entityType: "supplier", newName: v, presetBrandName: form.brand })}
             />
