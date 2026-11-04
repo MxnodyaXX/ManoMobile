@@ -499,7 +499,8 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
   const rebuiltRef = useRef<HTMLDivElement>(null);
   const printRebuilt = () => {
     const el = rebuiltRef.current;
-    if (!el) return;
+    // Still on the plain layout while the designed template loads — wait.
+    if (!el || el.dataset.templatePending) return;
     printInvoiceDocument({ invoiceNo: tx.invoiceNo, html: el.outerHTML, pageCss: rebuilt.pageCss, createdAt: tx.date });
   };
   const canPrint = !!doc || (!loading && !rebuilt.loading);

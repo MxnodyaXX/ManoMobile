@@ -144,3 +144,9 @@ export function useAccessories() {
   if (!ctx) throw new Error("useAccessories must be inside <AccessoriesProvider>");
   return ctx;
 }
+
+/** The catalogue when there is one — for screens that only use it to fill in
+ *  details (a product's code on a reprint) and must still work without it. */
+export function useOptionalAccessories() {
+  return useContext(AccessoriesContext);
+}

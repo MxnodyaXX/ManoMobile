@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/supabase/fetchAll";
 import { fetchSales } from "@/lib/sales/api";
 import type { SaleTx } from "@/cashier/contexts/SalesContext";
 import type { SaleItemKind } from "@/lib/sales/saleItems";
@@ -113,37 +114,42 @@ type Row = Record<string, unknown>;
 const num = (v: unknown) => (v == null ? 0 : Number(v));
 const str = (v: unknown) => (v == null ? null : String(v));
 
+// Every reader below pages through fetchAllRows — a single read stops at
+// 1,000 rows, which is how Analytics showed exactly 1,000 jobs.
+const sbc = () => getSupabaseBrowserClient();
+
 async function fetchSoldDevices(): Promise<SoldDevice[]> {
-  const { data, error } = await getSupabaseBrowserClient()
+  const data = await fetchAllRows<Row>((from, to) => sbc()
     .from("mobile_devices")
     .select("id, sold_invoice_no, buying_price, sold_price")
-    .not("sold_invoice_no", "is", null);
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as Row[]).map(r => ({
+    .not("sold_invoice_no", "is", null)
+    .order("id")
+    .range(from, to));
+  return data.map(r => ({
     id: Number(r.id), invoiceNo: String(r.sold_invoice_no), buyingPrice: num(r.buying_price),
     soldPrice: r.sold_price == null ? null : num(r.sold_price),
   }));
 }
 
 async function fetchAllSaleLines(): Promise<SaleLine[]> {
-  const { data, error } = await getSupabaseBrowserClient()
+  const data = await fetchAllRows<Row>((from, to) => sbc()
     .from("sale_items")
     .select("id, invoice_no, kind, reference_id, description, qty, unit_price, discount, line_total")
-    .order("id", { ascending: false });
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as Row[]).map(r => ({
+    .order("id", { ascending: false })
+    .range(from, to));
+  return data.map(r => ({
     id: Number(r.id), invoiceNo: String(r.invoice_no), kind: r.kind as SaleItemKind, referenceId: str(r.reference_id),
     description: String(r.description ?? ""), qty: num(r.qty), unitPrice: num(r.unit_price), discount: num(r.discount), lineTotal: num(r.line_total),
   }));
 }
 
 async function fetchAllCreditEntries(): Promise<CreditEntryLite[]> {
-  const { data, error } = await getSupabaseBrowserClient()
+  const data = await fetchAllRows<Row>((from, to) => sbc()
     .from("credit_entries")
     .select("id, account_id, kind, amount, occurred_on, due_on, job_id, invoice_no, created_by, created_at")
-    .order("id", { ascending: false });
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as Row[]).map(r => ({
+    .order("id", { ascending: false })
+    .range(from, to));
+  return data.map(r => ({
     id: Number(r.id), accountId: String(r.account_id), kind: r.kind as CreditEntryLite["kind"], amount: num(r.amount),
     occurredOn: String(r.occurred_on), dueOn: str(r.due_on), jobId: str(r.job_id), invoiceNo: str(r.invoice_no),
     createdBy: str(r.created_by), createdAt: String(r.created_at),
@@ -151,13 +157,13 @@ async function fetchAllCreditEntries(): Promise<CreditEntryLite[]> {
 }
 
 async function fetchSms(): Promise<SmsRecord[]> {
-  const { data, error } = await getSupabaseBrowserClient()
+  // The latest 5,000 — .limit(5000) alone was quietly capped at 1,000.
+  const data = await fetchAllRows<Row>((from, to) => sbc()
     .from("sms_messages")
     .select("id, status, purpose, job_id, cost, sms_count, sent_by_name, created_at")
     .order("id", { ascending: false })
-    .limit(5000);
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as Row[]).map(r => ({
+    .range(from, to), { limit: 5000 });
+  return data.map(r => ({
     id: Number(r.id), status: String(r.status), purpose: str(r.purpose), jobId: str(r.job_id),
     cost: r.cost == null ? null : Number(r.cost), count: r.sms_count == null ? null : Number(r.sms_count),
     sentByName: str(r.sent_by_name), createdAt: String(r.created_at),
@@ -165,13 +171,13 @@ async function fetchSms(): Promise<SmsRecord[]> {
 }
 
 async function fetchEvents(): Promise<JobEvent[]> {
-  const { data, error } = await getSupabaseBrowserClient()
+  // The latest 20,000 — .limit(20000) alone was quietly capped at 1,000.
+  const data = await fetchAllRows<Row>((from, to) => sbc()
     .from("repair_job_events")
     .select("id, job_id, from_status, to_status, note, changed_by, changed_at, technician_from, technician_to")
     .order("id", { ascending: false })
-    .limit(20000);
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as Row[]).map(r => ({
+    .range(from, to), { limit: 20000 });
+  return data.map(r => ({
     id: Number(r.id), jobId: String(r.job_id), from: str(r.from_status), to: String(r.to_status),
     note: str(r.note), changedBy: str(r.changed_by), changedAt: String(r.changed_at),
     technicianFrom: str(r.technician_from), technicianTo: str(r.technician_to),

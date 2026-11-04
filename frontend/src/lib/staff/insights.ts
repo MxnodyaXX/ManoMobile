@@ -6,6 +6,7 @@ import type { Supplier, PurchaseOrder } from "@/admin/contexts/AdminContext";
 import type { StaffProfile } from "@/lib/staff/api";
 import { bucketsFor, periodRange, type FigurePeriod } from "@/lib/repair/figures";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/supabase/fetchAll";
 
 /**
  * The arithmetic behind Staff Insights.
@@ -113,13 +114,15 @@ export interface CreditPayment {
 /** Every payment taken on account, with the login that took it. */
 export async function fetchCreditPayments(): Promise<CreditPayment[]> {
   if (!isSupabaseConfigured()) return [];
-  const { data, error } = await getSupabaseBrowserClient()
+  // Every payment ever taken grows past 1,000 — paged (see fetchAllRows).
+  const sb = getSupabaseBrowserClient();
+  const data = await fetchAllRows<Record<string, unknown>>((from, to) => sb
     .from("credit_entries")
     .select("id, amount, occurred_on, created_by, invoice_no, note, created_at")
     .eq("kind", "Payment")
-    .order("id", { ascending: false });
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as Record<string, unknown>[]).map(r => ({
+    .order("id", { ascending: false })
+    .range(from, to));
+  return data.map(r => ({
     id: Number(r.id),
     amount: Number(r.amount ?? 0),
     occurredOn: r.occurred_on as string,

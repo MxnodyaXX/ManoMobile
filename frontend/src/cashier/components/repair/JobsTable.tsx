@@ -46,6 +46,7 @@ import { useDeviceBrands } from "@/lib/repair/brands";
 import { useDeviceModelLookup } from "@/lib/repair/deviceModels";
 import { normaliseModelNumber } from "@/cashier/data/modelNumbers";
 import { phoneMatches } from "@/lib/repair/phoneSearch";
+import { docDate } from "@/lib/docDate";
 
 interface FinishJobData {
   actionTaken: string;
@@ -820,7 +821,7 @@ function IntakeSlipModal({ job, onClose }: { job: RepairJob; onClose: () => void
     adminApprover: "",
     warranty: job.jobWarranty ?? "",
     invoiceNo: job.id,
-    createdAt: fmtSlipDate(job.handover?.handedOverAt ?? job.completedAt ?? job.createdAt),
+    createdAt: docDate(job.handover?.handedOverAt ?? job.completedAt ?? job.createdAt),
   };
 
   if (typeof document === "undefined") return null;
@@ -3101,6 +3102,7 @@ export default function JobsTable({ view = "All", title, icon: Icon, description
           code={labelJob.id}
           title={`${labelJob.brand} ${labelJob.model}`.trim()}
           subtitle={labelJob.customerName}
+          phone={isInHouseDealer(dealers, labelJob) ? labelJob.phone : undefined}
           fault={labelJob.issue}
           imei={labelJob.imei}
           passcode={labelJob.passcodeType !== "None" ? labelJob.devicePasscode : undefined}

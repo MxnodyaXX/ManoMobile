@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/supabase/fetchAll";
 
 /**
  * Money the shop hands back.
@@ -65,15 +66,20 @@ const toCashReturn = (r: Row): CashReturn => ({
 });
 
 export async function fetchCashReturns(limit = 200): Promise<CashReturn[]> {
-  const { data, error } = await getSupabaseBrowserClient()
-    .from("cash_returns")
-    .select(COLUMNS)
-    .order("returned_on", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(limit);
-
-  if (error) throw new Error(`Could not load cash returns: ${error.message}`);
-  return (data as Row[]).map(toCashReturn);
+  // Paged: a limit above 1,000 was quietly capped at 1,000 (see fetchAllRows).
+  const sb = getSupabaseBrowserClient();
+  try {
+    const rows = await fetchAllRows<Row>((from, to) => sb
+      .from("cash_returns")
+      .select(COLUMNS)
+      .order("returned_on", { ascending: false })
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to), { limit });
+    return rows.map(toCashReturn);
+  } catch (e) {
+    throw new Error(`Could not load cash returns: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /** Every return recorded against one repair job. Normally none or one. */

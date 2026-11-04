@@ -10,7 +10,7 @@ import ReceiptRender from "@/cashier/components/shared/ReceiptRender";
 import { SHOP_DETAILS } from "@/lib/shop";
 import {
   blankReceiptElement, clampReceiptElement, copyReceiptElements, RECEIPT_TOKENS,
-  INVOICE_COLUMNS, invoiceColumns,
+  INVOICE_COLUMNS, invoiceColumns, ACCESSORY_INVOICE_COLUMNS,
   type ReceiptElement, type ReceiptElementType, type ReceiptData, type TemplateKind,
   type InvoiceColumn, type RepeatScope,
 } from "@/lib/repair/receiptElements";
@@ -48,6 +48,25 @@ const SAMPLE: ReceiptData = {
   paidAmount: "8,000", dueAmount: "0", paymentType: "CASH / FULL", adminApprover: "",
 };
 
+/** The accessory invoice's stand-ins — a counter sale of three products, so
+ *  the item table previews as the list it really prints. */
+const ACCESSORY_SAMPLE: ReceiptData = {
+  ...SAMPLE,
+  invoiceNo: "INV-01024", jobId: "", device: "", imei: "", estimate: "", advance: "",
+  trackUrl: typeof window === "undefined" ? "" : `${publicOrigin()}/verify?inv=INV-01024`,
+  remarks: "", discount: "200", paymentType: "CASH", itemCount: "4",
+  subtotal: "6,700", total: "6,500", received: "7,000", change: "500",
+  paidAmount: "6,500", dueAmount: "0",
+};
+const ACCESSORY_SAMPLE_ROWS: ReceiptData[] = [
+  { name: "Anker 20W USB-C Fast Charger", code: "ACC-0142", category: "Chargers", warranty: "6 Months", qty: "1", price: "3,200", total: "3,200" },
+  { name: "Tempered Glass — Galaxy A15", code: "ACC-0087", category: "Screen Protectors", warranty: "None", qty: "2", price: "750", total: "1,500" },
+  { name: "Silicone Back Cover — iPhone 13", code: "ACC-0213", category: "Covers", warranty: "None", qty: "1", price: "2,000", total: "2,000" },
+].map(r => ({
+  ...ACCESSORY_SAMPLE, itemName: r.name, itemCode: r.code, itemType: "Accessory", category: r.category,
+  warranty: r.warranty, qty: r.qty, estimate: r.price, lineTotal: r.total, discount: "0",
+}));
+
 /** Another template whose design can be copied onto this one — receipt and
  *  invoice alike, since reusing one document's logo/header arrangement on
  *  the other is exactly the point. */
@@ -81,13 +100,19 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
 
   const selected = elements.find(e => e.id === selectedId) ?? null;
   const page = { w: widthMm, h: heightMm };
+  // The kinds whose invoice table carries many rows and can run onto more sheets.
+  const multiPage = kind === "dealerInvoice" || kind === "accessoryInvoice";
 
   const update = useCallback((id: string, patch: Partial<ReceiptElement>) => {
     onChange(elements.map(e => (e.id === id ? clampReceiptElement({ ...e, ...patch } as ReceiptElement, page) : e)));
   }, [elements, onChange, page]);
 
   const add = (type: ReceiptElementType) => {
-    const el = clampReceiptElement(blankReceiptElement(type, page), page);
+    const blank = blankReceiptElement(type, page);
+    // An accessory invoice lists products, not a repair job — start its table
+    // on item columns instead of the repair invoice's ten.
+    if (blank.type === "invoiceTable" && kind === "accessoryInvoice") blank.columns = ACCESSORY_INVOICE_COLUMNS;
+    const el = clampReceiptElement(blank, page);
     onChange([...elements, el]);
     setSelectedId(el.id);
   };
@@ -271,7 +296,8 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
             <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
               <ReceiptRender
                 elements={elements}
-                data={SAMPLE}
+                data={kind === "accessoryInvoice" ? ACCESSORY_SAMPLE : SAMPLE}
+                tableRows={kind === "accessoryInvoice" ? ACCESSORY_SAMPLE_ROWS : undefined}
                 widthMm={widthMm}
                 heightMm={heightMm}
                 scale={PX_PER_MM / (96 / 25.4)}
@@ -363,14 +389,14 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
               {/* Only a dealerInvoice ever spans more than one physical page —
                   a receipt or issue template is always exactly one, so this
                   choice would do nothing there and isn't offered. */}
-              {kind === "dealerInvoice" && selected.type === "invoiceTable" && (
+              {multiPage && selected.type === "invoiceTable" && (
                 <Field label="Repeats">
                   <div style={{ width: "100%", background: "var(--bg-secondary)", border: "1px dashed var(--border)", borderRadius: 7, padding: "8px 9px", fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
                     <strong style={{ color: "var(--text-secondary)" }}>Body.</strong> The job list — it isn&apos;t tagged like the header/footer pieces, it always fills the space between them and grows across as many pages as the jobs need.
                   </div>
                 </Field>
               )}
-              {kind === "dealerInvoice" && selected.type !== "invoiceTable" && (
+              {multiPage && selected.type !== "invoiceTable" && (
                 <Field label="Repeats">
                   <select
                     value={selected.repeatScope ?? "page"}
@@ -617,7 +643,7 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
                   <Row label="Font (pt)">
                     <NumIn value={selected.fontSize} onChange={v => update(selected.id, { fontSize: Math.max(4, v) })} />
                   </Row>
-                  {kind === "dealerInvoice" && (
+                  {multiPage && (
                     <p style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: ff, lineHeight: 1.5 }}>
                       How many rows fit on a page is measured off the real printed row height automatically — nothing to set here.
                     </p>
@@ -625,6 +651,7 @@ export default function ReceiptCanvas({ elements, onChange, widthMm, heightMm, k
                   <InvoiceColumnsField
                     columns={invoiceColumns(selected)}
                     onChange={columns => update(selected.id, { columns })}
+                    kind={kind}
                   />
                 </>
               )}
@@ -772,13 +799,13 @@ function CopyReceiptDesignDialog({ sources, target, replacing, onClose, onCopy }
  * how a table behaves everywhere else and means a drag can never quietly
  * reflow the whole row.
  */
-function InvoiceColumnsField({ columns, onChange }: {
-  columns: InvoiceColumn[]; onChange: (c: InvoiceColumn[]) => void;
+function InvoiceColumnsField({ columns, onChange, kind }: {
+  columns: InvoiceColumn[]; onChange: (c: InvoiceColumn[]) => void; kind: TemplateKind;
 }) {
   const [adding, setAdding] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
   const total = columns.reduce((n, c) => n + Math.max(1, c.width), 0);
-  const unused = INVOICE_COLUMNS.filter(k => !columns.some(c => c.id === k.id));
+  const unused = INVOICE_COLUMNS.filter(k => (!k.kind || k.kind.includes(kind)) && !columns.some(c => c.id === k.id));
 
   const move = (i: number, by: number) => {
     const j = i + by;

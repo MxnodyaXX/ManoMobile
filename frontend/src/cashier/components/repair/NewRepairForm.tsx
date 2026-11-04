@@ -1759,8 +1759,10 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
     for (const j of jobs) {
       if (!j.model?.trim()) continue;
       const cur = map.get(j.model);
+      // Blank (an unidentifiable device) counts the same as "Other": any real
+      // brand seen for the model replaces it.
       if (cur === undefined) map.set(j.model, j.brand);
-      else if (cur === "Other" && j.brand && j.brand !== "Other") map.set(j.model, j.brand);
+      else if ((!cur || cur === "Other") && j.brand && j.brand !== "Other") map.set(j.model, j.brand);
     }
     return map;
   }, [jobs]);
@@ -1914,11 +1916,13 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
       // Optional: blank stays undefined so the column is NULL rather than an
       // empty string, which would look like an address the send path could use.
       customerEmail: form.customerEmail.trim() || undefined,
-      // An unidentifiable device is "Other", full stop. Left to detectBrand,
-      // a description like "Samsung clone" would be filed as a genuine Samsung
-      // — and would then teach the model lookup that too.
+      // An unidentifiable device has no brand: it is saved as just what was
+      // typed ("Chinese clone, no markings"), not "Other Chinese clone".
+      // Deliberately not left to detectBrand either — a description like
+      // "Samsung clone" would be filed as a genuine Samsung, and would then
+      // teach the model lookup that too.
       brand: form.modelNumberUnavailable
-        ? "Other"
+        ? ""
         : form.deviceBrand.trim() || detectBrand(form.deviceModel),
       model: form.deviceModel,
       modelNumber: form.deviceModelNumber || undefined,
@@ -2203,6 +2207,7 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
           code={autoPrintJob.id}
           title={`${autoPrintJob.brand} ${autoPrintJob.model}`.trim()}
           subtitle={autoPrintJob.customerName}
+          phone={isInHouseDealer(dealers, autoPrintJob) ? autoPrintJob.phone : undefined}
           fault={autoPrintJob.issue}
           imei={autoPrintJob.imei}
           passcode={autoPrintJob.passcodeType !== "None" ? autoPrintJob.devicePasscode : undefined}

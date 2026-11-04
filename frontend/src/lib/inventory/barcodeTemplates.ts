@@ -24,7 +24,13 @@ export interface BarcodeTemplate extends BarcodeSettings {
   /** A canvas design. Empty means "use the built-in layout named above", so a
    *  template never opened in the designer keeps printing exactly as it did. */
   elements: LabelElement[];
+  /** Repair tags only: which side it prints for (migration 20261103000089).
+   *  Absent on a database without that migration. */
+  repairAudience?: RepairAudience | null;
 }
+
+export type RepairAudience = "internal" | "external";
+export type RepairTagSlot = "internal" | "internal_passcode" | "external" | "external_passcode";
 
 export const LAYOUT_LABELS: Record<BarcodeLayout, { label: string; blurb: string }> = {
   simple:    { label: "Product Label",       blurb: "Barcode with the code underneath — inventory and accessories." },
@@ -49,6 +55,7 @@ interface TemplateRow {
   label_margin_mm: number | string;
   is_default: boolean;
   elements: unknown;
+  repair_audience?: string | null;
 }
 
 // numeric columns arrive as strings over PostgREST.
@@ -70,6 +77,7 @@ function toTemplate(row: TemplateRow): BarcodeTemplate {
     labelWidthMm: num(row.label_width_mm),
     labelHeightMm: num(row.label_height_mm),
     labelMarginMm: num(row.label_margin_mm),
+    repairAudience: (row.repair_audience as RepairAudience | null | undefined) ?? null,
   };
 }
 
@@ -87,12 +95,14 @@ function toRow(t: Omit<BarcodeTemplate, "id" | "isDefault">) {
     label_height_mm: t.labelHeightMm,
     label_margin_mm: t.labelMarginMm,
     elements: t.elements,
+    // Only sent when set, so a database without the column still saves.
+    ...(t.repairAudience ? { repair_audience: t.repairAudience } : {}),
   };
 }
 
-const COLUMNS =
-  "id, name, layout, format, bar_width, bar_height, font_size, show_text, " +
-  "code_prefix, label_width_mm, label_height_mm, label_margin_mm, is_default, elements";
+// "*" rather than a list: repair_audience exists only after migration
+// 20261103000089, and naming it would fail every read before then.
+const COLUMNS = "*";
 
 export async function fetchTemplates(): Promise<BarcodeTemplate[]> {
   if (!isSupabaseConfigured()) return [];
@@ -224,4 +234,73 @@ export async function fetchTemplateByName(name: string): Promise<BarcodeTemplate
   if (error) throw new Error(error.message);
   const row = (data as TemplateRow[] | null)?.[0];
   return row ? toTemplate(row) : null;
+}
+
+// ── Repair tags: which template prints for which kind of job ─────────────────
+
+export const REPAIR_SLOT_LABEL: Record<RepairTagSlot, string> = {
+  internal: "Normal job tag",
+  internal_passcode: "Job tag with passcode",
+  external: "Normal job tag",
+  external_passcode: "Job tag with passcode",
+};
+
+/** slot → template id (null = nothing chosen). Empty before migration 20261103000089. */
+export async function fetchRepairSlots(): Promise<Partial<Record<RepairTagSlot, string | null>>> {
+  if (!isSupabaseConfigured()) return {};
+  const { data, error } = await getSupabaseBrowserClient().from("repair_tag_slots").select("slot, template_id");
+  if (error) return {};
+  return Object.fromEntries(((data ?? []) as { slot: RepairTagSlot; template_id: number | null }[])
+    .map(r => [r.slot, r.template_id == null ? null : String(r.template_id)]));
+}
+
+export async function setRepairSlot(slot: RepairTagSlot, templateId: string | null): Promise<void> {
+  const { error } = await getSupabaseBrowserClient()
+    .from("repair_tag_slots")
+    .upsert({ slot, template_id: templateId ? Number(templateId) : null, updated_at: new Date().toISOString() });
+  if (error) {
+    if (/repair_tag_slots|PGRST205|does not exist/.test(error.message)) {
+      throw new Error("Run migration 20261103000089_repair_tag_slots.sql to choose repair tags.");
+    }
+    throw new Error(error.message);
+  }
+}
+
+async function fetchTemplateById(id: string): Promise<BarcodeTemplate | null> {
+  const { data, error } = await getSupabaseBrowserClient().from("barcode_templates").select(COLUMNS).eq("id", Number(id)).maybeSingle();
+  if (error || !data) return null;
+  return toTemplate(data as TemplateRow);
+}
+
+/**
+ * The template a repair tag prints with, for one kind of job.
+ *
+ *   1. the chosen template for that exact case (e.g. external + passcode);
+ *   2. for a passcode case left empty, that side's normal tag;
+ *   3. nothing chosen at all (or before the migration): the old rule — the
+ *      template named for the case, then the repair default.
+ * A template from the other side is never used: an internal job never prints
+ * an external tag, and vice versa.
+ */
+export async function fetchRepairTag(audience: RepairAudience, passcode: boolean): Promise<BarcodeTemplate | null> {
+  if (!isSupabaseConfigured()) return null;
+  const slots = await fetchRepairSlots();
+  const order: RepairTagSlot[] = passcode ? [`${audience}_passcode`, audience] : [audience];
+  const anyChosen = Object.keys(slots).length > 0;
+
+  for (const slot of order) {
+    const id = slots[slot];
+    if (!id) continue;
+    const t = await fetchTemplateById(id);
+    if (t && (t.repairAudience == null || t.repairAudience === audience)) return t;
+  }
+  if (anyChosen) return null; // slots exist but none chosen for this side → built-in tag
+
+  // Before the migration: the names the app always used.
+  const names = [...(passcode ? ["Repair Job Tag With Pass"] : []), ...(audience === "external" ? ["RepairJobTagOutsideDealers"] : [])];
+  for (const n of names) {
+    const t = await fetchTemplateByName(n);
+    if (t) return t;
+  }
+  return fetchTemplateForLayout("repair");
 }

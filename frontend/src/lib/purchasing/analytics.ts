@@ -1,6 +1,7 @@
 "use client";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/supabase/fetchAll";
 import type { POStatus, PurchaseOrder, Supplier as AdminSupplier } from "@/admin/contexts/AdminContext";
 
 /**
@@ -16,12 +17,17 @@ import type { POStatus, PurchaseOrder, Supplier as AdminSupplier } from "@/admin
  */
 export async function fetchPurchaseAnalytics(): Promise<{ suppliers: AdminSupplier[]; purchaseOrders: PurchaseOrder[] }> {
   const sb = getSupabaseBrowserClient();
+  // Invoices and their lines grow past 1,000 — paged (see fetchAllRows).
+  const page = <T,>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>) =>
+    fetchAllRows<T>(build).then(data => ({ data, error: null }));
   const [sup, inv, items] = await Promise.all([
     sb.from("accessory_suppliers").select("*").order("name"),
-    sb.from("purchase_invoice_summary").select("*"),
-    sb.from("purchase_invoice_items").select("id, invoice_id, product_id, description, qty, received_qty, line_total, new_product, accessory_products(code, name)"),
+    page<Record<string, unknown>>((from, to) => sb.from("purchase_invoice_summary").select("*").order("id").range(from, to)),
+    page<Record<string, unknown>>((from, to) => sb.from("purchase_invoice_items")
+      .select("id, invoice_id, product_id, description, qty, received_qty, line_total, new_product, accessory_products(code, name)")
+      .order("id").range(from, to)),
   ]);
-  for (const r of [sup, inv, items]) if (r.error) throw new Error(r.error.message);
+  if (sup.error) throw new Error(sup.error.message);
 
   type Row = Record<string, unknown>;
   const invoices = (inv.data ?? []) as Row[];

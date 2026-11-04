@@ -38,12 +38,16 @@ export interface SaleItem extends Required<Omit<NewSaleItem, "referenceId" | "wa
   invoiceNo: string;
   referenceId: string | null;
   sortOrder: number;
+  /** As printed, e.g. "6 months warranty". Null when none was chosen, or on a
+   *  database without migration 20261021000084. */
+  warrantyLabel: string | null;
 }
 
 interface Row {
   id: number; invoice_no: string; kind: SaleItemKind; reference_id: string | null;
   description: string; qty: number; unit_price: number | string; discount: number | string;
   line_total: number | string; sort_order: number;
+  warranty_label?: string | null;
 }
 
 const rowToItem = (r: Row): SaleItem => ({
@@ -57,6 +61,7 @@ const rowToItem = (r: Row): SaleItem => ({
   discount: Number(r.discount),
   lineTotal: Number(r.line_total),
   sortOrder: r.sort_order,
+  warrantyLabel: r.warranty_label ?? null,
 });
 
 export const lineTotalOf = (i: Pick<NewSaleItem, "qty" | "unitPrice" | "discount" | "lineTotal">) =>
@@ -97,7 +102,9 @@ export async function insertSaleItems(saleId: string, invoiceNo: string, items: 
 export async function fetchSaleItems(invoiceNo: string): Promise<SaleItem[]> {
   const { data, error } = await getSupabaseBrowserClient()
     .from("sale_items")
-    .select("id, invoice_no, kind, reference_id, description, qty, unit_price, discount, line_total, sort_order")
+    // "*" rather than a column list: warranty_label only exists once
+    // migration 20261021000084 has run, and naming it would fail the read.
+    .select("*")
     .eq("invoice_no", invoiceNo)
     .order("sort_order");
   if (error) throw new Error(`Could not load the lines of ${invoiceNo}: ${error.message}`);

@@ -16,7 +16,7 @@ export function categoryIcon(category: string): LucideIcon {
   if (/ear|head|bud|audio/.test(c)) return Headphones;
   if (/lens|camera/.test(c)) return Camera;
   if (/glass|protect|guard/.test(c)) return ShieldCheck;
-  if (/cover|case|back/.test(c)) return Smartphone;
+  if (/cover|case|back|pouch|flip/.test(c)) return Smartphone;
   if (/watch|strap/.test(c)) return Watch;
   if (/speaker/.test(c)) return Speaker;
   if (/power ?bank|battery/.test(c)) return BatteryCharging;

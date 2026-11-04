@@ -8,6 +8,7 @@ import { type ReceiptData } from "@/lib/repair/receiptElements";
 import { type RepairJob, useRepair, findDealer, IN_HOUSE_DEALER } from "@/cashier/contexts/RepairContext";
 import { SHOP_DETAILS } from "@/lib/shop";
 import { publicOrigin } from "@/lib/siteUrl";
+import { docDate } from "@/lib/docDate";
 
 /**
  * What actually prints for a job receipt. Picks up Admin -> Barcode -> Job
@@ -40,11 +41,7 @@ const JobReceiptPrintable = forwardRef<HTMLDivElement, {
   }
 
   const dealerRecord = findDealer(dealers, job);
-  const fmtSlipDate = (s?: string) => {
-    if (!s) return "—";
-    const dt = new Date(s);
-    return isNaN(dt.getTime()) ? "—" : dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-  };
+  const fmtSlipDate = (s?: string) => docDate(s);
   const origin = publicOrigin();
 
   const data: ReceiptData = {

@@ -1,6 +1,7 @@
 "use client";
 
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/supabase/fetchAll";
 
 /**
  * Supplier invoices, purchase batches and supplier payments — the data side of
@@ -306,9 +307,18 @@ const sb = () => getSupabaseBrowserClient();
 
 export async function fetchInvoices(supplierId?: number): Promise<PurchaseInvoice[]> {
   if (!isSupabaseConfigured()) return [];
-  let q = sb().from("purchase_invoice_summary").select("*").order("invoice_date", { ascending: false }).order("id", { ascending: false });
-  if (supplierId) q = q.eq("supplier_id", supplierId);
-  return check<Row[]>(await q).map(toInvoice);
+  // Paged: a single read stops at 1,000 invoices (see fetchAllRows).
+  try {
+    const rows = await fetchAllRows<Row>((from, to) => {
+      let q = sb().from("purchase_invoice_summary").select("*");
+      if (supplierId) q = q.eq("supplier_id", supplierId);
+      return q.order("invoice_date", { ascending: false }).order("id", { ascending: false }).range(from, to);
+    });
+    return rows.map(toInvoice);
+  } catch (e) {
+    const err = e as Error & { code?: string };
+    throw new Error(explain(err.message, err.code));
+  }
 }
 
 export async function fetchInvoiceDetail(id: number): Promise<InvoiceDetail> {

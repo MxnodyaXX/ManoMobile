@@ -1,6 +1,7 @@
 "use client";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/supabase/fetchAll";
 import type { Warranty, WarrantyClaim } from "@/cashier/contexts/WarrantyContext";
 
 /**
@@ -132,23 +133,30 @@ function claimToRow(c: Partial<WarrantyClaim>): Record<string, unknown> {
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
 export async function fetchWarranties(): Promise<Warranty[]> {
-  const { data, error } = await getSupabaseBrowserClient()
-    .from("warranties")
-    .select("*")
-    .order("issued_at", { ascending: false });
-
-  if (error) throw new Error(`Could not load warranties: ${error.message}`);
-  return (data as WarrantyRow[]).map(rowToWarranty);
+  // Paged: a single read stops at 1,000 warranties (see fetchAllRows).
+  const sb = getSupabaseBrowserClient();
+  try {
+    const data = await fetchAllRows<WarrantyRow>((from, to) => sb
+      .from("warranties").select("*")
+      .order("issued_at", { ascending: false }).order("id", { ascending: false })
+      .range(from, to));
+    return data.map(rowToWarranty);
+  } catch (e) {
+    throw new Error(`Could not load warranties: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 export async function fetchWarrantyClaims(): Promise<WarrantyClaim[]> {
-  const { data, error } = await getSupabaseBrowserClient()
-    .from("warranty_claims")
-    .select("*")
-    .order("reported_at", { ascending: false });
-
-  if (error) throw new Error(`Could not load warranty claims: ${error.message}`);
-  return (data as ClaimRow[]).map(rowToClaim);
+  const sb = getSupabaseBrowserClient();
+  try {
+    const data = await fetchAllRows<ClaimRow>((from, to) => sb
+      .from("warranty_claims").select("*")
+      .order("reported_at", { ascending: false }).order("id", { ascending: false })
+      .range(from, to));
+    return data.map(rowToClaim);
+  } catch (e) {
+    throw new Error(`Could not load warranty claims: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /**

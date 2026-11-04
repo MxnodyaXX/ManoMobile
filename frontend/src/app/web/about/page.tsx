@@ -3,6 +3,7 @@ import { MapPin, MessageCircle, Phone, Mail } from "lucide-react";
 import { SHOP_DETAILS } from "@/lib/shop";
 import { WHATSAPP } from "@/web/Footer";
 import { delay } from "@/web/ui";
+import Team from "@/web/Team";
 
 export const metadata: Metadata = { title: "About us" };
 
@@ -41,6 +42,8 @@ export default function AboutPage() {
           </div>
         ))}
       </section>
+
+      <Team />
 
       <section className="mx-auto max-w-7xl px-5 pb-28 md:px-8">
         <div data-reveal data-live className="mm-shine grid gap-6 rounded-[28px] bg-neutral-950 p-8 text-white md:grid-cols-4 md:p-12">

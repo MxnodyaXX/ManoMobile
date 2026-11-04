@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useLayoutEffect, createElement } from "react";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import { useSales } from "@/cashier/contexts/SalesContext";
 import { createPortal } from "react-dom";
-import { Search, Grid3X3, List, Plus, Minus, Trash2, Eye, EyeOff, Tag, X } from "lucide-react";
+import { Search, Grid3X3, List, Plus, Minus, Trash2, Eye, EyeOff, X } from "lucide-react";
 import CreditCustomerPicker, { type POSCreditCustomer } from "./CreditCustomerPicker";
 import { QRCodeSVG } from "qrcode.react";
 import Barcode from "react-barcode";
@@ -15,6 +15,12 @@ import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/Access
 import { matchScannedAccessory } from "@/lib/inventory/accessoryScan";
 import { useToast } from "@/lib/ui/toast";
 import AccessoryScanModal from "./AccessoryScanModal";
+import { categoryIcon } from "@/web/ui";
+import AccessoryInvoicePrintable, { ACCESSORY_INVOICE_PAGE_CSS, type AccessoryInvoiceLine } from "./AccessoryInvoicePrintable";
+import { printInvoiceDocument, usePersistInvoiceDocument } from "@/lib/sales/invoiceDoc";
+import { useAuth } from "@/lib/auth/AuthContext";
+import { warrantyLabel } from "./QuickSaleModal";
+import { docDate } from "@/lib/docDate";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -34,6 +40,62 @@ interface CustomerInfo {
   whatsapp: string;
   email: string;
   nic: string;
+}
+
+/** Warranty choices at the counter, and the days each is stored as on the sale
+ *  line (what the Warranty Center reads). */
+const WARRANTY_OPTIONS: { label: string; days: number }[] = [
+  { label: "None", days: 0 },
+  { label: "1 Month", days: 30 },
+  { label: "3 Months", days: 90 },
+  { label: "6 Months", days: 180 },
+  { label: "1 Year", days: 365 },
+  { label: "2 Years", days: 730 },
+];
+const warrantyDaysOf = (label: string | undefined) => WARRANTY_OPTIONS.find(w => w.label === label)?.days ?? 0;
+
+const invoiceLines = (cart: CartItem[], warranties: Record<number, string>): AccessoryInvoiceLine[] =>
+  cart.map(c => ({
+    productId: c.product.id, name: c.product.name, code: c.product.code, brand: c.product.brand,
+    category: c.product.category, qty: c.qty, unitPrice: c.product.sellingPrice,
+    warranty: warranties[c.product.id] || "None",
+  }));
+
+const invoiceDate = (d: Date) => docDate(d);
+
+/** An A5 sheet (210mm) zoomed to whatever width its box has — the preview of
+ *  the invoice that prints, not a separate mock of it. */
+function FitToWidth({ children }: { children: React.ReactNode }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(0.4);
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    const sheetPx = 210 * (96 / 25.4);
+    const fit = () => setZoom(Math.max(0.2, box.clientWidth / sheetPx));
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <div ref={boxRef} style={{ width: "100%" }}>
+      <div style={{ zoom, boxShadow: "0 4px 24px rgba(0,0,0,0.18)", width: "fit-content" }}>{children}</div>
+    </div>
+  );
+}
+
+/** Everything Step 3 prints, frozen the moment the sale went through. */
+interface CompletedAccessorySale {
+  invoiceNo: string;
+  createdAt: string;
+  cart: CartItem[];
+  customer: CustomerInfo;
+  payMethod: string;
+  discount: number;
+  received: number;
+  warranties: Record<number, string>;
+  cashier: string;
 }
 
 // ─── Shared Styles ────────────────────────────────────────────────────────────
@@ -573,6 +635,62 @@ function Step1({
     setBarcodeVal("");
     if (code) onScan(code);
   };
+  // Width of the bill/customer panel, dragged by the handle between the two
+  // sides and remembered on this computer. The product list keeps at least
+  // PRODUCTS_MIN so it can't be squeezed out of sight.
+  const rowRef = useRef<HTMLDivElement>(null);
+  const PANEL_DEFAULT = 350, PANEL_MIN = 300, PRODUCTS_MIN = 380;
+  const [panelW, setPanelW] = useState<number>(() => {
+    try { const v = Number(localStorage.getItem("mm-acc-panel-w")); return v >= PANEL_MIN ? v : PANEL_DEFAULT; }
+    catch { return PANEL_DEFAULT; }
+  });
+  const [dragging, setDragging] = useState(false);
+  const [handleHover, setHandleHover] = useState(false);
+  const clampPanel = (w: number) => {
+    const row = rowRef.current?.getBoundingClientRect().width ?? 1200;
+    return Math.round(Math.max(PANEL_MIN, Math.min(w, row - PRODUCTS_MIN)));
+  };
+  const savePanelW = (w: number) => {
+    const v = clampPanel(w);
+    setPanelW(v);
+    try { localStorage.setItem("mm-acc-panel-w", String(v)); } catch { /* private window */ }
+  };
+  const startPanelDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    const row = rowRef.current;
+    if (!row) return;
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    setDragging(true);
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none"; // no text highlighting while dragging
+    let last = panelW;
+    const move = (ev: PointerEvent) => {
+      last = clampPanel(row.getBoundingClientRect().right - ev.clientX);
+      setPanelW(last);
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      document.body.style.userSelect = prevSelect;
+      setDragging(false);
+      savePanelW(last);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  };
+
+  // Bill Summary as compact cards or one row per item — remembered here.
+  const [billView, setBillView] = useState<"cards" | "rows">(() => {
+    try { return localStorage.getItem("mm-acc-bill-view") === "rows" ? "rows" : "cards"; } catch { return "cards"; }
+  });
+  const setBillViewSaved = (v: "cards" | "rows") => {
+    setBillView(v);
+    try { localStorage.setItem("mm-acc-bill-view", v); } catch { /* private window */ }
+  };
+
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [revealBuying, setRevealBuying] = useState<Record<number, boolean>>({});
   const [showCartPopup, setShowCartPopup] = useState(false);
@@ -580,11 +698,37 @@ function Step1({
 
   const MAX_TILES = 4;
 
+  // Category filter: chips for a quick tap, dropdowns for when there are many.
+  const [cat, setCat] = useState("");        // "" = all
+  const [subcat, setSubcat] = useState("");  // "" = all within the category
+  const [inStockOnly, setInStockOnly] = useState(false);
+
+  /** Every category with how many products it has, biggest first. */
+  const categories = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of products) if (p.category) counts.set(p.category, (counts.get(p.category) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [products]);
+
+  const subcategories = useMemo(() => {
+    if (!cat) return [];
+    const counts = new Map<string, number>();
+    for (const p of products) if (p.category === cat && p.subcategory) counts.set(p.subcategory, (counts.get(p.subcategory) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [products, cat]);
+
+  const pickCategory = (c: string) => { setCat(c); setSubcat(""); };
+
   const filtered = products.filter((p) => {
+    if (cat && p.category !== cat) return false;
+    if (subcat && p.subcategory !== subcat) return false;
+    if (inStockOnly && p.stock <= 0) return false;
     const q = query.trim().toLowerCase();
     return !q || p.name.toLowerCase().includes(q) || p.model.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q)
+      || p.category.toLowerCase().includes(q) || p.subcategory.toLowerCase().includes(q)
       || p.code.toLowerCase().includes(q) || p.labelBarcode.includes(q) || p.barcodes.some(b => b.toLowerCase().includes(q));
   });
+  const filtering = !!(cat || subcat || inStockOnly);
 
   // Enter in the name box: an exact code/barcode (a scan that landed here
   // instead of the SCAN box) goes to the cart; anything else just filters.
@@ -605,10 +749,12 @@ function Step1({
   const stockColor = (s: number) => s > 20 ? "#4ade80" : s > 5 ? "#f59e0b" : "#ef4444";
 
   return (
-    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 0, flex: isMobile ? undefined : 1, minHeight: isMobile ? undefined : 0 }}>
+    <div ref={rowRef} style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 0, flex: isMobile ? undefined : 1, minHeight: isMobile ? undefined : 0, minWidth: 0, maxWidth: "100%" }}>
 
       {/* ── Left: Search + Product List ── */}
-      <div style={{ flex: isMobile ? undefined : 1, display: "flex", flexDirection: "column", gap: 10, minHeight: isMobile ? undefined : 0 }}>
+      {/* minWidth 0: without it the column grows to fit the category chips and
+          the whole page scrolls sideways — only the chip strip should. */}
+      <div style={{ flex: isMobile ? undefined : 1, display: "flex", flexDirection: "column", gap: 10, minHeight: isMobile ? undefined : 0, minWidth: 0 }}>
 
         {/* Search bar row */}
         <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: isMobile ? "wrap" : "nowrap" }}>
@@ -662,6 +808,64 @@ function Step1({
           </button>
         </div>
 
+        {/* Filters: category chips (scroll sideways) + dropdowns for many */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0, flexWrap: isMobile ? "wrap" : "nowrap", minWidth: 0, maxWidth: "100%" }}>
+          <div className="mm-chip-scroll" style={{ display: "flex", gap: 6, overflowX: "auto", overscrollBehaviorX: "contain", flex: isMobile ? "1 1 100%" : "1 1 0", minWidth: 0, maxWidth: "100%", paddingBottom: 2, scrollbarWidth: "thin" }}>
+            {[["", products.length] as [string, number], ...categories].map(([c, n]) => {
+              const on = cat === c;
+              return (
+                <button
+                  key={c || "__all"}
+                  onClick={() => pickCategory(c)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6, flexShrink: 0, padding: "6px 12px", borderRadius: 20,
+                    border: `1px solid ${on ? "var(--accent)" : "var(--border)"}`,
+                    background: on ? "var(--accent)" : "var(--bg-card)", color: on ? "var(--accent-fg)" : "var(--text-secondary)",
+                    fontSize: 12, fontWeight: on ? 700 : 500, fontFamily: "'Plus Jakarta Sans', sans-serif", cursor: "pointer", whiteSpace: "nowrap",
+                    transition: "background 0.15s, color 0.15s, border-color 0.15s",
+                  }}
+                >
+                  {c && createElement(categoryIcon(c), { size: 13, strokeWidth: 1.8 })}
+                  {c || "All"}
+                  <span style={{ fontSize: 10.5, opacity: 0.7 }}>{n}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <select
+            value={cat}
+            onChange={(e) => pickCategory(e.target.value)}
+            title="Category"
+            style={{ ...inputStyle, flex: isMobile ? "1 1 140px" : "0 0 170px", padding: "8px 10px", cursor: "pointer" }}
+          >
+            <option value="">All categories</option>
+            {categories.map(([c, n]) => <option key={c} value={c}>{c} ({n})</option>)}
+          </select>
+          <select
+            value={subcat}
+            onChange={(e) => setSubcat(e.target.value)}
+            disabled={!cat || subcategories.length === 0}
+            title={!cat ? "Pick a category first" : "Subcategory"}
+            style={{ ...inputStyle, flex: isMobile ? "1 1 140px" : "0 0 160px", padding: "8px 10px", cursor: !cat || subcategories.length === 0 ? "not-allowed" : "pointer", opacity: !cat || subcategories.length === 0 ? 0.55 : 1 }}
+          >
+            <option value="">{!cat ? "Subcategory" : subcategories.length ? "All subcategories" : "No subcategories"}</option>
+            {subcategories.map(([s, n]) => <option key={s} value={s}>{s} ({n})</option>)}
+          </select>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>
+            <input type="checkbox" checked={inStockOnly} onChange={(e) => setInStockOnly(e.target.checked)} style={{ cursor: "pointer" }} />
+            In stock
+          </label>
+          {filtering && (
+            <button
+              onClick={() => { pickCategory(""); setInStockOnly(false); }}
+              style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}
+            >
+              <X size={12} /> Clear
+            </button>
+          )}
+        </div>
+
         {/* Product list */}
         <div style={{
           flex: isMobile ? undefined : 1,
@@ -677,7 +881,9 @@ function Step1({
               flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
               color: "var(--text-muted)", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif",
             }}>
-              No products found
+              {filtering
+                ? `Nothing${inStockOnly ? " in stock" : ""} in ${[cat, subcat].filter(Boolean).join(" · ") || "these filters"}${query.trim() ? ` matching "${query.trim()}"` : ""}`
+                : "No products found"}
             </div>
           )}
 
@@ -691,24 +897,38 @@ function Step1({
                 <div
                   key={p.id}
                   style={{
-                    height: 130, padding: "14px 16px", borderRadius: 10,
+                    minHeight: 150, padding: "14px 16px", borderRadius: 10,
                     border: `1px solid ${inCart ? "var(--accent)" : "var(--border)"}`,
                     background: inCart ? "rgba(var(--accent-rgb,232,232,232),0.04)" : "var(--bg-card)",
-                    display: "flex", flexDirection: "column", gap: 8, boxSizing: "border-box", overflow: "hidden",
+                    display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 8, boxSizing: "border-box", overflow: "hidden",
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{p.name}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 2 }}>{p.model} · {p.brand}</div>
+                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start", minWidth: 0 }}>
+                    {/* What kind of item it is, at a glance */}
+                    <div title={p.category} style={{
+                      width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+                      background: "var(--bg-primary)", border: "1px solid var(--border)",
+                      display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)",
+                    }}>
+                      {createElement(categoryIcon(p.category), { size: 15, strokeWidth: 1.6 })}
                     </div>
-                    <span style={{
-                      fontSize: 10, padding: "2px 7px", borderRadius: 5,
-                      background: "var(--accent-dim)", color: "var(--accent)",
-                      fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 600,
-                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                      maxWidth: 90, flexShrink: 0,
-                    }}>{p.category}</span>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                      {p.category && (
+                        <span style={{
+                          display: "inline-block", marginTop: 4, maxWidth: "100%",
+                          fontSize: 9.5, fontWeight: 700, padding: "2px 7px", borderRadius: 20,
+                          background: "var(--accent)", color: "var(--accent-fg)", letterSpacing: "0.04em", textTransform: "uppercase",
+                          fontFamily: "'Plus Jakarta Sans', sans-serif",
+                          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", verticalAlign: "top",
+                        }}>{[p.category, p.subcategory].filter(Boolean).join(" · ")}</span>
+                      )}
+                      {(p.brand || p.model) && (
+                        <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {[p.brand, p.model].filter(Boolean).join(" · ")}
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
@@ -761,39 +981,38 @@ function Step1({
                   flexShrink: 0, transition: "border-color 0.15s",
                 }}
               >
-                {/* Category badge */}
-                <div style={{
+                {/* What kind of item it is, at a glance: a cable, earphones, a charger… */}
+                <div title={p.category} style={{
                   width: 42, height: 42, borderRadius: 9, flexShrink: 0,
                   background: "var(--bg-primary)", border: "1px solid var(--border)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
+                  display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)",
                 }}>
-                  <Tag size={16} color="var(--accent)" />
+                  {createElement(categoryIcon(p.category), { size: 18, strokeWidth: 1.6 })}
                 </div>
 
                 {/* Main info */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  {isMobile ? (
-                    <>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.model} · {p.brand}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.supplier}</div>
-                    </>
-                  ) : (
-                    <>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{p.name}</span>
-                        <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>|</span>
-                        <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{p.model}</span>
-                        <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>|</span>
-                        <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{p.brand}</span>
-                      </div>
-                      <div style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 2 }}>
-                        {p.supplier}
-                      </div>
-                      <div style={{ fontSize: 11, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 3, fontStyle: "italic" }}>
-                        💡 {p.insight}
-                      </div>
-                    </>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", minWidth: 0 }}>
+                    <span style={{ fontSize: isMobile ? 13 : 13.5, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{p.name}</span>
+                    {p.category && (
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 20, background: "var(--accent)", color: "var(--accent-fg)", fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: "0.04em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                        {[p.category, p.subcategory].filter(Boolean).join(" · ")}
+                      </span>
+                    )}
+                  </div>
+                  {/* Model and brand only when known — no empty "| |". */}
+                  {(p.model || p.brand) && (
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {[p.brand, p.model].filter(Boolean).join(" · ")}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {p.supplier}
+                  </div>
+                  {!isMobile && p.insight?.trim() && (
+                    <div style={{ fontSize: 11, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 3, fontStyle: "italic" }}>
+                      💡 {p.insight}
+                    </div>
                   )}
                 </div>
 
@@ -877,19 +1096,117 @@ function Step1({
         </div>
       </div>
 
+      {/* ── Drag handle: pull left for a wider bill/customer panel ── */}
+      {!isMobile && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the bill and customer panel"
+          title="Drag to resize · double-click to reset"
+          onPointerDown={startPanelDrag}
+          onDoubleClick={() => savePanelW(PANEL_DEFAULT)}
+          onPointerEnter={() => setHandleHover(true)}
+          onPointerLeave={() => setHandleHover(false)}
+          style={{ flex: "0 0 14px", alignSelf: "stretch", cursor: "col-resize", display: "flex", alignItems: "center", justifyContent: "center", touchAction: "none" }}
+        >
+          <div style={{
+            width: 4, borderRadius: 4,
+            height: dragging || handleHover ? 72 : 56,
+            background: dragging || handleHover ? "var(--accent)" : "var(--border)",
+            transition: "background 0.15s, height 0.15s",
+          }} />
+        </div>
+      )}
+
       {/* ── Right panel ── */}
-      <div style={{ width: isMobile ? "100%" : 350, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12, overflowY: isMobile ? "visible" : "auto", paddingRight: 2, paddingTop: isMobile ? 12 : 0 }}>
+      <div style={{ width: isMobile ? "100%" : panelW, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12, overflowY: isMobile ? "visible" : "auto", paddingRight: 2, paddingTop: isMobile ? 12 : 0 }}>
 
         {/* Bill Summary */}
         <div style={{
           background: "var(--bg-card)", border: "1px solid var(--border)",
           borderRadius: 12, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12,
         }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-            Bill Summary
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              Bill Summary{cart.length > 0 && <span style={{ color: "var(--text-muted)", fontWeight: 600 }}> · {cart.reduce((s, c) => s + c.qty, 0)} item{cart.reduce((s, c) => s + c.qty, 0) === 1 ? "" : "s"}</span>}
+            </div>
+            {/* Cards (compact tiles) or rows (one line per item, editable) */}
+            <div style={{ display: "flex", gap: 2, padding: 2, borderRadius: 7, border: "1px solid var(--border)" }}>
+              {([["cards", Grid3X3, "Cards"], ["rows", List, "Rows"]] as const).map(([v, Icon, label]) => (
+                <button
+                  key={v}
+                  onClick={() => setBillViewSaved(v)}
+                  title={label}
+                  aria-label={`Show bill as ${label.toLowerCase()}`}
+                  style={{
+                    width: 26, height: 22, borderRadius: 5, border: "none", cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: billView === v ? "var(--accent)" : "transparent",
+                    color: billView === v ? "var(--accent-fg)" : "var(--text-muted)",
+                  }}
+                >
+                  <Icon size={13} />
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Cart item tiles */}
+          {/* Rows: every item on its own line, with quantity and total */}
+          {billView === "rows" && (
+            cart.length === 0 ? (
+              <div style={{ padding: "14px 10px", borderRadius: 8, border: "1px dashed var(--border)", textAlign: "center", fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                No items yet — scan or add a product.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 280, overflowY: "auto", paddingRight: 2 }}>
+                {cart.map((c) => {
+                  const left = products.find(p => p.id === c.product.id)?.stock ?? 0;
+                  return (
+                    <div key={c.product.id} style={{
+                      display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 9,
+                      background: "var(--bg-primary)", border: "1px solid var(--border)",
+                    }}>
+                      <div style={{ width: 30, height: 30, borderRadius: 7, flexShrink: 0, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)" }}>
+                        {createElement(categoryIcon(c.product.category), { size: 14, strokeWidth: 1.7 })}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.product.name}</div>
+                        <div style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {[c.product.category, c.product.subcategory].filter(Boolean).join(" · ")}{c.product.category ? " · " : ""}Rs. {c.product.sellingPrice.toLocaleString()} each
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                        <button
+                          onClick={() => c.qty === 1 ? onRemove(c.product.id) : onQtyChange(c.product.id, c.qty - 1)}
+                          aria-label="One less"
+                          style={{ width: 22, height: 22, borderRadius: 5, border: "1px solid var(--border)", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)" }}
+                        ><Minus size={11} /></button>
+                        <span style={{ minWidth: 18, textAlign: "center", fontSize: 12.5, fontWeight: 700, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{c.qty}</span>
+                        <button
+                          onClick={() => left > 0 && onQtyChange(c.product.id, c.qty + 1)}
+                          disabled={left <= 0}
+                          aria-label="One more"
+                          title={left <= 0 ? "No more in stock" : undefined}
+                          style={{ width: 22, height: 22, borderRadius: 5, border: "1px solid var(--border)", background: "transparent", cursor: left > 0 ? "pointer" : "not-allowed", opacity: left > 0 ? 1 : 0.4, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)" }}
+                        ><Plus size={11} /></button>
+                      </div>
+                      <div style={{ minWidth: 64, textAlign: "right", fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", flexShrink: 0 }}>
+                        Rs. {(c.product.sellingPrice * c.qty).toLocaleString()}
+                      </div>
+                      <button
+                        onClick={() => onRemove(c.product.id)}
+                        aria-label={`Remove ${c.product.name}`}
+                        style={{ width: 22, height: 22, borderRadius: 5, border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", flexShrink: 0 }}
+                      ><Trash2 size={12} /></button>
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          )}
+
+          {/* Cards: the compact tiles */}
+          {billView === "cards" && (
           <div style={{ display: "flex", alignItems: "stretch", gap: 6 }}>
             {cart.length === 0
               ? [0, 1, 2, 3].map((i) => (
@@ -946,6 +1263,7 @@ function Step1({
               {cart.length > MAX_TILES ? `+${cart.length - MAX_TILES}` : "+"}
             </button>
           </div>
+          )}
 
           {/* Cart popup */}
           {showCartPopup && (
@@ -1109,6 +1427,7 @@ function Step1({
 
 function Step2({
   cart, customer, onCustomerChange, payMethod, onPayMethod, discount, onDiscount,
+  warranties, setWarranties, payReceived, setPayReceived,
 }: {
   cart: CartItem[];
   customer: CustomerInfo;
@@ -1117,11 +1436,15 @@ function Step2({
   onPayMethod: (m: string) => void;
   discount: string;
   onDiscount: (v: string) => void;
+  // Held by the parent: the completed invoice prints them, and the sale lines
+  // store the warranty, after this step has unmounted.
+  warranties: Record<number, string>;
+  setWarranties: React.Dispatch<React.SetStateAction<Record<number, string>>>;
+  payReceived: string;
+  setPayReceived: (v: string) => void;
 }) {
-  const [payReceived, setPayReceived] = useState("");
   const [advance, setAdvance]         = useState("");
   const [sameAsPhone, setSameAsPhone] = useState(false);
-  const [warranties, setWarranties]   = useState<Record<number, string>>({});
   const [printFormat, setPrintFormat] = useState<"POS" | "A5">("POS");
   const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<POSCreditCustomer | null>(null);
   const receiptRef = useRef<HTMLDivElement>(null);
@@ -1289,7 +1612,7 @@ function Step2({
                       fontWeight: warranty !== "None" ? 600 : 400,
                     }}
                   >
-                    {["None", "1 Month", "3 Months", "6 Months", "1 Year", "2 Years"].map((w) => (
+                    {WARRANTY_OPTIONS.map(({ label: w }) => (
                       <option key={w} value={w}>{w}</option>
                     ))}
                   </select>
@@ -1498,12 +1821,15 @@ function Step2({
             </div>
             <button
               onClick={handlePrint}
+              disabled={printFormat === "A5"}
+              title={printFormat === "A5" ? "The A5 invoice prints after Complete Sale, with its invoice number" : undefined}
               style={{
                 display: "flex", alignItems: "center", gap: 5,
                 padding: "5px 12px", borderRadius: 7, fontSize: 11,
                 fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 600,
                 border: "1px solid var(--accent)", background: "var(--accent)",
-                color: "var(--accent-fg)", cursor: "pointer",
+                color: "var(--accent-fg)", cursor: printFormat === "A5" ? "not-allowed" : "pointer",
+                opacity: printFormat === "A5" ? 0.45 : 1,
               }}
             >
               🖨️ Print
@@ -1513,156 +1839,23 @@ function Step2({
         <div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 0" }}>
 
           {printFormat === "A5" ? (
-            /* ── A5 Invoice Layout ── */
-            <div ref={receiptRef} style={{ background: "#ffffff", borderRadius: 6, border: "1px solid #d1d5db", overflow: "hidden", boxShadow: "0 4px 24px rgba(0,0,0,0.18)", fontFamily: "Arial, Helvetica, sans-serif", color: "#111827" }}>
-
-              {/* Top accent bar */}
-              <div style={{ height: 4, background: "#111827" }} />
-
-              {/* Row 1: Shop/Invoice Info  |  Customer Info */}
-              <div style={{ display: "flex", borderBottom: "1.5px solid #111827" }}>
-
-                {/* Left — Branding + Invoice ref */}
-                <div style={{ flex: "0 0 52%", padding: "14px 18px 12px", borderRight: "1px solid #d1d5db" }}>
-                  <div style={{ fontSize: 17, fontWeight: 900, letterSpacing: "0.12em", color: "#111827", lineHeight: 1 }}>MANO MOBILE</div>
-                  <div style={{ fontSize: 8, letterSpacing: "0.22em", color: "#6b7280", marginTop: 3, marginBottom: 10 }}>MANAGEMENT SUITE</div>
-                  <div style={{ fontSize: 9.5, color: "#374151", lineHeight: 1.65 }}>
-                    <div style={{ color: "#374151" }}>123 Main Street, Colombo 03</div>
-                    <div style={{ color: "#374151" }}>Tel: 0112 345 678</div>
-                    <div style={{ color: "#374151" }}>mano@manomobile.lk</div>
-                  </div>
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-                    <div>
-                      <div style={{ fontSize: 8, fontWeight: 700, color: "#6b7280", letterSpacing: "0.14em", textTransform: "uppercase" as const }}>Invoice No.</div>
-                      <div style={{ fontSize: 12, fontWeight: 900, color: "#111827", letterSpacing: "0.06em", marginTop: 1 }}>{receiptNo}</div>
-                    </div>
-                    <div style={{ textAlign: "right" as const }}>
-                      <div style={{ fontSize: 8, fontWeight: 700, color: "#6b7280", letterSpacing: "0.14em", textTransform: "uppercase" as const }}>Date</div>
-                      <div style={{ fontSize: 9, color: "#374151", marginTop: 1 }}>{receiptDate}</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right — Customer Details */}
-                <div style={{ flex: 1, padding: "14px 18px 12px" }}>
-                  <div style={{ fontSize: 8, fontWeight: 700, color: "#6b7280", letterSpacing: "0.14em", textTransform: "uppercase" as const, marginBottom: 8 }}>Bill To</div>
-                  {customer.name ? (
-                    <div style={{ fontSize: 10, lineHeight: 1.7 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{customer.name}</div>
-                      {customer.phone && <div style={{ color: "#374151" }}>Tel: {customer.phone}</div>}
-                      {customer.whatsapp && customer.whatsapp !== customer.phone && <div style={{ color: "#374151" }}>WhatsApp: {customer.whatsapp}</div>}
-                      {customer.nic && <div style={{ color: "#374151" }}>NIC: {customer.nic}</div>}
-                      {customer.email && <div style={{ color: "#374151" }}>{customer.email}</div>}
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: 10, color: "#9ca3af", fontStyle: "italic" as const }}>Walk-in customer</div>
-                  )}
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e5e7eb" }}>
-                    <div style={{ fontSize: 8, fontWeight: 700, color: "#6b7280", letterSpacing: "0.14em", textTransform: "uppercase" as const, marginBottom: 3 }}>Payment Method</div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: payMethod === "Credit" ? "#dc2626" : "#111827" }}>{payMethod}</div>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Row 2: Bill Summary */}
-              <div style={{ padding: "12px 18px", borderBottom: "1.5px solid #111827" }}>
-                <div style={{ fontSize: 8, fontWeight: 700, color: "#6b7280", letterSpacing: "0.14em", textTransform: "uppercase" as const, marginBottom: 8 }}>Items</div>
-                <table style={{ width: "100%", borderCollapse: "collapse" as const, fontSize: 9.5 }}>
-                  <colgroup>
-                    <col style={{ width: "24%" }} />
-                    <col style={{ width: "15%" }} />
-                    <col style={{ width: "7%" }} />
-                    <col style={{ width: "14%" }} />
-                    <col style={{ width: "14%" }} />
-                    <col style={{ width: "14%" }} />
-                    <col style={{ width: "12%" }} />
-                  </colgroup>
-                  <thead>
-                    <tr style={{ borderBottom: "1.5px solid #111827" }}>
-                      <th style={{ textAlign: "left" as const, padding: "4px 6px 5px 0", fontWeight: 700, color: "#111827" }}>Item</th>
-                      <th style={{ textAlign: "left" as const, padding: "4px 6px 5px", fontWeight: 700, color: "#111827" }}>Brand</th>
-                      <th style={{ textAlign: "center" as const, padding: "4px 6px 5px", fontWeight: 700, color: "#111827" }}>Qty</th>
-                      <th style={{ textAlign: "right" as const, padding: "4px 6px 5px", fontWeight: 700, color: "#111827" }}>Unit Price</th>
-                      <th style={{ textAlign: "right" as const, padding: "4px 6px 5px", fontWeight: 700, color: "#111827" }}>Discount</th>
-                      <th style={{ textAlign: "right" as const, padding: "4px 6px 5px", fontWeight: 700, color: "#111827" }}>Amount</th>
-                      <th style={{ textAlign: "center" as const, padding: "4px 0 5px 6px", fontWeight: 700, color: "#111827" }}>Warranty</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cart.map((c) => {
-                      const w = warranties[c.product.id];
-                      return (
-                        <tr key={c.product.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                          <td style={{ padding: "5px 6px 5px 0", fontWeight: 600, color: "#111827" }}>{c.product.name}</td>
-                          <td style={{ padding: "5px 6px", color: "#6b7280" }}>{c.product.brand}</td>
-                          <td style={{ padding: "5px 6px", textAlign: "center" as const, color: "#374151" }}>{c.qty}</td>
-                          <td style={{ padding: "5px 6px", textAlign: "right" as const, color: "#374151" }}>Rs.{c.product.sellingPrice.toLocaleString()}</td>
-                          <td style={{ padding: "5px 6px", textAlign: "right" as const, color: "#9ca3af" }}>—</td>
-                          <td style={{ padding: "5px 6px", textAlign: "right" as const, fontWeight: 700, color: "#111827" }}>Rs.{(c.product.sellingPrice * c.qty).toLocaleString()}</td>
-                          <td style={{ padding: "5px 0 5px 6px", textAlign: "center" as const, fontWeight: w && w !== "None" ? 700 : 400, color: w && w !== "None" ? "#111827" : "#9ca3af" }}>{w && w !== "None" ? w : "—"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-
-                {/* Totals block */}
-                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-                  <div style={{ width: 230 }}>
-                    {[
-                      { label: "Subtotal", value: `Rs.${subtotal.toLocaleString()}`, show: true },
-                      { label: "Discount", value: `(Rs.${discountAmt.toLocaleString()})`, show: discountAmt > 0 },
-                      { label: "Received", value: `Rs.${payReceivedAmt.toLocaleString()}`, show: payReceivedAmt > 0 },
-                      { label: "Change", value: `Rs.${Math.max(0, payReceivedAmt - total).toLocaleString()}`, show: payReceivedAmt > 0 },
-                      { label: "Advance", value: `Rs.${advanceAmt.toLocaleString()}`, show: payMethod === "Credit" && advanceAmt > 0 },
-                    ].filter(r => r.show).map(r => (
-                      <div key={r.label} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 9.5, borderBottom: "1px solid #f3f4f6" }}>
-                        <span style={{ color: "#6b7280" }}>{r.label}</span>
-                        <span style={{ color: "#374151" }}>{r.value}</span>
-                      </div>
-                    ))}
-                    <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", marginTop: 2, borderTop: "1.5px solid #111827", fontSize: 11, fontWeight: 700, color: "#111827" }}>
-                      <span>TOTAL</span>
-                      <span>Rs.{total.toLocaleString()}</span>
-                    </div>
-                    {payMethod === "Credit" && (
-                      <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 9.5, fontWeight: 700, color: "#dc2626" }}>
-                        <span>Balance Due</span>
-                        <span>Rs.{Math.max(0, total - advanceAmt).toLocaleString()}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Row 3: Terms  |  QR + Barcode */}
-              <div style={{ display: "flex" }}>
-
-                {/* Terms */}
-                <div style={{ flex: "0 0 52%", padding: "10px 18px 12px", borderRight: "1px solid #d1d5db" }}>
-                  <div style={{ fontSize: 8, fontWeight: 700, color: "#6b7280", letterSpacing: "0.14em", textTransform: "uppercase" as const, marginBottom: 6 }}>Terms &amp; Conditions</div>
-                  <div style={{ fontSize: 8.5, color: "#374151", lineHeight: 1.75, fontFamily: "Arial, Helvetica, sans-serif" }}>
-                    <div style={{ color: "#374151", textDecoration: "none" }}>• All sales are final. No refunds after 7 days.</div>
-                    <div style={{ color: "#374151", textDecoration: "none" }}>• Warranty valid only with this receipt.</div>
-                    <div style={{ color: "#374151", textDecoration: "none" }}>• Physical damage not covered under warranty.</div>
-                    <div style={{ color: "#374151", textDecoration: "none" }}>• Keep this receipt for future reference.</div>
-                    <div style={{ color: "#374151", textDecoration: "none" }}>• Queries: 0112 345 678</div>
-                  </div>
-                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e5e7eb", fontSize: 8.5, color: "#6b7280" }}>
-                    Issued by: <span style={{ fontWeight: 700, color: "#111827" }}>Admin</span>
-                  </div>
-                </div>
-
-                {/* QR + Barcode */}
-                <div style={{ flex: 1, padding: "10px 18px 12px", display: "flex", alignItems: "center", justifyContent: "space-evenly", gap: 6 }}>
-                  <QRCodeSVG value={receiptNo} size={72} level="M" />
-                  <Barcode value={receiptNo} width={1.2} height={58} fontSize={8} margin={0} background="#ffffff" lineColor="#111111" displayValue />
-                </div>
-
-              </div>
-
-            </div>
+            /* ── A5 Invoice — the same document Complete Sale prints ── */
+            <>
+              <FitToWidth>
+                <AccessoryInvoicePrintable
+                  invoiceNo="INV-PREVIEW"
+                  createdAt={invoiceDate(new Date())}
+                  customer={customer}
+                  lines={invoiceLines(cart, warranties)}
+                  discount={discountAmt}
+                  payMethod={payMethod}
+                  received={payMethod === "Cash" ? payReceivedAmt : 0}
+                />
+              </FitToWidth>
+              <p style={{ fontSize: 10.5, color: "var(--text-muted)", textAlign: "center", margin: "8px 0 12px", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                Gets its invoice number and prints after Complete Sale.
+              </p>
+            </>
           ) : (
             /* ── POS Thermal Receipt ── */
             <div ref={receiptRef} style={{ background: "#ffffff", borderRadius: "6px 6px 0 0", overflow: "hidden", boxShadow: "0 4px 24px rgba(0,0,0,0.25)" }}>
@@ -1820,84 +2013,77 @@ function Step2({
 
 // ─── Step 3: Complete Sale ────────────────────────────────────────────────────
 
-function Step3({ cart, customer, payMethod, discount, onNewSale }: {
-  cart: CartItem[];
-  customer: CustomerInfo;
-  payMethod: string;
-  discount: string;
+function Step3({ sale, onNewSale }: {
+  sale: CompletedAccessorySale;
   onNewSale: () => void;
 }) {
+  const { invoiceNo, cart, customer, payMethod } = sale;
+  const invoiceRef = useRef<HTMLDivElement>(null);
   const subtotal = cart.reduce((s, c) => s + c.product.sellingPrice * c.qty, 0);
-  const discountAmt = parseFloat(discount) || 0;
-  const total = Math.max(0, subtotal - discountAmt);
+  const total = Math.max(0, subtotal - sale.discount);
+  const itemCount = cart.reduce((s, c) => s + c.qty, 0);
 
-  const receiptNo = `ACC-${Date.now().toString().slice(-6)}`;
+  // The invoice as printed goes into history, same as a repair invoice — Sales
+  // History reprints this, not a re-render.
+  usePersistInvoiceDocument(invoiceNo, invoiceRef, ACCESSORY_INVOICE_PAGE_CSS);
+
+  const handlePrint = () => {
+    const el = invoiceRef.current;
+    if (!el || el.dataset.templatePending) return;
+    printInvoiceDocument({ invoiceNo, html: el.outerHTML, pageCss: ACCESSORY_INVOICE_PAGE_CSS, createdAt: sale.createdAt });
+  };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flex: 1, gap: 20 }}>
-      <div style={{ fontSize: 52 }}>✅</div>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1, gap: 18, padding: "24px 28px", overflowY: "auto", minHeight: 0 }}>
       <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+        <div style={{ fontSize: 40 }}>✅</div>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 4 }}>
           Sale Completed!
         </div>
         <div style={{ fontSize: 13, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 6 }}>
-          Receipt #{receiptNo} · {cart.reduce((s, c) => s + c.qty, 0)} item{cart.reduce((s, c) => s + c.qty, 0) !== 1 ? "s" : ""} sold
+          Invoice #{invoiceNo} · {itemCount} item{itemCount !== 1 ? "s" : ""} sold · Rs. {total.toLocaleString()} ({payMethod})
         </div>
-      </div>
-
-      <div style={{
-        width: 340, background: "var(--bg-card)", border: "1px solid var(--border)",
-        borderRadius: 12, padding: "20px 24px", display: "flex", flexDirection: "column", gap: 10,
-      }}>
-        <div style={{ textAlign: "center", borderBottom: "1px dashed var(--border)", paddingBottom: 12, marginBottom: 4 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Mano Mobile</div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 3 }}>Accessories Sale Receipt</div>
-        </div>
-        {cart.map((c) => (
-          <div key={c.product.id} style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 12, color: "var(--text-secondary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{c.product.name} ×{c.qty}</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Rs. {(c.product.sellingPrice * c.qty).toLocaleString()}</span>
-          </div>
-        ))}
-        {discountAmt > 0 && (
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 12, color: "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Discount</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "#4ade80", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>− Rs. {discountAmt.toLocaleString()}</span>
-          </div>
-        )}
-        <div style={{ borderTop: "1px dashed var(--border)", paddingTop: 10, display: "flex", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Total Paid ({payMethod})</span>
-          <span style={{ fontSize: 15, fontWeight: 700, color: "var(--accent)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Rs. {total.toLocaleString()}</span>
-        </div>
-        {customer.name && (
-          <div style={{ borderTop: "1px dashed var(--border)", paddingTop: 10 }}>
-            <div style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Customer: {customer.name} · {customer.phone}</div>
-          </div>
-        )}
       </div>
 
       <div style={{ display: "flex", gap: 10 }}>
         <button
-          onClick={onNewSale}
+          onClick={handlePrint}
           style={{
-            padding: "10px 28px", borderRadius: 8, border: "none",
+            padding: "10px 24px", borderRadius: 8, border: "none",
             background: "var(--accent)", color: "var(--accent-fg)",
             fontWeight: 700, fontSize: 13, cursor: "pointer",
             fontFamily: "'Plus Jakarta Sans', sans-serif",
           }}
         >
-          + New Sale
+          🖨️ Print Invoice (A5)
         </button>
         <button
+          onClick={onNewSale}
           style={{
-            padding: "10px 20px", borderRadius: 8,
+            padding: "10px 24px", borderRadius: 8,
             border: "1px solid var(--border)", background: "transparent",
             color: "var(--text-secondary)", fontSize: 13, cursor: "pointer",
             fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 600,
           }}
         >
-          🖨️ Print Receipt
+          + New Sale
         </button>
+      </div>
+
+      <div style={{ width: "100%", maxWidth: 820 }}>
+        <FitToWidth>
+          <AccessoryInvoicePrintable
+            ref={invoiceRef}
+            invoiceNo={invoiceNo}
+            createdAt={sale.createdAt}
+            customer={customer}
+            lines={invoiceLines(cart, sale.warranties)}
+            discount={sale.discount}
+            payMethod={payMethod}
+            received={sale.received}
+            cashier={sale.cashier}
+          />
+        </FitToWidth>
       </div>
     </div>
   );
@@ -1910,6 +2096,7 @@ const INITIAL_CUSTOMER: CustomerInfo = { name: "", phone: "", whatsapp: "", emai
 export default function AccessorySales() {
   const { addEntry } = useCashRegister();
   const { addSale } = useSales();
+  const { profile } = useAuth();
   const { products, sellStock, linkBarcode, loading: productsLoading, configured: productsConfigured } = useAccessories();
   const toast = useToast();
   const [scanResolve, setScanResolve] = useState<{ mode: "pick" | "link"; barcode: string; matches: Product[] } | null>(null);
@@ -1919,7 +2106,9 @@ export default function AccessorySales() {
   const [customer, setCustomer] = useState<CustomerInfo>(INITIAL_CUSTOMER);
   const [payMethod, setPayMethod] = useState("Cash");
   const [discount, setDiscount] = useState("");
-  const [completed, setCompleted] = useState(false);
+  const [warranties, setWarranties] = useState<Record<number, string>>({});
+  const [payReceived, setPayReceived] = useState("");
+  const [completed, setCompleted] = useState<CompletedAccessorySale | null>(null);
   const [invoicing, setInvoicing] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [showSearchPopup, setShowSearchPopup] = useState(false);
@@ -2004,25 +2193,19 @@ export default function AccessorySales() {
     setCustomer(INITIAL_CUSTOMER);
     setPayMethod("Cash");
     setDiscount("");
+    setWarranties({});
+    setPayReceived("");
     setStep(1);
-    setCompleted(false);
+    setCompleted(null);
   };
 
   if (completed) {
-    return (
-      <Step3
-        cart={cart}
-        customer={customer}
-        payMethod={payMethod}
-        discount={discount}
-        onNewSale={handleNewSale}
-      />
-    );
+    return <Step3 sale={completed} onNewSale={handleNewSale} />;
   }
 
   return (
     <div style={{
-      display: "flex", flexDirection: "column", flex: 1, minHeight: 0,
+      display: "flex", flexDirection: "column", flex: 1, minHeight: 0, minWidth: 0, maxWidth: "100%",
       background: "var(--bg-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif",
     }}>
       {/* Step indicator */}
@@ -2045,7 +2228,7 @@ export default function AccessorySales() {
       )}
 
       {/* Content */}
-      <div style={{ flex: 1, padding: "0 28px", minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, padding: "0 28px", minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column" }}>
         {step === 1 && (
           <Step1
             products={availableProducts}
@@ -2073,6 +2256,10 @@ export default function AccessorySales() {
             onPayMethod={setPayMethod}
             discount={discount}
             onDiscount={setDiscount}
+            warranties={warranties}
+            setWarranties={setWarranties}
+            payReceived={payReceived}
+            setPayReceived={setPayReceived}
           />
         )}
       </div>
@@ -2136,7 +2323,9 @@ export default function AccessorySales() {
                 await sellStock(cart.map(c => ({ id: c.product.id, qty: c.qty })), saleKey);
                 const invoiceNo = await fetchNextInvoiceNo();
                 const subtotal = cart.reduce((s, c) => s + c.product.sellingPrice * c.qty, 0);
-                const total = Math.max(0, subtotal - (parseFloat(discount) || 0));
+                const discountAmt = parseFloat(discount) || 0;
+                const total = Math.max(0, subtotal - discountAmt);
+                const cashier = profile?.fullName ?? "";
                 if (payMethod === "Cash") {
                   addEntry("in", `Cash Sale — Accessories`, total);
                 }
@@ -2146,15 +2335,45 @@ export default function AccessorySales() {
                   customer: customer.name || "Walk-in",
                   category: "Accessories",
                   items: cart.map(c => `${c.product.name} ×${c.qty}`).join(", ") || "Accessory Sale",
+                  subtotal,
+                  discountAmount: discountAmt,
                   total,
+                  paymentMethod: payMethod as "Cash" | "Card" | "Credit",
                   status: "Paid",
+                  cashier: cashier || undefined,
                 }, {
+                  customerPhone: customer.phone.trim() || null,
                   // So a later void can restock exactly what this sale sold —
                   // see void_sale() in the migration.
                   lineItems: cart.map(c => ({ type: "accessory" as const, id: c.product.id, qty: c.qty })),
+                  // The invoice's lines, with the warranty given on each — what
+                  // the Warranty Center looks the sale up by.
+                  saleItems: cart.map(c => {
+                    const w = warranties[c.product.id] || "None";
+                    return {
+                      kind: "accessory" as const,
+                      referenceId: c.product.id,
+                      description: c.product.name,
+                      qty: c.qty,
+                      unitPrice: c.product.sellingPrice,
+                      lineTotal: c.product.sellingPrice * c.qty,
+                      warrantyDays: warrantyDaysOf(w),
+                      warrantyLabel: warrantyLabel(warrantyDaysOf(w)),
+                    };
+                  }),
                   saleKey,
                 });
-                setCompleted(true);
+                setCompleted({
+                  invoiceNo,
+                  createdAt: invoiceDate(new Date()),
+                  cart,
+                  customer,
+                  payMethod,
+                  discount: discountAmt,
+                  received: payMethod === "Cash" ? (parseFloat(payReceived) || 0) : 0,
+                  warranties,
+                  cashier,
+                });
               } catch (e) {
                 setCheckoutError(e instanceof Error ? e.message : String(e));
               } finally {

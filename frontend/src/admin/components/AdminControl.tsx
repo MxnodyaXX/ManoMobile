@@ -21,7 +21,8 @@ import { useRepair, type RepairDealer } from "@/cashier/contexts/RepairContext";
 import { useParts, type PartRequestStatus } from "@/cashier/contexts/PartsContext";
 import {
   useBarcodeTemplates, createTemplate, updateTemplate, deleteTemplate, setDefaultTemplate,
-  LAYOUT_LABELS, type BarcodeTemplate, type BarcodeLayout,
+  fetchRepairSlots, setRepairSlot, REPAIR_SLOT_LABEL,
+  LAYOUT_LABELS, type BarcodeTemplate, type BarcodeLayout, type RepairAudience, type RepairTagSlot,
 } from "@/lib/inventory/barcodeTemplates";
 import {
   useDeviceFaults, createDeviceFault, updateDeviceFault, deleteDeviceFault, type DeviceFault,
@@ -1133,58 +1134,136 @@ const LABEL_PRESETS: { width: number; height: number; label: string }[] = [
  * is what the app loads at startup.
  */
 function BarcodeManager() {
-  // Barcode labels, plus the two full-page printed documents. Same canvas
-  // building blocks, wildly different scale — kept as a toggle rather than
-  // merged into one picker. "Mobile Devices" and "Accessories" are the same
-  // Barcode Labels gallery-plus-editor again, just pointed at one layout
-  // each (LabelTemplatesPanel's restrictToLayout) so a phone label and an
-  // accessory label can be designed independently without three copies of
-  // this screen.
-  const [section, setSection] = useState<"labels" | "device" | "accessory" | "receipt" | "issue" | "dealerInvoice">("labels");
+  // One tab per part of the shop — Repairs, Accessories, Mobile Devices,
+  // Inventory — and inside each, its Labels and its Receipts. Labels are the
+  // same gallery-plus-editor everywhere (LABEL_SECTIONS below), each showing
+  // only its own kinds of template; Repairs' receipts are the three printed
+  // documents a job produces.
+  const [section, setSection] = useState<LabelSection>("repair");
+  const [sub, setSub] = useState<"labels" | "receipts">("labels");
+  const [repairSide, setRepairSide] = useState<RepairAudience>("internal");
+  const [repairDoc, setRepairDoc] = useState<"receipt" | "issue" | "dealerInvoice">("receipt");
 
   const { templates, loading, error, configured, reload } = useBarcodeTemplates();
 
   const ff = "'Plus Jakarta Sans', sans-serif";
+  const hasReceipts = section !== "inventory";
+  const showing = hasReceipts ? sub : "labels";
+
+  const tabBar = (children: React.ReactNode) => (
+    <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, width: "fit-content", flexWrap: "wrap" }}>
+      {children}
+    </div>
+  );
+  const tab = (active: boolean, label: string, onClick: () => void, strong = false) => (
+    <button key={label} onClick={onClick} style={{
+      padding: strong ? "7px 15px" : "6px 16px", borderRadius: 7, fontSize: 12.5, cursor: "pointer", fontFamily: ff,
+      ...(strong
+        ? { background: active ? "var(--bg-secondary)" : "transparent", border: active ? "1px solid var(--border-active)" : "1px solid transparent", color: active ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: active ? 600 : 400 }
+        : { background: active ? "var(--accent)" : "transparent", border: "none", color: active ? "#fff" : "var(--text-secondary)", fontWeight: 600 }),
+    }}>{label}</button>
+  );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-      {/* Barcode labels vs. the two printed documents — same canvas idea,
-          differently-sized/shaped printables, so they each get their own
-          section rather than one picker trying to hold all three. */}
-      <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, width: "fit-content", flexWrap: "wrap" }}>
-        {([["labels", "Barcode Labels"], ["device", "Mobile Devices"], ["accessory", "Accessories"], ["receipt", "Job Receipt"], ["issue", "Job Issue Invoice"], ["dealerInvoice", "Dealer Invoice"]] as const).map(([sec, lbl]) => {
-          const active = section === sec;
-          return (
-            <button key={sec} onClick={() => setSection(sec)} style={{ padding: "7px 15px", borderRadius: 7, fontSize: 12.5, cursor: "pointer", fontFamily: ff, background: active ? "var(--bg-secondary)" : "transparent", border: active ? "1px solid var(--border-active)" : "1px solid transparent", color: active ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: active ? 600 : 400 }}>
-              {lbl}
-            </button>
-          );
-        })}
-      </div>
+      {/* Which part of the shop */}
+      {tabBar((Object.keys(LABEL_SECTIONS) as LabelSection[]).map(k =>
+        tab(section === k, LABEL_SECTIONS[k].label, () => setSection(k), true)))}
 
-      {section === "receipt" ? (
-        <ReceiptTemplateManager kind="receipt" />
-      ) : section === "issue" ? (
-        <ReceiptTemplateManager kind="issue" />
-      ) : section === "dealerInvoice" ? (
-        <ReceiptTemplateManager kind="dealerInvoice" />
+      {/* Its labels or its receipts (Inventory has labels only) */}
+      {hasReceipts && tabBar(<>
+        {tab(showing === "labels", "Labels", () => setSub("labels"))}
+        {tab(showing === "receipts", "Receipts", () => setSub("receipts"))}
+      </>)}
+
+      {showing === "labels" ? (
+        <>
+          {/* Repair labels split again: our own customers' jobs vs other shops'. */}
+          {section === "repair" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              {tabBar(<>
+                {tab(repairSide === "internal", "Internal", () => setRepairSide("internal"))}
+                {tab(repairSide === "external", "External", () => setRepairSide("external"))}
+              </>)}
+              <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: ff }}>
+                {repairSide === "internal" ? "Tags for our own customers' jobs (MANO MOBILE CENTRE)." : "Tags for jobs from other shops (dealers)."}
+              </span>
+            </div>
+          )}
+          <LabelTemplatesPanel
+            // One panel per tab: without the key, the draft open on one tab
+            // (a repair tag) carried over into the next.
+            key={section === "repair" ? `repair-${repairSide}` : section}
+            templates={templates}
+            loading={loading}
+            error={error}
+            configured={configured}
+            reload={reload}
+            title={section === "repair" ? `${repairSide === "internal" ? "Internal" : "External"} Repair Tag` : LABEL_SECTIONS[section].title}
+            layouts={LABEL_SECTIONS[section].layouts}
+            audience={section === "repair" ? repairSide : undefined}
+          />
+        </>
+      ) : section === "repair" ? (
+        <>
+          {tabBar(<>
+            {tab(repairDoc === "receipt", "Job Receipt", () => setRepairDoc("receipt"))}
+            {tab(repairDoc === "issue", "Job Issue Invoice", () => setRepairDoc("issue"))}
+            {tab(repairDoc === "dealerInvoice", "Dealer Invoice", () => setRepairDoc("dealerInvoice"))}
+          </>)}
+          <ReceiptTemplateManager key={repairDoc} kind={repairDoc} />
+        </>
+      ) : section === "accessory" ? (
+        <ReceiptTemplateManager key="accessoryInvoice" kind="accessoryInvoice" />
       ) : (
-        <LabelTemplatesPanel
-          // One panel per tab: without the key, the draft open on Barcode
-          // Labels (a repair tag) carried over into Accessories/Mobile Devices.
-          key={section}
-          templates={templates}
-          loading={loading}
-          error={error}
-          configured={configured}
-          reload={reload}
-          restrictToLayout={section === "device" || section === "accessory" ? section : undefined}
-        />
+        // Phone sale receipts print a fixed layout today — there is no
+        // template behind them to design, so say so rather than show an
+        // editor that would change nothing.
+        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "28px 24px", fontFamily: ff }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>
+            Mobile phone sale receipts
+          </div>
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: 6, maxWidth: 560, lineHeight: 1.6 }}>
+            These receipts print with the built-in layout for now — there is no design to edit yet.
+            Designable phone receipts will appear here once they are added.
+          </p>
+        </div>
       )}
     </div>
   );
 }
+
+/**
+ * The label tabs, each showing only its own kind of template. Inventory holds
+ * two kinds (shelf product labels and spare-part bin labels), so its editor
+ * keeps a Layout picker limited to those two; the others are preset.
+ */
+type LabelSection = "repair" | "accessory" | "device" | "inventory";
+const LABEL_SECTIONS: Record<LabelSection, { label: string; title: string; layouts: BarcodeLayout[] }> = {
+  repair:    { label: "Repairs",        title: "Repair Tag",           layouts: ["repair"] },
+  accessory: { label: "Accessories",    title: "Accessory Label",      layouts: ["accessory"] },
+  device:    { label: "Mobile Devices", title: "Mobile Device Label",  layouts: ["device"] },
+  inventory: { label: "Inventory",      title: "Inventory Label",      layouts: ["simple", "part"] },
+};
+
+/** A saved template as an editable draft. A repair template saved before sides
+ *  existed takes the side it's being edited under. */
+function toDraft(t: BarcodeTemplate, audience?: RepairAudience): TemplateDraft {
+  return {
+    name: t.name, layout: t.layout, format: t.format, width: t.width, height: t.height,
+    fontSize: t.fontSize, showText: t.showText, prefix: t.prefix,
+    labelWidthMm: t.labelWidthMm, labelHeightMm: t.labelHeightMm, labelMarginMm: t.labelMarginMm,
+    elements: t.elements,
+    repairAudience: t.repairAudience ?? audience ?? null,
+  };
+}
+
+/** The little "Normal tag" / "With passcode" marker on a repair template card. */
+const usedForChip: React.CSSProperties = {
+  fontSize: 9.5, fontWeight: 700, padding: "2px 7px", borderRadius: 20,
+  background: "rgba(74,222,128,0.14)", color: "#16a34a", letterSpacing: "0.02em",
+};
 
 // ─── Barcode Labels gallery + editor ──────────────────────────────────────────
 // Shared by the "Barcode Labels", "Mobile Devices" and "Accessories" tabs.
@@ -1194,13 +1273,18 @@ function BarcodeManager() {
 // presets it, and the Layout picker is hidden since there's nothing to pick
 // — everything else (Settings/Design, LabelCanvas, save/delete/set-default)
 // is exactly the machinery the "labels" tab already used.
-function LabelTemplatesPanel({ templates, loading, error, configured, reload, restrictToLayout }: {
+function LabelTemplatesPanel({ templates, loading, error, configured, reload, title, layouts, audience }: {
   templates: BarcodeTemplate[];
   loading: boolean;
   error: string | null;
   configured: boolean;
   reload: () => Promise<void>;
-  restrictToLayout?: BarcodeLayout;
+  /** What this tab is called ("Repair Tag") and the template kinds it shows. */
+  title: string;
+  layouts: BarcodeLayout[];
+  /** Repairs only: show just this side's templates, and pick which of them
+   *  prints for a normal job and for one with a passcode. */
+  audience?: RepairAudience;
 }) {
   const { setBarcodeSettings } = useInventory();
   const toast = useToast();
@@ -1210,14 +1294,31 @@ function LabelTemplatesPanel({ templates, loading, error, configured, reload, re
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<"settings" | "design">("settings");
 
-  const visibleTemplates = restrictToLayout ? templates.filter(t => t.layout === restrictToLayout) : templates;
+  // A repair template saved before sides existed counts as internal.
+  const visibleTemplates = templates.filter(t =>
+    layouts.includes(t.layout) && (!audience || (t.repairAudience ?? "internal") === audience));
 
-  const asDraft = (t: BarcodeTemplate): TemplateDraft => ({
-    name: t.name, layout: t.layout, format: t.format, width: t.width, height: t.height,
-    fontSize: t.fontSize, showText: t.showText, prefix: t.prefix,
-    labelWidthMm: t.labelWidthMm, labelHeightMm: t.labelHeightMm, labelMarginMm: t.labelMarginMm,
-    elements: t.elements,
-  });
+  // Which of this side's templates prints for each case.
+  const [slots, setSlots] = useState<Partial<Record<RepairTagSlot, string | null>>>({});
+  useEffect(() => {
+    if (!audience) return;
+    let on = true;
+    fetchRepairSlots().then(s => { if (on) setSlots(s); });
+    return () => { on = false; };
+  }, [audience]);
+  const chooseSlot = async (slot: RepairTagSlot, templateId: string | null) => {
+    const before = slots;
+    setSlots(s => ({ ...s, [slot]: templateId }));
+    try {
+      await setRepairSlot(slot, templateId);
+      toast.success("Saved", `${REPAIR_SLOT_LABEL[slot]} updated`);
+    } catch (e) {
+      setSlots(before);
+      toast.error("Not saved", e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const asDraft = (t: BarcodeTemplate): TemplateDraft => toDraft(t, audience);
 
   // Land on the default template once the list arrives, so the panel is never
   // blank and the thing being edited is the thing that actually prints.
@@ -1225,8 +1326,8 @@ function LabelTemplatesPanel({ templates, loading, error, configured, reload, re
     if (draft || visibleTemplates.length === 0) return;
     const first = visibleTemplates.find(t => t.isDefault) ?? visibleTemplates[0];
     setSelectedId(first.id);
-    setDraft(asDraft(first));
-  }, [visibleTemplates, draft]);
+    setDraft(toDraft(first, audience));
+  }, [visibleTemplates, draft, audience]);
 
   const selected = templates.find(t => t.id === selectedId) ?? null;
   const s = draft;
@@ -1246,9 +1347,10 @@ function LabelTemplatesPanel({ templates, loading, error, configured, reload, re
     if (dirty && !confirm("Discard unsaved changes to this template?")) return;
     setSelectedId(null);
     setDraft({
-      name: "", layout: restrictToLayout ?? "simple", format: "CODE128", width: 2, height: 60, fontSize: 12,
+      name: "", layout: layouts[0], format: "CODE128", width: 2, height: 60, fontSize: 12,
       showText: true, prefix: "MM", labelWidthMm: 50, labelHeightMm: 25, labelMarginMm: 3,
       elements: [],
+      repairAudience: audience ?? null,
     });
   };
 
@@ -1320,9 +1422,7 @@ function LabelTemplatesPanel({ templates, loading, error, configured, reload, re
   };
 
   const ff = "'Plus Jakarta Sans', sans-serif";
-  const emptyGalleryHint = restrictToLayout
-    ? `No ${LAYOUT_LABELS[restrictToLayout].label.toLowerCase()} templates yet — click New Template to create one.`
-    : "No templates yet — run the migration, or click New Template to create one.";
+  const emptyGalleryHint = `No ${title.toLowerCase()} templates yet — click New Template to create one.`;
 
   return (
     <>
@@ -1342,7 +1442,7 @@ function LabelTemplatesPanel({ templates, loading, error, configured, reload, re
         <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
           <BarcodeIcon size={15} color="var(--accent)" />
           <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: ff }}>
-            {restrictToLayout ? LAYOUT_LABELS[restrictToLayout].label + " Templates" : "Label Templates"}
+            {title} Templates
           </span>
           <span style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff }}>
             {visibleTemplates.length} saved
@@ -1378,6 +1478,12 @@ function LabelTemplatesPanel({ templates, loading, error, configured, reload, re
                 </div>
                 <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{LAYOUT_LABELS[t.layout].label}</div>
                 <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>{t.labelWidthMm} × {t.labelHeightMm} mm · {t.format}</div>
+                {audience && (slots[audience] === t.id || slots[`${audience}_passcode`] === t.id) && (
+                  <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
+                    {slots[audience] === t.id && <span style={usedForChip}>Normal tag</span>}
+                    {slots[`${audience}_passcode`] === t.id && <span style={usedForChip}>With passcode</span>}
+                  </div>
+                )}
               </button>
             );
           })}
@@ -1389,6 +1495,29 @@ function LabelTemplatesPanel({ templates, loading, error, configured, reload, re
             </div>
           )}
         </div>
+
+        {/* Repairs: which of this side's templates actually prints. */}
+        {audience && (
+          <div style={{ borderTop: "1px solid var(--border)", padding: "14px 20px", display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end", fontFamily: ff }}>
+            <div style={{ fontSize: 12, color: "var(--text-secondary)", maxWidth: 260, lineHeight: 1.5 }}>
+              <strong style={{ color: "var(--text-primary)" }}>Use for {audience === "internal" ? "our own jobs" : "other shops' jobs"}</strong><br />
+              {audience === "internal" ? "MANO MOBILE CENTRE customers." : "Jobs from Phone House and the other dealers."} Only these templates are used for them.
+            </div>
+            {([audience, `${audience}_passcode`] as RepairTagSlot[]).map(slot => (
+              <label key={slot} style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 220 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{REPAIR_SLOT_LABEL[slot]}</span>
+                <select
+                  value={slots[slot] ?? ""}
+                  onChange={e => void chooseSlot(slot, e.target.value || null)}
+                  style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-surface)", color: "var(--text-primary)", fontSize: 12.5, fontFamily: ff }}
+                >
+                  <option value="">{slot.endsWith("_passcode") ? "Same as the normal tag" : "Built-in tag (no design)"}</option>
+                  {visibleTemplates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </label>
+            ))}
+          </div>
+        )}
       </div>
 
       {!s ? null : (
@@ -1466,11 +1595,10 @@ function LabelTemplatesPanel({ templates, loading, error, configured, reload, re
                   <input type="text" value={s.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Product 50×25" style={inputStyle} />
                 </div>
 
-                {/* On a dedicated Mobile Devices / Accessories tab the layout
-                    is already unambiguous — picking it again from a list of
-                    five would just be a second, redundant place to get it
-                    wrong, so it's preset and this picker is hidden. */}
-                {!restrictToLayout && (
+                {/* Only where a tab holds more than one kind (Inventory: product
+                    labels and part labels), and only those kinds. Everywhere
+                    else the tab already decides it, so the picker is hidden. */}
+                {layouts.length > 1 && (
                 <div>
                   <label style={labelStyle}>Layout</label>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

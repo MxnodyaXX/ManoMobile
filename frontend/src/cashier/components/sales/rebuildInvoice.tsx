@@ -8,7 +8,10 @@ import type { SaleItem } from "@/lib/sales/saleItems";
 import { warrantyLine } from "@/lib/repair/warrantyLine";
 import { SHOP_DETAILS } from "@/lib/shop";
 import RepairInvoicePrintable, { repairInvoicePageCss, type InvoiceRepairLine } from "./RepairInvoicePrintable";
+import AccessoryInvoicePrintable, { ACCESSORY_INVOICE_PAGE_CSS, type AccessoryInvoiceLine } from "./AccessoryInvoicePrintable";
+import { useOptionalAccessories } from "@/cashier/contexts/AccessoriesContext";
 import type { ExtraLine } from "./AddProductsModal";
+import { docDate } from "@/lib/docDate";
 
 /**
  * An invoice for a sale whose printed document was never kept.
@@ -31,15 +34,18 @@ export interface RebuiltInvoice {
   render: (ref: Ref<HTMLDivElement>) => ReactNode;
 }
 
-const fmtCreatedAt = (isoDate: string) => {
-  const d = new Date(isoDate);
-  return isNaN(d.getTime())
-    ? isoDate
-    : d.toLocaleDateString("en-US", { year: "numeric", month: "2-digit", day: "2-digit" });
+const fmtCreatedAt = (isoDate: string) => docDate(isoDate);
+
+/** "6 months warranty" -> "6 Months"; "No warranty" -> "None". */
+const warrantyShort = (label: string | null) => {
+  const t = (label ?? "").replace(/\s*warranty$/i, "").trim();
+  if (!t || /^no$/i.test(t)) return "None";
+  return t.replace(/\b\w/g, c => c.toUpperCase());
 };
 
 export function useRebuiltInvoice(tx: SaleTx, lines: SaleItem[]): RebuiltInvoice {
   const { jobs, dealers } = useRepair();
+  const catalogue = useOptionalAccessories();
 
   // What the sale row carries that the ledger's SaleTx does not: which jobs,
   // which dealer, and the customer's number.
@@ -150,6 +156,43 @@ export function useRebuiltInvoice(tx: SaleTx, lines: SaleItem[]): RebuiltInvoice
           invoiceDiscount={invoiceDiscount}
           repairs={repairs}
           extras={products}
+        />
+      ),
+    };
+  }
+
+  // An accessory sale reprints on the A5 accessory invoice — Admin -> Barcode
+  // -> Accessories -> Receipts' design when one is set — like it prints at
+  // the counter. Code and category come from today's catalogue.
+  if (tx.category === "Accessories") {
+    const products = catalogue?.products ?? [];
+    const accLines: AccessoryInvoiceLine[] = lines.length > 0
+      ? lines.map(l => {
+          const p = products.find(x => String(x.id) === l.referenceId);
+          return {
+            productId: Number(l.referenceId) || l.id, name: l.description,
+            code: p?.code ?? "", brand: p?.brand ?? "", category: p?.category ?? "",
+            qty: l.qty, unitPrice: l.unitPrice, warranty: warrantyShort(l.warrantyLabel),
+          };
+        })
+      : [{
+          productId: 0, name: tx.items || "Accessory Sale", code: "", brand: "", category: "",
+          qty: 1, unitPrice: tx.total + (tx.discountAmount ?? 0), warranty: "None",
+        }];
+    const createdAt = fmtCreatedAt(tx.createdAt || tx.date);
+    return {
+      loading: !ready,
+      pageCss: ACCESSORY_INVOICE_PAGE_CSS,
+      render: ref => (
+        <AccessoryInvoicePrintable
+          ref={ref}
+          invoiceNo={tx.invoiceNo}
+          createdAt={createdAt}
+          customer={{ name: tx.customer === "Walk-in" ? "" : tx.customer, phone: sale?.customerPhone ?? "" }}
+          lines={accLines}
+          discount={tx.discountAmount ?? 0}
+          payMethod={tx.paymentMethod ?? "Cash"}
+          cashier={tx.cashier}
         />
       ),
     };

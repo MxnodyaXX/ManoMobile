@@ -1,6 +1,7 @@
 "use client";
 
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/supabase/fetchAll";
 import type { DeviceRecord, DeviceStatus } from "@/cashier/contexts/DevicesContext";
 
 /**
@@ -78,13 +79,15 @@ const missingWarrantyColumns = (msg: string) => /warranty_(days|note)/.test(msg)
 
 export async function fetchDevices(): Promise<DeviceRecord[]> {
   if (!isSupabaseConfigured()) return [];
-  const { data, error } = await getSupabaseBrowserClient()
+  // Paged: a single read stops at 1,000 phones (see fetchAllRows).
+  const sb = getSupabaseBrowserClient();
+  const data = await fetchAllRows<DeviceRow>((from, to) => sb
     .from("mobile_devices")
     .select(DEVICE_COLUMNS)
-    .order("name", { ascending: true });
-
-  if (error) throw new Error(error.message);
-  return (data as DeviceRow[]).map(toDevice);
+    .order("name", { ascending: true })
+    .order("id", { ascending: true })
+    .range(from, to) as unknown as PromiseLike<{ data: DeviceRow[] | null; error: { message: string } | null }>);
+  return data.map(toDevice);
 }
 
 /** Insert (id === 0) or update one device. */

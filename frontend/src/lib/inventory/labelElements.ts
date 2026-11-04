@@ -70,6 +70,9 @@ export interface LabelData {
    *  on our own jobs without any extra logic. */
   dealerJobNo?: string;
   customer?: string;
+  /** The customer's phone — job tags for our own (in-house) jobs only; a
+   *  dealer's job carries the dealer's number, not the end customer's. */
+  phone?: string;
   device?: string;
   imei?: string;
   /** Last 6 digits of the IMEI — the full 15 digits rarely fit legibly on a
@@ -124,6 +127,7 @@ export const LABEL_TOKENS: { token: string; label: string; layouts?: string[] }[
   { token: "{{dealerJobNo}}", label: "Dealer's job number", layouts: ["repair"] },
   { token: "{{code}}",        label: "Barcode value" },
   { token: "{{customer}}",    label: "Customer name", layouts: ["repair"] },
+  { token: "{{phone}}",       label: "Customer phone", layouts: ["repair"] },
   { token: "{{device}}",      label: "Device brand & model", layouts: ["repair", "device"] },
   { token: "{{imei}}",        label: "IMEI", layouts: ["repair", "device"] },
   { token: "{{imeiShort}}",   label: "IMEI (last 6 digits)", layouts: ["device"] },
@@ -161,6 +165,7 @@ export function resolveTokens(text: string, data: LabelData): string {
     dealerJobNo: data.dealerJobNo,
     code: data.code,
     customer: data.customer,
+    phone: data.phone,
     device: data.device,
     imei: data.imei,
     imeiShort: data.imeiShort,

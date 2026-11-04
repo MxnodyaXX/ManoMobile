@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/supabase/fetchAll";
 
 /**
  * External repair agents — the outside workshops a device is sent to when it
@@ -262,11 +263,15 @@ export async function fetchJobTransfers(jobId: string): Promise<AgentTransfer[]>
  * outside", and a screen showing forty rows should not scan a list forty times.
  */
 export async function fetchAgentCostsByJob(): Promise<Record<string, number>> {
-  const { data, error } = await getSupabaseBrowserClient()
-    .from("v_job_agent_cost")
-    .select("job_id, agent_cost");
-
-  if (error) throw new Error(`Could not load agent costs: ${error.message}`);
+  // One row per job — paged, since a single read stops at 1,000 (see fetchAllRows).
+  const sb = getSupabaseBrowserClient();
+  let data: { job_id: string; agent_cost: number | string }[];
+  try {
+    data = await fetchAllRows<{ job_id: string; agent_cost: number | string }>((from, to) => sb
+      .from("v_job_agent_cost").select("job_id, agent_cost").order("job_id").range(from, to));
+  } catch (e) {
+    throw new Error(`Could not load agent costs: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   const out: Record<string, number> = {};
   for (const r of (data ?? []) as { job_id: string; agent_cost: number | string }[]) {

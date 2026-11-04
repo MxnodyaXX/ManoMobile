@@ -1,6 +1,7 @@
 "use client";
 
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/supabase/fetchAll";
 import type { AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
 
 /**
@@ -57,13 +58,15 @@ function toProduct(row: ProductRow): AccessoryProduct {
 
 export async function fetchAccessoryProducts(): Promise<AccessoryProduct[]> {
   if (!isSupabaseConfigured()) return [];
-  const { data, error } = await getSupabaseBrowserClient()
+  // Paged: a single read stops at 1,000 products (see fetchAllRows).
+  const sb = getSupabaseBrowserClient();
+  const data = await fetchAllRows<ProductRow>((from, to) => sb
     .from("accessory_products")
     .select(PRODUCT_COLUMNS)
-    .order("name", { ascending: true });
-
-  if (error) throw new Error(error.message);
-  return (data as ProductRow[]).map(toProduct);
+    .order("name", { ascending: true })
+    .order("id", { ascending: true })
+    .range(from, to) as unknown as PromiseLike<{ data: ProductRow[] | null; error: { message: string } | null }>);
+  return data.map(toProduct);
 }
 
 /** Insert (id === 0) or update one product. */

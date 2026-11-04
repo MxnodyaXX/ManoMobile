@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { insertSaleItems, type NewSaleItem } from "@/lib/sales/saleItems";
+import { fetchAllRows } from "@/lib/supabase/fetchAll";
 import type { SaleTx, TxCategory, TxStatus } from "@/cashier/contexts/SalesContext";
 
 /**
@@ -98,14 +99,21 @@ function explain(message: string, code?: string): string {
 
 /** Every recorded invoice, newest first. */
 export async function fetchSales(): Promise<SaleTx[]> {
-  const { data, error } = await getSupabaseBrowserClient()
-    .from("sales")
-    .select("*")
-    .order("sold_on", { ascending: false })
-    .order("created_at", { ascending: false });
-
-  if (error) throw new Error(explain(error.message, error.code));
-  return ((data ?? []) as Row[]).map(toSale);
+  // Page by page: a single read stops at 1,000 invoices (see fetchAllRows).
+  const sb = getSupabaseBrowserClient();
+  try {
+    const rows = await fetchAllRows<Row>((from, to) => sb
+      .from("sales")
+      .select("*")
+      .order("sold_on", { ascending: false })
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to));
+    return rows.map(toSale);
+  } catch (e) {
+    const err = e as Error & { code?: string };
+    throw new Error(explain(err.message, err.code));
+  }
 }
 
 /**

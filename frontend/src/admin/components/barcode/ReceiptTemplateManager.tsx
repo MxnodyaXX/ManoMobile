@@ -37,10 +37,13 @@ type Draft = Omit<ReceiptTemplate, "id" | "isDefault">;
 // Dealer invoice: A5 landscape, no print margin — matches
 // DEALER_INVOICE_PAGE_CSS in DealerInvoicePrintable.tsx, so a template built
 // here lines up with the built-in fallback it's replacing.
+// Accessory invoice: the same A5 landscape sheet, matching
+// ACCESSORY_INVOICE_PAGE_CSS in AccessoryInvoicePrintable.tsx.
 const BLANK_BY_KIND: Record<TemplateKind, Draft> = {
   receipt: { name: "", kind: "receipt", pageWidthMm: 210, pageHeightMm: 148, elements: [] },
   issue: { name: "", kind: "issue", pageWidthMm: 180, pageHeightMm: 267, elements: [] },
   dealerInvoice: { name: "", kind: "dealerInvoice", pageWidthMm: 210, pageHeightMm: 148, elements: [] },
+  accessoryInvoice: { name: "", kind: "accessoryInvoice", pageWidthMm: 210, pageHeightMm: 148, elements: [] },
 };
 
 const COPY: Record<TemplateKind, {
@@ -74,6 +77,17 @@ const COPY: Record<TemplateKind, {
       + "An empty design (no elements added yet) keeps printing the plain built-in invoice.",
     pageNote: "A5 landscape prints at 210 × 148mm with no page margin — the design has to fill that itself, and it may span more than one physical sheet.",
     migrationFile: "20260928000001_dealer_invoice_templates.sql",
+  },
+  accessoryInvoice: {
+    title: "Accessory Invoice Templates",
+    listEmpty: "No accessory invoice templates yet — click New Template to design one.",
+    description: "Design the sales invoice printed when accessories are sold at the counter — logo, invoice number, "
+      + "customer details, the item table (one row per product, with its warranty), and the totals. Tag each element's "
+      + "repeat scope in its properties so a long bill carries onto a second sheet properly: \"Every page\" for the logo "
+      + "band, \"First page only\" for the customer block, \"Last page only\" for the totals. An empty design (no "
+      + "elements added yet) keeps printing the plain built-in invoice.",
+    pageNote: "A5 landscape prints at 210 × 148mm with no page margin — the design has to fill that itself, and a long bill spans more than one sheet.",
+    migrationFile: "20261104000090_accessory_invoice_templates.sql",
   },
 };
 
@@ -181,7 +195,7 @@ export default function ReceiptTemplateManager({ kind }: { kind: TemplateKind })
     try {
       await setDefaultReceiptTemplate(selected.id);
       await reload();
-      toast.dialog("success", "Default set", `${selected.name} is now what prints ${kind === "receipt" ? "on job intake" : kind === "issue" ? "on job issue" : "on a dealer invoice"}.`);
+      toast.dialog("success", "Default set", `${selected.name} is now what prints ${kind === "receipt" ? "on job intake" : kind === "issue" ? "on job issue" : kind === "dealerInvoice" ? "on a dealer invoice" : "on an accessory sale"}.`);
     } catch (e) {
       toast.dialog("error", "Could not set default", e instanceof Error ? e.message : String(e));
     } finally {

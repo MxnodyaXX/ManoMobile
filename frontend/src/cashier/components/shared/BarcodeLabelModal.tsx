@@ -8,18 +8,7 @@ import { useInventory } from "@/cashier/contexts/InventoryContext";
 import { printLabelNode } from "@/cashier/utils/printLabel";
 import { SHOP_DETAILS } from "@/lib/shop";
 import LabelRender from "@/cashier/components/shared/LabelRender";
-import { fetchTemplateForLayout, fetchTemplateByName, type BarcodeTemplate } from "@/lib/inventory/barcodeTemplates";
-
-/** The exact name of the label template used for a repair job whose dealer
- *  is someone other than Mano Mobile itself — must match the template's
- *  saved name in Admin -> Barcode exactly (case-insensitive). Falls back to
- *  the normal default "repair" template if no template has this name yet. */
-const OUTSIDE_DEALER_TEMPLATE_NAME = "RepairJobTagOutsideDealers";
-/** The template for a device that came in with its unlock code. Tried first,
- *  before the dealer one: the code is what the technician needs off the tag,
- *  whoever sent the phone. Same rule — exact saved name, case-insensitive,
- *  and the normal default applies until somebody creates it. */
-const PASSCODE_TEMPLATE_NAME = "Repair Job Tag With Pass";
+import { fetchTemplateForLayout, fetchRepairTag, type BarcodeTemplate } from "@/lib/inventory/barcodeTemplates";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 const PX_PER_MM = 96 / 25.4;
@@ -71,14 +60,17 @@ interface BarcodeLabelModalProps {
   modelNumber?: string;
   /** Accessory label tokens: {{itemCode}}, {{brand}}, {{model}}, {{category}}. */
   accessory?: { itemCode: string; brand: string; model: string; category: string };
-  /** The unlock code the customer left with the device, when they did. A tag
-   *  for such a device uses the PASSCODE_TEMPLATE_NAME design where one
-   *  exists, and the built-in tag prints the code. */
+  /** The unlock code the customer left with the device, when they did. Such a
+   *  tag prints the "Job tag with passcode" template chosen in Admin →
+   *  Barcode → Repairs, and the built-in tag prints the code. */
   passcode?: string;
+  /** The customer's phone for a repair tag — {{phone}} in a design, and after
+   *  the name on the built-in tag. Passed for in-house jobs only: a dealer's
+   *  job carries the dealer's number, not the end customer's. */
+  phone?: string;
   /** True when this job's dealer is someone other than Mano Mobile itself —
-   *  picks the OUTSIDE_DEALER_TEMPLATE_NAME design instead of the normal
-   *  default "repair" template, when one exists. Only meaningful for
-   *  variant="repair". */
+   *  prints the External repair tags instead of the Internal ones (Admin →
+   *  Barcode → Repairs). Only meaningful for variant="repair". */
   outsideDealer?: boolean;
   /**
    * Skip the confirm-and-click dialog entirely: render the label off-screen,
@@ -125,7 +117,7 @@ interface BarcodeLabelModalProps {
  * until it fits. Runs for both axes since a narrower label (38mm) can
  * overflow sideways even when a wider one (50mm) had enough slack.
  */
-export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, price, deviceName, modelNumber, accessory, passcode, outsideDealer = false, silent = false, ask = false, onReady, onClose }: BarcodeLabelModalProps) {
+export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, price, deviceName, modelNumber, accessory, passcode, phone, outsideDealer = false, silent = false, ask = false, onReady, onClose }: BarcodeLabelModalProps) {
   const hasPasscode = !!passcode && passcode.trim() !== "";
   const { barcodeSettings: s } = useInventory();
   const labelRef = useRef<HTMLDivElement>(null);
@@ -142,16 +134,12 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
   const [designLoaded, setDesignLoaded] = useState(false);
   useEffect(() => {
     let active = true;
-    // A repair tag tries the named templates in order — passcode, then
-    // outside dealer — and falls through to the normal default whenever a
-    // template doesn't exist (not yet created, renamed, or deleted), so
-    // nothing breaks either way.
-    const names = variant === "repair"
-      ? [...(hasPasscode ? [PASSCODE_TEMPLATE_NAME] : []), ...(outsideDealer ? [OUTSIDE_DEALER_TEMPLATE_NAME] : [])]
-      : [];
-    const lookup = names
-      .reduce<Promise<BarcodeTemplate | null>>((p, name) => p.then(t => t ?? fetchTemplateByName(name)), Promise.resolve(null))
-      .then(t => t ?? fetchTemplateForLayout(variant));
+    // A repair tag prints whatever Admin → Barcode → Repairs chose for this
+    // kind of job — internal or external, with or without a passcode — and
+    // never a template from the other side (see fetchRepairTag).
+    const lookup = variant === "repair"
+      ? fetchRepairTag(outsideDealer ? "external" : "internal", hasPasscode)
+      : fetchTemplateForLayout(variant);
     lookup
       .then(t => { if (active && t && t.elements.length > 0) setDesign(t); })
       .catch(() => { /* built-in layout applies */ })
@@ -324,6 +312,7 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
           jobId: jobId ?? code,
           dealerJobNo: dealerJobNo ?? "",
           customer: subtitle ?? "",
+          phone: phone?.trim() ?? "",
           device: title ?? "",
           imei: imei ?? "",
           imeiShort: imei ? imei.slice(-6) : "",
@@ -374,9 +363,9 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
                     <div style={{ fontSize: 9, fontWeight: 800, color: "#000", fontFamily: ff, lineHeight: 1.15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {title}
                     </div>
-                    {subtitle && (
+                    {(subtitle || phone?.trim()) && (
                       <div style={{ fontSize: 6.5, color: "#444", fontFamily: ff, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {subtitle}
+                        {[subtitle, phone?.trim()].filter(Boolean).join(" · ")}
                       </div>
                     )}
                   </div>

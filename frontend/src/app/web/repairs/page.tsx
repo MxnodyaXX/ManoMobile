@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowRight, BatteryCharging, Camera, Cpu, Droplets, MessageCircle, Mic, PlugZap, Smartphone, Unlock, Volume2 } from "lucide-react";
 import { WHATSAPP } from "@/web/Footer";
 import { delay } from "@/web/ui";
+import RepairFaq from "@/web/RepairFaq";
 
 export const metadata: Metadata = { title: "Repairs" };
 
@@ -55,6 +56,8 @@ export default function RepairsPage() {
           ))}
         </div>
       </section>
+
+      <RepairFaq title="Repair questions" />
 
       <section className="bg-neutral-950 text-white">
         <div className="mx-auto grid max-w-7xl gap-12 px-5 py-24 md:grid-cols-3 md:px-8">

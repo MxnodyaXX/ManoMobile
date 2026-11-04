@@ -1,6 +1,7 @@
 "use client";
 
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/supabase/fetchAll";
 import type {
   SparePart,
   PartCategory,
@@ -158,13 +159,13 @@ export async function deletePart(id: string): Promise<void> {
 
 export async function fetchPartRequests(): Promise<PartRequest[]> {
   if (!isSupabaseConfigured()) return [];
-  const { data, error } = await getSupabaseBrowserClient()
-    .from("repair_part_requests")
-    .select("*")
-    .order("requested_at", { ascending: false });
-
-  if (error) throw new Error(error.message);
-  return (data as RequestRow[] | null)?.map(toRequest) ?? [];
+  // Paged: a single read stops at 1,000 requests (see fetchAllRows).
+  const sb = getSupabaseBrowserClient();
+  const data = await fetchAllRows<RequestRow>((from, to) => sb
+    .from("repair_part_requests").select("*")
+    .order("requested_at", { ascending: false }).order("id", { ascending: false })
+    .range(from, to));
+  return data.map(toRequest);
 }
 
 export async function createPartRequest(

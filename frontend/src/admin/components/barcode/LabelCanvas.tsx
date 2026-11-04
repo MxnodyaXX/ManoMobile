@@ -30,6 +30,7 @@ const SAMPLE: LabelData = {
   jobId: "RM-011",
   dealerJobNo: "D-4821",
   customer: "Wijaya Kumara",
+  phone: "077 123 4567",
   device: "Xiaomi Redmi 9C",
   imei: "356938035643809",
   fault: "Screen cracked, no display",

@@ -28,6 +28,7 @@ import { useAccessories } from "@/cashier/contexts/AccessoriesContext";
 import AddProductsModal, { extraLineTotal, type ExtraLine } from "@/cashier/components/sales/AddProductsModal";
 import type { NewSaleItem } from "@/lib/sales/saleItems";
 import { phoneMatches } from "@/lib/repair/phoneSearch";
+import { docDate } from "@/lib/docDate";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -607,7 +608,7 @@ export default function RepairSales({ initialDealer, initialJobId }: {
   // this can't just run on mount.
   const [invoiceNo, setInvoiceNo] = useState<string | null>(null);
   const [invoicing, setInvoicing] = useState(false);
-  const createdAt = useMemo(() => new Date().toLocaleString("en-US", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: true }), []);
+  const createdAt = useMemo(() => docDate(new Date()), []);
 
   // Dealers managed in Admin Control, plus any legacy dealer still attached to
   // a repair row so historic work stays invoiceable.

@@ -9,6 +9,7 @@ import { CountUp } from "@/web/Motion";
 import { delay } from "@/web/ui";
 import { WHATSAPP } from "@/web/Footer";
 import { BRAND_LOGOS, BrandMark } from "@/web/BrandLogos";
+import RepairFaq from "@/web/RepairFaq";
 
 export const revalidate = 300;
 
@@ -46,7 +47,7 @@ export default async function HomePage() {
           <div className="mx-auto grid max-w-7xl items-center gap-6 px-6 pb-40 pt-14 md:grid-cols-[1.15fr_1fr] md:px-12 md:pb-48 md:pt-20">
             <div className="relative z-10">
               <p className="mm-rise flex items-center gap-3 text-[11px] uppercase tracking-[0.35em] text-neutral-500">
-                <span className="h-px w-8 bg-neutral-400" /> Since {SINCE} · Horana Road
+                <span className="h-px w-8 bg-neutral-400" /> Since {SINCE} · KURUSA JUNCTION
               </p>
               <h1 className={`${D} mt-6 text-[clamp(2.7rem,7.2vw,6.2rem)] font-extralight uppercase leading-[0.92] tracking-[-0.02em]`}>
                 <span className="mm-rise block" style={delay(120)}>Your phone,</span>
@@ -59,8 +60,8 @@ export default async function HomePage() {
                 </span>
               </h1>
               <p className="mm-rise mt-7 max-w-md text-[15px] leading-relaxed text-neutral-600" style={delay(420)}>
-                Screens, batteries, charging ports and water damage — diagnosed honestly, repaired properly,
-                and tracked from drop-off to pickup. Plus the accessories to go with it.
+                Cracked screen? Battery issues? Something more complicated? We&apos;ve got you covered. Expert repairs,
+                quality parts, and honest service backed by over two decades of experience.
               </p>
               <div className="mm-rise mt-9 flex flex-wrap gap-3" style={delay(540)}>
                 <Link href="/track" className="group inline-flex items-center gap-2 rounded-full bg-neutral-950 px-6 py-3.5 text-[13px] font-medium text-white transition-transform duration-300 hover:scale-[1.03]">
@@ -210,6 +211,8 @@ export default async function HomePage() {
           </form>
         </div>
       </section>
+
+      <RepairFaq />
 
       {/* ── Visit ────────────────────────────────────────────────────────── */}
       <section className="mx-auto grid max-w-7xl gap-10 px-5 py-24 md:grid-cols-[1fr_1.3fr] md:px-8 md:py-32">

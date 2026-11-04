@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/supabase/fetchAll";
 
 /**
  * Numbers for the admin dashboard, read from the database.
@@ -67,10 +68,14 @@ export async function fetchAdminOverview(): Promise<AdminOverview> {
   }
 
   // ── Repair jobs ──
-  const jobsRes = await supabase
+  // Paged: a single read stops at 1,000 jobs (see fetchAllRows).
+  const jobsRes = await fetchAllRows<Record<string, unknown>>((from, to) => supabase
     .from("repair_jobs")
     .select("id, customer_name, brand, model, status, technician, created_at, estimated_cost, advance_paid")
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .range(from, to))
+    .then(data => ({ data, error: null as null | { message: string } }), (e: Error) => ({ data: null, error: e }));
 
   if (jobsRes.error) {
     missing.push("repair_jobs");
@@ -108,7 +113,9 @@ export async function fetchAdminOverview(): Promise<AdminOverview> {
   }
 
   // ── SMS log (optional table) ──
-  const smsRes = await supabase.from("sms_messages").select("status, created_at");
+  const smsRes = await fetchAllRows<Record<string, unknown>>((from, to) => supabase
+    .from("sms_messages").select("id, status, created_at").order("id").range(from, to))
+    .then(data => ({ data, error: null as null | { message: string } }), (e: Error) => ({ data: null, error: e }));
   if (smsRes.error) {
     missing.push("sms_messages");
   } else {

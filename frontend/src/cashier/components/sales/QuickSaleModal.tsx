@@ -16,6 +16,8 @@ import { insertSale } from "@/lib/sales/api";
 import { fetchPolicies, policyFor, type WarrantyPolicy } from "@/lib/warranty/lookup";
 import { fetchNextBatchCustomerWarranty } from "@/lib/purchasing/api";
 import { SHOP_DETAILS } from "@/lib/shop";
+import { QRCodeSVG } from "qrcode.react";
+import { verifyUrl } from "@/lib/sales/verify";
 
 /**
  * Quick Sale — an accessory sale straight from the scan popup.
@@ -551,6 +553,10 @@ function QuickSaleReceipt({ r, ref }: { r: ReceiptSnapshot; ref: React.Ref<HTMLD
         <div style={{ fontSize: 9.5 }}>Warranty valid only with this receipt. Physical damage not covered.</div>
       )}
       {r.cashier && <div style={{ fontSize: 9.5 }}>Cashier: {r.cashier}</div>}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 8 }}>
+        <QRCodeSVG value={verifyUrl(r.invoiceNo)} size={128} level="M" marginSize={0} style={{ width: "24mm", height: "24mm" }} />
+        <div style={{ fontSize: 9, marginTop: 3, fontFamily: "Arial, sans-serif" }}>Scan to check your product &amp; warranty</div>
+      </div>
       <div style={{ textAlign: "center", marginTop: 6, fontSize: 10 }}>Thank you — come again!</div>
     </div>
   );

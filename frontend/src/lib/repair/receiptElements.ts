@@ -11,13 +11,16 @@ import { DEFAULT_FONT_FAMILY } from "@/lib/fonts";
  * code and two different priced tables (one per document kind).
  */
 
-export type TemplateKind = "receipt" | "issue" | "dealerInvoice";
+export type TemplateKind = "receipt" | "issue" | "dealerInvoice" | "accessoryInvoice";
+
+/** The three repair documents — what a repair-only token or column is offered on. */
+const REPAIR_KINDS: TemplateKind[] = ["receipt", "issue", "dealerInvoice"];
 
 export type ReceiptElementType = "text" | "image" | "line" | "shape" | "qr" | "table" | "invoiceTable";
 
 /**
- * Only meaningful on a `dealerInvoice` template, which is the only kind that
- * ever spans more than one physical page — see ReceiptPagedRender.tsx.
+ * Only meaningful on a `dealerInvoice` or `accessoryInvoice` template, the
+ * kinds that can span more than one physical page — see ReceiptPagedRender.tsx.
  *   "page"       — repeats on every page (a logo band, a page footer).
  *   "firstOnly"  — only the first page (the dealer/invoice-number block).
  *   "lastOnly"   — only the last page (totals, the closing footer band).
@@ -168,33 +171,39 @@ export const INVOICE_COLUMNS: {
   /** Formatted as currency, and shown as an amount in the editor's preview. */
   money?: boolean;
   value: (d: ReceiptData) => string | undefined;
+  /** Offered only on these kinds; absent = every kind. */
+  kind?: TemplateKind[];
 }[] = [
   { id: "index",       label: "No.",           align: "left",  value: () => "1" },
-  { id: "itemType",    label: "Item Type",     align: "left",  value: () => "Repair" },
-  { id: "itemName",    label: "Item Name",     align: "left",  value: d => `${d.jobId} ${d.device}`.trim() },
-  { id: "jobId",       label: "Job No.",       align: "left",  value: d => d.jobId },
-  { id: "device",      label: "Device",        align: "left",  value: d => d.device },
-  { id: "modelNumber", label: "Model No.",     align: "left",  value: d => d.modelNumber },
-  { id: "imei",        label: "IMEI",          align: "left",  value: d => d.imei },
-  { id: "fault",       label: "Fault",         align: "left",  value: d => d.fault },
+  // A repair invoice's one line has no item fields of its own, so these fall
+  // back to what it has always printed; an accessory invoice's rows set them.
+  { id: "itemType",    label: "Item Type",     align: "left",  value: d => d.itemType ?? "Repair" },
+  { id: "itemName",    label: "Item Name",     align: "left",  value: d => d.itemName ?? `${d.jobId} ${d.device}`.trim() },
+  { id: "itemCode",    label: "Item Code",     align: "left",  value: d => d.itemCode, kind: ["accessoryInvoice"] },
+  { id: "category",    label: "Category",      align: "left",  value: d => d.category, kind: ["accessoryInvoice"] },
+  { id: "jobId",       label: "Job No.",       align: "left",  value: d => d.jobId, kind: REPAIR_KINDS },
+  { id: "device",      label: "Device",        align: "left",  value: d => d.device, kind: REPAIR_KINDS },
+  { id: "modelNumber", label: "Model No.",     align: "left",  value: d => d.modelNumber, kind: REPAIR_KINDS },
+  { id: "imei",        label: "IMEI",          align: "left",  value: d => d.imei, kind: REPAIR_KINDS },
+  { id: "fault",       label: "Fault",         align: "left",  value: d => d.fault, kind: REPAIR_KINDS },
   { id: "warranty",    label: "Warranty",      align: "left",  value: d => d.warranty },
-  { id: "warrantyPeriod", label: "Warranty Period", align: "left", value: d => d.warrantyPeriod },
-  { id: "technician",  label: "Technician",    align: "left",  value: d => d.technician },
-  { id: "technicianRemarks", label: "Technician Remarks", align: "left", value: d => d.technicianRemarks },
-  { id: "remarks",     label: "Remarks",       align: "left",  value: d => d.remarks },
-  { id: "completionDate", label: "Completed",  align: "left",  value: d => d.completionDate },
+  { id: "warrantyPeriod", label: "Warranty Period", align: "left", value: d => d.warrantyPeriod, kind: REPAIR_KINDS },
+  { id: "technician",  label: "Technician",    align: "left",  value: d => d.technician, kind: REPAIR_KINDS },
+  { id: "technicianRemarks", label: "Technician Remarks", align: "left", value: d => d.technicianRemarks, kind: REPAIR_KINDS },
+  { id: "remarks",     label: "Remarks",       align: "left",  value: d => d.remarks, kind: REPAIR_KINDS },
+  { id: "completionDate", label: "Completed",  align: "left",  value: d => d.completionDate, kind: REPAIR_KINDS },
   { id: "date",        label: "Date",          align: "left",  value: d => d.date },
-  { id: "qty",         label: "Qty",           align: "right", value: () => "1" },
-  { id: "advance",     label: "Advance",       align: "right", money: true, value: d => d.advance },
+  { id: "qty",         label: "Qty",           align: "right", value: d => d.qty ?? "1" },
+  { id: "advance",     label: "Advance",       align: "right", money: true, value: d => d.advance, kind: REPAIR_KINDS },
   { id: "estimate",    label: "Unit Price",    align: "right", money: true, value: d => d.estimate },
-  { id: "finalAmount", label: "Final Amount",  align: "right", money: true, value: d => d.finalAmount },
+  { id: "finalAmount", label: "Final Amount",  align: "right", money: true, value: d => d.finalAmount, kind: REPAIR_KINDS },
   { id: "discount",    label: "Discount",      align: "right", money: true, value: d => d.discount },
   { id: "lineTotal",   label: "Line Total",    align: "right", money: true, value: d => d.lineTotal },
-  { id: "balanceDue",  label: "Balance Due",   align: "right", money: true, value: d => d.balanceDue },
-  { id: "amountToBePaid", label: "Amount To Pay", align: "right", money: true, value: d => d.amountToBePaid },
-  { id: "paidAmount",  label: "Paid",          align: "right", money: true, value: d => d.paidAmount },
-  { id: "dueAmount",   label: "Due",           align: "right", money: true, value: d => d.dueAmount },
-  { id: "paymentType", label: "Payment Type",  align: "left",  value: d => d.paymentType },
+  { id: "balanceDue",  label: "Balance Due",   align: "right", money: true, value: d => d.balanceDue, kind: REPAIR_KINDS },
+  { id: "amountToBePaid", label: "Amount To Pay", align: "right", money: true, value: d => d.amountToBePaid, kind: REPAIR_KINDS },
+  { id: "paidAmount",  label: "Paid",          align: "right", money: true, value: d => d.paidAmount, kind: REPAIR_KINDS },
+  { id: "dueAmount",   label: "Due",           align: "right", money: true, value: d => d.dueAmount, kind: REPAIR_KINDS },
+  { id: "paymentType", label: "Payment Type",  align: "left",  value: d => d.paymentType, kind: REPAIR_KINDS },
 ];
 
 /**
@@ -213,6 +222,18 @@ export const DEFAULT_INVOICE_COLUMNS: InvoiceColumn[] = [
   { id: "estimate",  label: "Unit Price", width: 11 },
   { id: "discount",  label: "Discount",   width: 11 },
   { id: "lineTotal", label: "Line Total", width: 11 },
+];
+
+/** What a fresh Invoice Table starts with on the accessory sales invoice —
+ *  one row per product sold, so item and price columns rather than job ones. */
+export const ACCESSORY_INVOICE_COLUMNS: InvoiceColumn[] = [
+  { id: "index",     label: "No.",        width: 6 },
+  { id: "itemName",  label: "Item",       width: 32 },
+  { id: "itemCode",  label: "Code",       width: 12 },
+  { id: "warranty",  label: "Warranty",   width: 13 },
+  { id: "qty",       label: "Qty",        width: 7 },
+  { id: "estimate",  label: "Unit Price", width: 13 },
+  { id: "lineTotal", label: "Amount",     width: 14 },
 ];
 
 /**
@@ -302,19 +323,32 @@ export interface ReceiptData {
   /** The dealer's own reference for this job. When set, the Job No. column
    *  prints it in bold instead of our internal number (jobId). */
   dealerJobNo?: string;
+  // ── Accessory sales invoice only ──
+  // Per row (one product sold) — read by the invoice table's columns.
+  itemName?: string;
+  itemCode?: string;
+  itemType?: string;
+  category?: string;
+  qty?: string;
+  // Whole invoice — {{tokens}} for the totals block.
+  subtotal?: string;
+  total?: string;
+  received?: string;
+  change?: string;
+  itemCount?: string;
 }
 
 export const RECEIPT_TOKENS: { token: string; label: string; kind?: TemplateKind[] }[] = [
-  { token: "{{jobId}}",         label: "Job number" },
+  { token: "{{jobId}}",         label: "Job number", kind: REPAIR_KINDS },
   { token: "{{dealerJobNo}}",   label: "Dealer's job number", kind: ["dealerInvoice"] },
   { token: "{{customer}}",      label: "Customer name" },
   { token: "{{phone}}",         label: "Customer phone" },
   { token: "{{address}}",       label: "Customer address" },
-  { token: "{{device}}",        label: "Device brand & model" },
-  { token: "{{imei}}",          label: "IMEI" },
+  { token: "{{device}}",        label: "Device brand & model", kind: REPAIR_KINDS },
+  { token: "{{imei}}",          label: "IMEI", kind: REPAIR_KINDS },
   { token: "{{fault}}",         label: "Fault type", kind: ["receipt"] },
-  { token: "{{estimate}}",      label: "Estimate" },
-  { token: "{{advance}}",       label: "Advance paid" },
+  { token: "{{estimate}}",      label: "Estimate", kind: REPAIR_KINDS },
+  { token: "{{advance}}",       label: "Advance paid", kind: REPAIR_KINDS },
   { token: "{{technician}}",    label: "Technician", kind: ["receipt", "dealerInvoice"] },
   { token: "{{estCompletion}}", label: "Est. completion", kind: ["receipt"] },
   { token: "{{priority}}",      label: "Priority", kind: ["receipt"] },
@@ -330,9 +364,9 @@ export const RECEIPT_TOKENS: { token: string; label: string; kind?: TemplateKind
   { token: "{{bankName}}",           label: "Bank name" },
   { token: "{{bankAccountNumber}}",  label: "Bank account number" },
   { token: "{{bankAccountHolder}}",  label: "Bank account holder" },
-  { token: "{{invoiceNo}}",     label: "Invoice number", kind: ["issue", "dealerInvoice"] },
-  { token: "{{nic}}",           label: "Customer NIC", kind: ["issue"] },
-  { token: "{{email}}",         label: "Customer email", kind: ["issue"] },
+  { token: "{{invoiceNo}}",     label: "Invoice number", kind: ["issue", "dealerInvoice", "accessoryInvoice"] },
+  { token: "{{nic}}",           label: "Customer NIC", kind: ["issue", "accessoryInvoice"] },
+  { token: "{{email}}",         label: "Customer email", kind: ["issue", "accessoryInvoice"] },
   { token: "{{warranty}}",      label: "Warranty terms", kind: ["issue", "dealerInvoice"] },
   { token: "{{completionDate}}",    label: "Date of completion", kind: ["issue", "dealerInvoice"] },
   { token: "{{finalAmount}}",       label: "Final amount", kind: ["issue", "dealerInvoice"] },
@@ -340,16 +374,21 @@ export const RECEIPT_TOKENS: { token: string; label: string; kind?: TemplateKind
   { token: "{{warrantyPeriod}}",    label: "Warranty period (parts/labour)", kind: ["issue", "dealerInvoice"] },
   { token: "{{balanceDue}}",        label: "Due amount (before discount)", kind: ["issue", "dealerInvoice"] },
   { token: "{{amountToBePaid}}",    label: "Amount to be paid (after discount)", kind: ["issue", "dealerInvoice"] },
-  { token: "{{discount}}",      label: "Discount", kind: ["issue", "dealerInvoice"] },
+  { token: "{{discount}}",      label: "Discount", kind: ["issue", "dealerInvoice", "accessoryInvoice"] },
   { token: "{{lineTotal}}",     label: "Line total (after discount)", kind: ["issue", "dealerInvoice"] },
   { token: "{{paidAmount}}",    label: "Paid amount", kind: ["issue", "dealerInvoice"] },
   { token: "{{dueAfterPayment}}",   label: "Due after payment", kind: ["issue", "dealerInvoice"] },
   { token: "{{dueAmount}}",     label: "Balance due", kind: ["issue", "dealerInvoice"] },
-  { token: "{{paymentType}}",   label: "Payment type (CASH / CREDIT)", kind: ["issue"] },
+  { token: "{{paymentType}}",   label: "Payment type (CASH / CREDIT)", kind: ["issue", "accessoryInvoice"] },
   { token: "{{adminApprover}}", label: "Credit approved by", kind: ["issue"] },
   { token: "{{dealerName}}",    label: "Dealer name", kind: ["dealerInvoice"] },
   { token: "{{dealerAddress}}", label: "Dealer address", kind: ["dealerInvoice"] },
   { token: "{{dealerContact}}", label: "Dealer contact", kind: ["dealerInvoice"] },
+  { token: "{{itemCount}}",     label: "Number of items", kind: ["accessoryInvoice"] },
+  { token: "{{subtotal}}",      label: "Subtotal (before discount)", kind: ["accessoryInvoice"] },
+  { token: "{{total}}",         label: "Total", kind: ["accessoryInvoice"] },
+  { token: "{{received}}",      label: "Cash received", kind: ["accessoryInvoice"] },
+  { token: "{{change}}",        label: "Change given", kind: ["accessoryInvoice"] },
 ];
 
 export function resolveReceiptTokens(text: string, data: ReceiptData): string {

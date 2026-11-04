@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/supabase/fetchAll";
 
 /**
  * Credit accounts and the entries that make up their balances.
@@ -161,25 +162,34 @@ function explain(message: string, code?: string): string {
 /* ── reads ───────────────────────────────────────────────────────────────── */
 
 export async function fetchCreditAccounts(): Promise<CreditAccount[]> {
-  const { data, error } = await getSupabaseBrowserClient()
-    .from("v_credit_accounts")
-    .select("*")
-    .order("name");
-
-  if (error) throw new Error(explain(error.message, error.code));
-  return ((data ?? []) as AccountRow[]).map(toAccount);
+  // Paged: a single read stops at 1,000 accounts (see fetchAllRows).
+  const sb = getSupabaseBrowserClient();
+  try {
+    const data = await fetchAllRows<AccountRow>((from, to) => sb
+      .from("v_credit_accounts").select("*").order("name").order("id").range(from, to));
+    return data.map(toAccount);
+  } catch (e) {
+    const err = e as Error & { code?: string };
+    throw new Error(explain(err.message, err.code));
+  }
 }
 
 export async function fetchCreditEntries(accountId: string): Promise<CreditEntry[]> {
-  const { data, error } = await getSupabaseBrowserClient()
-    .from("credit_entries")
-    .select("*")
-    .eq("account_id", accountId)
-    .order("occurred_on", { ascending: false })
-    .order("id", { ascending: false });
-
-  if (error) throw new Error(explain(error.message, error.code));
-  return ((data ?? []) as AccountRow[]).map(toEntry);
+  // A busy dealer account can pass 1,000 entries — paged (see fetchAllRows).
+  const sb = getSupabaseBrowserClient();
+  try {
+    const data = await fetchAllRows<AccountRow>((from, to) => sb
+      .from("credit_entries")
+      .select("*")
+      .eq("account_id", accountId)
+      .order("occurred_on", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to));
+    return data.map(toEntry);
+  } catch (e) {
+    const err = e as Error & { code?: string };
+    throw new Error(explain(err.message, err.code));
+  }
 }
 
 /* ── writes ──────────────────────────────────────────────────────────────── */

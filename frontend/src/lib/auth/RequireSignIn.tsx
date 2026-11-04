@@ -26,10 +26,11 @@ import { isSupabaseConfigured } from "@/lib/supabase/client";
  * not on the roster. /track is the public job lookup customers use; /dealer is
  * the dealer portal behind the QR on a dealer invoice (secret-token gated).
  * /web is the customer website (home, shop, account) — open to everyone.
+ * /verify is the product & warranty check behind the QR on a product invoice.
  */
-const PUBLIC_PATHS = ["/login", "/track", "/dealer", "/d", "/auth", "/web"];
+const PUBLIC_PATHS = ["/login", "/track", "/verify", "/dealer", "/d", "/auth", "/web"];
 
-const CUSTOMER_PATHS = ["/web", "/track", "/dealer", "/d"];
+const CUSTOMER_PATHS = ["/web", "/track", "/verify", "/dealer", "/d"];
 
 const isPublic = (pathname: string) =>
   pathname === "/" || PUBLIC_PATHS.some(p => pathname === p || pathname.startsWith(`${p}/`));

@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef } from "react";
+import { forwardRef, useLayoutEffect, useRef } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
   resolveReceiptTokens,
@@ -77,28 +77,73 @@ const ReceiptRender = forwardRef<HTMLDivElement, ReceiptRenderProps>(function Re
 
 export default ReceiptRender;
 
+/** 1pt in mm — for telling whether a box is one line tall. */
+const PT_MM = 25.4 / 72;
+/** The smallest a too-long single line is shrunk to, as a share of its size. */
+const MIN_FIT = 0.6;
+
+/**
+ * A text box. One drawn a single line tall never wraps: a value longer than
+ * the box was designed around (a longer date, a long customer name) shrinks
+ * to fit on that line instead of breaking onto a second one the box has no
+ * room for, which used to print as the top half of two lines. A box tall
+ * enough for several lines wraps as it always has.
+ *
+ * The shrink is written onto the element's own style, so the markup copied
+ * for printing (and stored for history) carries it.
+ */
+function TextBody({ el, text }: { el: Extract<ReceiptElement, { type: "text" }>; text: string }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const spanRef = useRef<HTMLSpanElement>(null);
+  const singleLine = !text.includes("\n") && el.h < el.fontSize * PT_MM * 1.2 * 2;
+
+  useLayoutEffect(() => {
+    const box = boxRef.current, span = spanRef.current;
+    if (!singleLine || !box || !span) return;
+    let live = true;
+    const fit = () => {
+      if (!live) return;
+      let size = el.fontSize;
+      box.style.fontSize = `${size}pt`;
+      // Twice: glyph widths don't scale perfectly linearly with size, so the
+      // first estimate can land a hair over and still clip the last letter.
+      for (let i = 0; i < 2; i++) {
+        const need = span.getBoundingClientRect().width, have = box.getBoundingClientRect().width;
+        if (!(need > have && have > 0)) break;
+        size = Math.max(MIN_FIT * el.fontSize, size * (have / need) * 0.98);
+        box.style.fontSize = `${size}pt`;
+      }
+    };
+    fit();
+    // A web font that arrives after the first measure is wider or narrower
+    // than the fallback that was measured — fit again once it's in.
+    document.fonts?.ready.then(fit).catch(() => {});
+    return () => { live = false; };
+  }, [singleLine, text, el.fontSize, el.w, el.fontFamily, el.bold]);
+
+  return (
+    <div ref={boxRef} style={{
+      width: "100%", height: "100%",
+      display: "flex", alignItems: "center",
+      justifyContent: el.align === "center" ? "center" : el.align === "right" ? "flex-end" : "flex-start",
+      fontSize: `${el.fontSize}pt`,
+      fontWeight: el.bold ? 800 : 500,
+      color: el.color,
+      fontFamily: el.fontFamily ?? DEFAULT_FONT_FAMILY,
+      lineHeight: 1.2,
+      textAlign: el.align,
+      whiteSpace: singleLine ? "nowrap" : "pre-wrap",
+      wordBreak: singleLine ? undefined : "break-word",
+    }}>
+      <span ref={spanRef}>{text}</span>
+    </div>
+  );
+}
+
 function ElementBody({ el, data, tableRows, tableRowStart = 0 }: { el: ReceiptElement; data: ReceiptData; tableRows?: ReceiptData[]; tableRowStart?: number }) {
   switch (el.type) {
-    case "text": {
-      const text = resolveReceiptTokens(el.text, data);
-      return (
-        <div style={{
-          width: "100%", height: "100%",
-          display: "flex", alignItems: "center",
-          justifyContent: el.align === "center" ? "center" : el.align === "right" ? "flex-end" : "flex-start",
-          fontSize: `${el.fontSize}pt`,
-          fontWeight: el.bold ? 800 : 500,
-          color: el.color,
-          fontFamily: el.fontFamily ?? DEFAULT_FONT_FAMILY,
-          lineHeight: 1.2,
-          textAlign: el.align,
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-        }}>
-          {text}
-        </div>
-      );
-    }
+    case "text":
+      return <TextBody el={el} text={resolveReceiptTokens(el.text, data)} />;
 
     case "image":
       return (

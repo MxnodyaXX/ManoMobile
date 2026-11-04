@@ -1,6 +1,7 @@
 "use client";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { fetchAllRows } from "@/lib/supabase/fetchAll";
 import type {
   RepairJob,
   RepairDealer,
@@ -275,13 +276,19 @@ export const rowToDealer = (row: DealerRow): RepairDealer => ({
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
 export async function fetchJobs(): Promise<RepairJob[]> {
-  const { data, error } = await getSupabaseBrowserClient()
-    .from("repair_jobs")
-    .select("*")
-    .order("created_at", { ascending: false });
-
-  if (error) throw new Error(`Could not load repair jobs: ${error.message}`);
-  return (data as JobRow[]).map(rowToJob);
+  // Page by page: a single read stops at 1,000 jobs (see fetchAllRows).
+  const sb = getSupabaseBrowserClient();
+  try {
+    const rows = await fetchAllRows<JobRow>((from, to) => sb
+      .from("repair_jobs")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to));
+    return rows.map(rowToJob);
+  } catch (e) {
+    throw new Error(`Could not load repair jobs: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /**
@@ -300,15 +307,21 @@ export async function fetchJobsByImei(imei: string, excludeId?: string): Promise
   const digits = (imei ?? "").replace(/\D/g, "");
   if (digits.length < 14) return [];
 
-  const { data, error } = await getSupabaseBrowserClient()
-    .from("repair_jobs")
-    .select("*")
-    .not("imei", "is", null)
-    .order("created_at", { ascending: false });
+  const sb = getSupabaseBrowserClient();
+  let data: JobRow[];
+  try {
+    data = await fetchAllRows<JobRow>((from, to) => sb
+      .from("repair_jobs")
+      .select("*")
+      .not("imei", "is", null)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to));
+  } catch (e) {
+    throw new Error(`Could not check the IMEI: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
-  if (error) throw new Error(`Could not check the IMEI: ${error.message}`);
-
-  return (data as JobRow[])
+  return data
     .filter(r => (r.imei ?? "").replace(/\D/g, "") === digits)
     .filter(r => r.id !== excludeId)
     .map(rowToJob);
