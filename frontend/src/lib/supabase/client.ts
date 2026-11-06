@@ -3,6 +3,7 @@
 import { createClient } from "@supabase/supabase-js";
 import type { createBrowserClient } from "@supabase/ssr";
 import { tabSessionStorage, TAB_STORAGE_KEY } from "@/lib/supabase/tabSession";
+import { trackedFetch } from "@/lib/ui/netActivity";
 
 /**
  * The browser Supabase client.
@@ -61,6 +62,8 @@ export function getSupabaseBrowserClient() {
           // URL, and leaving it on makes every page load parse the hash.
           detectSessionInUrl: false,
         },
+        // Counted for the app-wide loading screen — see netActivity.ts.
+        global: { fetch: trackedFetch },
       },
     );
   }
@@ -91,7 +94,7 @@ export async function authedFetch(input: string, init: RequestInit = {}): Promis
   const token = await getAccessToken();
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(input, { ...init, headers });
+  return trackedFetch(input, { ...init, headers });
 }
 
 /**

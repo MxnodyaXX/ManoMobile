@@ -58,7 +58,23 @@ const ACCESSORY_SAMPLE: LabelData = {
   shopAddress: SHOP_DETAILS.address,
 };
 
-const sampleFor = (layout?: string) => (layout === "accessory" ? ACCESSORY_SAMPLE : SAMPLE);
+/** A part label sits on a parts bin — no job, no customer, no selling price. */
+const PART_SAMPLE: LabelData = {
+  code: "SCR-0042",
+  title: "Redmi 9C Display",
+  subtitle: "Screen",
+  category: "Screen",
+  location: "B-4",
+  compatible: "Redmi 9C, Redmi 9A",
+  supplier: "Matrix",
+  date: SAMPLE.date,
+  shopName: SHOP_DETAILS.name,
+  shopPhone: SHOP_DETAILS.phone,
+  shopAddress: SHOP_DETAILS.address,
+};
+
+const sampleFor = (layout?: string) =>
+  layout === "accessory" ? ACCESSORY_SAMPLE : layout === "part" ? PART_SAMPLE : SAMPLE;
 
 /** Another template whose design can be copied onto this one. */
 export interface DesignSource {

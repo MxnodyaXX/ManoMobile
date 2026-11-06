@@ -16,6 +16,14 @@ import {
   isHidden, RACK_MAX_ROWS, RACK_MAX_COLS, type RackLayout,
 } from "@/lib/settings/partsRack";
 
+/** What a designed part label can print — see LABEL_TOKENS. */
+const partLabelTokens = (p: SparePart) => ({
+  category: p.category,
+  location: p.location,
+  compatible: p.compatibleWith.join(", "),
+  supplier: p.supplier ?? "",
+});
+
 /**
  * The spare-parts catalogue.
  *
@@ -773,6 +781,7 @@ function BulkPartLabelsModal({ parts, onClose }: { parts: SparePart[]; onClose: 
           code={current.sku}
           title={current.name}
           subtitle={current.category}
+          part={partLabelTokens(current)}
           silent
           onReady={handleReady}
           onClose={() => {}}
@@ -1069,6 +1078,7 @@ function PartsManager() {
           code={labelPart.sku}
           title={labelPart.name}
           subtitle={labelPart.category}
+          part={partLabelTokens(labelPart)}
           onClose={() => setLabelPart(null)}
         />
       )}

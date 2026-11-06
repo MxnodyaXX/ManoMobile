@@ -6,6 +6,7 @@ import { ToastProvider } from "@/lib/ui/toast";
 import AppearanceProvider from "@/lib/settings/AppearanceProvider";
 import NumberInputGuards from "@/lib/ui/NumberInputGuards";
 import UppercaseInputs from "@/lib/ui/UppercaseInputs";
+import LoadingOverlay from "@/lib/ui/LoadingOverlay";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <NumberInputGuards />
         <UppercaseInputs />
+        <LoadingOverlay />
         <ThemeProvider>
           <AuthProvider>
             <AppearanceProvider>

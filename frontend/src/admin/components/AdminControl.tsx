@@ -1147,7 +1147,7 @@ function BarcodeManager() {
   const { templates, loading, error, configured, reload } = useBarcodeTemplates();
 
   const ff = "'Plus Jakarta Sans', sans-serif";
-  const hasReceipts = section !== "inventory";
+  const hasReceipts = section !== "inventory" && section !== "part";
   const showing = hasReceipts ? sub : "labels";
 
   const tabBar = (children: React.ReactNode) => (
@@ -1171,7 +1171,7 @@ function BarcodeManager() {
       {tabBar((Object.keys(LABEL_SECTIONS) as LabelSection[]).map(k =>
         tab(section === k, LABEL_SECTIONS[k].label, () => setSection(k), true)))}
 
-      {/* Its labels or its receipts (Inventory has labels only) */}
+      {/* Its labels or its receipts (Repair Parts and Inventory have labels only) */}
       {hasReceipts && tabBar(<>
         {tab(showing === "labels", "Labels", () => setSub("labels"))}
         {tab(showing === "receipts", "Receipts", () => setSub("receipts"))}
@@ -1235,16 +1235,15 @@ function BarcodeManager() {
 }
 
 /**
- * The label tabs, each showing only its own kind of template. Inventory holds
- * two kinds (shelf product labels and spare-part bin labels), so its editor
- * keeps a Layout picker limited to those two; the others are preset.
+ * The label tabs, each showing only its own kind of template.
  */
-type LabelSection = "repair" | "accessory" | "device" | "inventory";
+type LabelSection = "repair" | "part" | "accessory" | "device" | "inventory";
 const LABEL_SECTIONS: Record<LabelSection, { label: string; title: string; layouts: BarcodeLayout[] }> = {
   repair:    { label: "Repairs",        title: "Repair Tag",           layouts: ["repair"] },
+  part:      { label: "Repair Parts",   title: "Repair Part Label",    layouts: ["part"] },
   accessory: { label: "Accessories",    title: "Accessory Label",      layouts: ["accessory"] },
   device:    { label: "Mobile Devices", title: "Mobile Device Label",  layouts: ["device"] },
-  inventory: { label: "Inventory",      title: "Inventory Label",      layouts: ["simple", "part"] },
+  inventory: { label: "Inventory",      title: "Inventory Label",      layouts: ["simple"] },
 };
 
 /** A saved template as an editable draft. A repair template saved before sides
@@ -1348,7 +1347,8 @@ function LabelTemplatesPanel({ templates, loading, error, configured, reload, ti
     setSelectedId(null);
     setDraft({
       name: "", layout: layouts[0], format: "CODE128", width: 2, height: 60, fontSize: 12,
-      showText: true, prefix: "MM", labelWidthMm: 50, labelHeightMm: 25, labelMarginMm: 3,
+      // A part label starts on the 38 × 25mm bin stock the built-in one prints on.
+      showText: true, prefix: "MM", labelWidthMm: layouts[0] === "part" ? 38 : 50, labelHeightMm: 25, labelMarginMm: 3,
       elements: [],
       repairAudience: audience ?? null,
     });
@@ -1595,9 +1595,8 @@ function LabelTemplatesPanel({ templates, loading, error, configured, reload, ti
                   <input type="text" value={s.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Product 50×25" style={inputStyle} />
                 </div>
 
-                {/* Only where a tab holds more than one kind (Inventory: product
-                    labels and part labels), and only those kinds. Everywhere
-                    else the tab already decides it, so the picker is hidden. */}
+                {/* Only where a tab holds more than one kind, and only those
+                    kinds. Otherwise the tab decides it, so the picker is hidden. */}
                 {layouts.length > 1 && (
                 <div>
                   <label style={labelStyle}>Layout</label>

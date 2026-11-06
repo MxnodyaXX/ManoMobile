@@ -60,6 +60,8 @@ interface BarcodeLabelModalProps {
   modelNumber?: string;
   /** Accessory label tokens: {{itemCode}}, {{brand}}, {{model}}, {{category}}. */
   accessory?: { itemCode: string; brand: string; model: string; category: string };
+  /** Repair part label tokens: {{category}}, {{location}}, {{compatible}}, {{supplier}}. */
+  part?: { category: string; location: string; compatible: string; supplier: string };
   /** The unlock code the customer left with the device, when they did. Such a
    *  tag prints the "Job tag with passcode" template chosen in Admin →
    *  Barcode → Repairs, and the built-in tag prints the code. */
@@ -117,7 +119,7 @@ interface BarcodeLabelModalProps {
  * until it fits. Runs for both axes since a narrower label (38mm) can
  * overflow sideways even when a wider one (50mm) had enough slack.
  */
-export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, price, deviceName, modelNumber, accessory, passcode, phone, outsideDealer = false, silent = false, ask = false, onReady, onClose }: BarcodeLabelModalProps) {
+export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, price, deviceName, modelNumber, accessory, part, passcode, phone, outsideDealer = false, silent = false, ask = false, onReady, onClose }: BarcodeLabelModalProps) {
   const hasPasscode = !!passcode && passcode.trim() !== "";
   const { barcodeSettings: s } = useInventory();
   const labelRef = useRef<HTMLDivElement>(null);
@@ -322,7 +324,10 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
           itemCode: accessory?.itemCode ?? "",
           brand: accessory?.brand ?? "",
           model: accessory?.model ?? "",
-          category: accessory?.category ?? "",
+          category: accessory?.category ?? part?.category ?? "",
+          location: part?.location ?? "",
+          compatible: part?.compatible ?? "",
+          supplier: part?.supplier ?? "",
           fault: fault ?? "",
           passcode: hasPasscode ? passcode!.trim() : "",
           title: title ?? "",
