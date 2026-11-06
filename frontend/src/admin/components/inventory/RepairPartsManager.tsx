@@ -18,6 +18,7 @@ import {
 
 /** What a designed part label can print — see LABEL_TOKENS. */
 const partLabelTokens = (p: SparePart) => ({
+  partNo: p.partNo ?? "",
   category: p.category,
   location: p.location,
   compatible: p.compatibleWith.join(", "),
@@ -333,7 +334,7 @@ function PartNameCombo({ value, onChange, groups, invalid }: {
 
   const q = value.trim().toUpperCase();
   const shown = q
-    ? groups.filter(g => g[0].name.toUpperCase().includes(q) || g.some(p => p.sku.toUpperCase().includes(q)))
+    ? groups.filter(g => g[0].name.toUpperCase().includes(q) || g.some(p => p.sku.toUpperCase().includes(q) || (p.partNo ?? "").includes(q)))
     : groups;
   const exact = groups.some(g => g[0].name.trim().toUpperCase() === q);
   const list = shown.slice(0, 50);
@@ -571,6 +572,7 @@ function PartModal({ part, preset, onSave, onClose }: {
               <label style={labelStyle}>SKU</label>
               <input type="text" value={form.sku} onChange={e => { set("sku", e.target.value); setErrors(p => ({ ...p, sku: undefined })); }} placeholder="e.g. SCR-IP13-001" style={{ ...inputStyle, borderColor: errors.sku ? "#dc2626" : "var(--border)" }} />
               {errors.sku && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{errors.sku}</div>}
+              {form.partNo && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>Part No. {form.partNo}</div>}
             </div>
             <div>
               <label style={labelStyle}>Category</label>
@@ -743,7 +745,7 @@ function BulkPartLabelsModal({ parts, onClose }: { parts: SparePart[]; onClose: 
                           <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => toggle(p.id)}>
                             <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
                             <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                              <span style={{ fontFamily: "monospace" }}>{p.sku}</span>{p.supplier ? ` · ${p.supplier}` : ""} · {p.stock} in stock
+                              {p.partNo ? `#${p.partNo} · ` : ""}<span style={{ fontFamily: "monospace" }}>{p.sku}</span>{p.supplier ? ` · ${p.supplier}` : ""} · {p.stock} in stock
                             </div>
                           </div>
                           <input
@@ -830,7 +832,7 @@ function PartsManager() {
     if (catFilter !== "All" && p.category !== catFilter) return false;
     if (search) {
       const q = search.toLowerCase();
-      if (!p.name.toLowerCase().includes(q) && !p.sku.toLowerCase().includes(q)) return false;
+      if (!p.name.toLowerCase().includes(q) && !p.sku.toLowerCase().includes(q) && !(p.partNo ?? "").includes(q)) return false;
     }
     return true;
   });
@@ -891,6 +893,7 @@ function PartsManager() {
           <span style={{ fontWeight: 600 }}>{p.name}</span>
         )}
       </td>
+      <td style={{ ...tdStyle, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{p.partNo || "—"}</td>
       <td style={tdStyle}>
         <div style={{ fontFamily: "monospace", fontSize: 12 }}>{p.sku}</div>
         {p.supplier && <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }}>{p.supplier}</div>}
@@ -931,6 +934,8 @@ function PartsManager() {
               <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}>{g.items.length} types</span>
             </span>
           </td>
+          {/* Each type has its own number, on its own row below. */}
+          <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{open ? "" : g.items.map(p => p.partNo).filter(Boolean).join(", ")}</td>
           <td style={tdStyle}>
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {g.items.map(p => (
@@ -960,7 +965,7 @@ function PartsManager() {
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ position: "relative", flex: 1, minWidth: 220, maxWidth: 380 }}>
           <Search size={13} style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or SKU…" style={{ ...inputStyle, paddingLeft: 34, fontSize: 12 }} />
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, SKU or number…" style={{ ...inputStyle, paddingLeft: 34, fontSize: 12 }} />
         </div>
         <select value={catFilter} onChange={e => setCatFilter(e.target.value as PartCategory | "All")} style={{ ...inputStyle, width: "auto", cursor: "pointer", fontSize: 12 }}>
           <option value="All">All Categories</option>
@@ -1008,15 +1013,15 @@ function PartsManager() {
         <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
           <thead><tr>
-            <th style={thStyle}>Part</th><th style={thStyle}>SKU</th><th style={thStyle}>Category</th>
+            <th style={thStyle}>Part</th><th style={thStyle}>No.</th><th style={thStyle}>SKU</th><th style={thStyle}>Category</th>
             <th style={thStyle}>Compatible With</th><th style={thStyle}>Stock</th><th style={thStyle}>Cost</th>
             <th style={thStyle}>Location</th><th style={{ ...thStyle, width: 104 }}></th>
           </tr></thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>Loading parts…</td></tr>
+              <tr><td colSpan={9} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>Loading parts…</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={8} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>{search || catFilter !== "All" ? "No parts match" : "No repair parts added yet — click “Add Part” to start the catalog"}</td></tr>
+              <tr><td colSpan={9} style={{ ...tdStyle, textAlign: "center", padding: 36, color: "var(--text-muted)" }}>{search || catFilter !== "All" ? "No parts match" : "No repair parts added yet — click “Add Part” to start the catalog"}</td></tr>
             ) : groups.map(g => g.items.length === 1 ? partRow(g.items[0], false) : groupRows(g))}
           </tbody>
         </table>

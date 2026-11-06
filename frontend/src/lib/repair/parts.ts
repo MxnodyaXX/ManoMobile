@@ -22,6 +22,8 @@ import type {
 
 interface PartRow {
   id: number;
+  /** Absent until migration 20261106000092 is applied. */
+  part_no?: string | null;
   sku: string;
   name: string;
   category: PartCategory;
@@ -55,6 +57,7 @@ const num = (v: number | string | null | undefined) => (v == null ? 0 : Number(v
 function toPart(row: PartRow): SparePart {
   return {
     id: String(row.id),
+    partNo: row.part_no ?? "",
     sku: row.sku,
     name: row.name,
     category: row.category,

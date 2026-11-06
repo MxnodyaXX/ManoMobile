@@ -31,6 +31,9 @@ export type PartCategory =
 
 export interface SparePart {
   id: string;
+  /** Short identifying number, e.g. "1001". Assigned by the database, so blank
+   *  on a part not saved yet, or before migration 20261106000092. */
+  partNo?: string;
   sku: string;
   name: string;
   category: PartCategory;

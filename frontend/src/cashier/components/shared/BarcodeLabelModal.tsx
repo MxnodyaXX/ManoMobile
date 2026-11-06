@@ -60,8 +60,8 @@ interface BarcodeLabelModalProps {
   modelNumber?: string;
   /** Accessory label tokens: {{itemCode}}, {{brand}}, {{model}}, {{category}}. */
   accessory?: { itemCode: string; brand: string; model: string; category: string };
-  /** Repair part label tokens: {{category}}, {{location}}, {{compatible}}, {{supplier}}. */
-  part?: { category: string; location: string; compatible: string; supplier: string };
+  /** Repair part label tokens: {{partNo}}, {{category}}, {{location}}, {{compatible}}, {{supplier}}. */
+  part?: { partNo: string; category: string; location: string; compatible: string; supplier: string };
   /** The unlock code the customer left with the device, when they did. Such a
    *  tag prints the "Job tag with passcode" template chosen in Admin →
    *  Barcode → Repairs, and the built-in tag prints the code. */
@@ -325,6 +325,7 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
           brand: accessory?.brand ?? "",
           model: accessory?.model ?? "",
           category: accessory?.category ?? part?.category ?? "",
+          partNo: part?.partNo ?? "",
           location: part?.location ?? "",
           compatible: part?.compatible ?? "",
           supplier: part?.supplier ?? "",

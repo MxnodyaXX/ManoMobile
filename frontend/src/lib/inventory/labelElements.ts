@@ -103,6 +103,8 @@ export interface LabelData {
   /** Accessory's compatible model, e.g. "iPhone 15 / Universal". */
   model?: string;
   category?: string;
+  /** Repair part labels: its short number, e.g. "1001". */
+  partNo?: string;
   /** Repair part labels: where it's kept in the rack, e.g. "B-4". */
   location?: string;
   /** Repair part labels: the phones it fits, e.g. "Redmi 9C, Redmi 9A". */
@@ -141,6 +143,7 @@ export const LABEL_TOKENS: { token: string; label: string; layouts?: string[] }[
   { token: "{{brand}}",       label: "Brand", layouts: ["accessory"] },
   { token: "{{model}}",       label: "Compatible model", layouts: ["accessory"] },
   { token: "{{category}}",    label: "Category", layouts: ["accessory", "part"] },
+  { token: "{{partNo}}",      label: "Part number", layouts: ["part"] },
   { token: "{{location}}",    label: "Rack location", layouts: ["part"] },
   { token: "{{compatible}}",  label: "Fits these phones", layouts: ["part"] },
   { token: "{{supplier}}",    label: "Supplier", layouts: ["part"] },
@@ -172,6 +175,7 @@ export function resolveTokens(text: string, data: LabelData): string {
     jobId: data.jobId,
     dealerJobNo: data.dealerJobNo,
     code: data.code,
+    partNo: data.partNo,
     location: data.location,
     compatible: data.compatible,
     supplier: data.supplier,
