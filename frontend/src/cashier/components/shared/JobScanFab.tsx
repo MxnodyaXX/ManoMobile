@@ -3,12 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DeviceLock } from "@/lib/repair/DeviceLock";
-import { ScanLine, X, Search, CheckCircle2, AlertCircle, ArrowRight, BellRing, Receipt, Package, Zap } from "lucide-react";
+import { ScanLine, X, Search, CheckCircle2, AlertCircle, ArrowRight, BellRing, Receipt, Package, Tag, Wrench, Zap } from "lucide-react";
 import { hasOpenInquiry, inquiryLabel, recordInquiry } from "@/lib/repair/inquiry";
 import { useToast } from "@/lib/ui/toast";
 import { useRepair, jobLabel, VIEW_META, type RepairJob, type RepairView } from "@/cashier/contexts/RepairContext";
 import { useBarcodeScanner } from "@/cashier/hooks/useBarcodeScanner";
 import type { AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
+import type { SparePart } from "@/cashier/contexts/PartsContext";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 const priorityColor: Record<string, string> = {
@@ -132,7 +133,7 @@ function JobActions({ job, flagged, flagging, onFlag, onOpen, onIssue }: {
  * open on its own — see useBarcodeScanner for how a hardware scan is told
  * apart from normal typing.
  */
-export default function JobScanFab({ onOpenJob, onIssueJob, findProducts, onQuickSale, paused = false }: {
+export default function JobScanFab({ onOpenJob, onIssueJob, findProducts, findParts, onPrintLabel, onQuickSale, paused = false }: {
   /**
    * What "open this job" means in the shell this is mounted in.
    *
@@ -156,6 +157,10 @@ export default function JobScanFab({ onOpenJob, onIssueJob, findProducts, onQuic
    * CashierScan); the technician's bench has no products to sell.
    */
   findProducts?: (code: string) => AccessoryProduct[];
+  /** Repair parts a scan could mean, by SKU, number or supplier's barcode. */
+  findParts?: (code: string) => SparePart[];
+  /** Reprint this item's label, starting on the barcode that was scanned. The panel closes first. */
+  onPrintLabel?: (item: { product: AccessoryProduct } | { part: SparePart }, scanned: string) => void;
   /** Start a Quick Sale with this product. The panel closes first. */
   onQuickSale?: (product: AccessoryProduct) => void;
   /** Stop listening for hardware scans — something else (Quick Sale) owns them. */
@@ -191,6 +196,7 @@ export default function JobScanFab({ onOpenJob, onIssueJob, findProducts, onQuic
   }, !paused);
 
   const productHits = result === null && findProducts && lookedUp.trim() ? findProducts(lookedUp) : [];
+  const partHits = result === null && findParts && lookedUp.trim() ? findParts(lookedUp) : [];
 
   // Keyboard shortcut: F9 opens the panel by hand (useful when there's no
   // scanner in reach). A single function key on purpose — no modifier combo
@@ -300,7 +306,7 @@ export default function JobScanFab({ onOpenJob, onIssueJob, findProducts, onQuic
                 </p>
               )}
 
-              {live === null && productHits.length === 0 && (
+              {live === null && productHits.length === 0 && partHits.length === 0 && (
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 14px", borderRadius: 10, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)" }}>
                   <AlertCircle size={15} color="#f87171" style={{ flexShrink: 0, marginTop: 1 }} />
                   <span style={{ fontSize: 12.5, color: "var(--text-secondary)", fontFamily: ff }}>
@@ -351,6 +357,44 @@ export default function JobScanFab({ onOpenJob, onIssueJob, findProducts, onQuic
                           }}
                         >
                           <Zap size={14} /> Quick Sale
+                        </button>
+                      )}
+                      {onPrintLabel && (
+                        <button
+                          onClick={() => { const code = lookedUp; close(); onPrintLabel({ product: p }, code); }}
+                          style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700, fontFamily: ff, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer" }}
+                        >
+                          <Tag size={14} /> Print label
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* A repair part: nothing to sell, but its label can be reprinted. */}
+              {live === null && partHits.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: productHits.length > 0 ? 10 : 0 }}>
+                  {partHits.map(p => (
+                    <div key={p.id} style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12, background: "var(--bg-surface)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                        <div style={{ display: "flex", gap: 10, minWidth: 0 }}>
+                          <Wrench size={18} color="var(--accent)" style={{ flexShrink: 0, marginTop: 2 }} />
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text-primary)", fontFamily: ff }}>{p.name}</div>
+                            <div style={{ fontSize: 11.5, color: "var(--text-muted)", fontFamily: ff, marginTop: 2 }}>Repair part · {p.sku} · {p.category}</div>
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 11.5, fontWeight: 600, flexShrink: 0, color: p.stock === 0 ? "#f87171" : "#4ade80", fontFamily: ff }}>
+                          {p.stock === 0 ? "Out of stock" : `${p.stock} in stock`}
+                        </div>
+                      </div>
+                      {onPrintLabel && (
+                        <button
+                          onClick={() => { const code = lookedUp; close(); onPrintLabel({ part: p }, code); }}
+                          style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700, fontFamily: ff, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer" }}
+                        >
+                          <Tag size={14} /> Print label
                         </button>
                       )}
                     </div>

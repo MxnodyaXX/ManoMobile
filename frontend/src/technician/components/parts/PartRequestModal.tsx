@@ -28,7 +28,8 @@ export default function PartRequestModal({ job, onClose }: { job: RepairJob; onC
       p.name.toLowerCase().includes(q) ||
       p.sku.toLowerCase().includes(q) ||
       p.category.toLowerCase().includes(q) ||
-      p.compatibleWith.some(c => c.toLowerCase().includes(q))
+      p.compatibleWith.some(c => c.toLowerCase().includes(q)) ||
+      (p.barcodes ?? []).some(b => b.toLowerCase().includes(q))
     );
   });
 

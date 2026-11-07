@@ -1,4 +1,5 @@
 import type { AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
+import type { SparePart } from "@/cashier/contexts/PartsContext";
 
 /**
  * Comparable form of a scanned or stored code.
@@ -27,4 +28,43 @@ export function matchScannedAccessory<T extends AccessoryProduct>(products: T[],
     (!!p.labelBarcode && normalizeScanCode(p.labelBarcode) === key) ||
     p.barcodes.some(b => normalizeScanCode(b) === key),
   );
+}
+
+/** Every repair part a scanned value could mean: its SKU, its number, or a supplier's barcode. */
+export function matchScannedPart<T extends SparePart>(parts: T[], scanned: string): T[] {
+  const key = normalizeScanCode(scanned);
+  if (!key) return [];
+  return parts.filter(p =>
+    normalizeScanCode(p.sku) === key ||
+    (!!p.partNo && normalizeScanCode(p.partNo) === key) ||
+    (p.barcodes ?? []).some(b => normalizeScanCode(b) === key),
+  );
+}
+
+export interface BarcodeOption { value: string; label: string }
+
+function withSupplierCodes(own: BarcodeOption, supplierCodes: string[]): BarcodeOption[] {
+  const seen = new Set([normalizeScanCode(own.value)]);
+  const options = [own];
+  for (const code of supplierCodes) {
+    const key = normalizeScanCode(code);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    options.push({ value: code, label: supplierCodes.length > 1 ? `Supplier's (${options.length})` : "Supplier's" });
+  }
+  return options;
+}
+
+/** The barcodes a label for this product can print. The shop's own comes first. */
+export const accessoryBarcodeOptions = (p: Pick<AccessoryProduct, "labelBarcode" | "code" | "barcodes">) =>
+  withSupplierCodes({ value: p.labelBarcode || p.code, label: "Our label" }, p.barcodes);
+
+/** The barcodes a label for this part can print. The shop's own comes first. */
+export const partBarcodeOptions = (p: Pick<SparePart, "sku" | "barcodes">) =>
+  withSupplierCodes({ value: p.sku, label: "Our SKU" }, p.barcodes ?? []);
+
+/** Starts on what was scanned, if it's one of these. Otherwise the shop's own. */
+export function pickBarcode(options: BarcodeOption[], scanned = ""): string {
+  const key = normalizeScanCode(scanned);
+  return options.find(o => key && normalizeScanCode(o.value) === key)?.value ?? options[0].value;
 }

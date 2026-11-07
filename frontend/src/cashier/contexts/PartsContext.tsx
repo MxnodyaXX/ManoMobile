@@ -52,6 +52,8 @@ export interface SparePart {
   brand?: string;
   /** Its cost when batches began, for older jobs that only typed its name. */
   legacyCost?: number;
+  /** Barcodes off suppliers' labels. Undefined until migration 20261107000096. */
+  barcodes?: string[];
 }
 
 export const PART_CATEGORIES: PartCategory[] = [

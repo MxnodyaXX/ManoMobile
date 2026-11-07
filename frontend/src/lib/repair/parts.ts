@@ -40,6 +40,8 @@ interface PartRow {
   brand?: string | null;
   /** Absent until migration 20261107000095 is applied. */
   legacy_cost?: number | string | null;
+  /** Absent until migration 20261107000096 is applied. */
+  repair_part_barcodes?: { barcode: string }[] | null;
 }
 
 interface RequestRow {
@@ -78,6 +80,7 @@ function toPart(row: PartRow): SparePart {
     formerNames: row.former_names ?? undefined,
     brand: row.brand ?? undefined,
     legacyCost: row.legacy_cost == null ? undefined : num(row.legacy_cost),
+    barcodes: row.repair_part_barcodes ? row.repair_part_barcodes.map(b => b.barcode).sort() : undefined,
   };
 }
 
@@ -107,13 +110,17 @@ const PART_COLUMNS = "*";
 
 export async function fetchParts(): Promise<SparePart[]> {
   if (!isSupabaseConfigured()) return [];
-  const { data, error } = await getSupabaseBrowserClient()
+  const read = (columns: string) => getSupabaseBrowserClient()
     .from("repair_parts")
-    .select(PART_COLUMNS)
+    .select(columns)
     .order("name", { ascending: true });
 
+  // Without the barcodes table (migration 20261107000096 not applied) the
+  // catalogue still loads.
+  let { data, error } = await read(`${PART_COLUMNS}, repair_part_barcodes(barcode)`);
+  if (error) ({ data, error } = await read(PART_COLUMNS));
   if (error) throw new Error(error.message);
-  return (data as PartRow[] | null)?.map(toPart) ?? [];
+  return (data as unknown as PartRow[] | null)?.map(toPart) ?? [];
 }
 
 /**
@@ -163,7 +170,16 @@ export async function savePart(part: SparePart): Promise<SparePart> {
     }
     throw new Error(error.message);
   }
-  return toPart(data as PartRow);
+  const saved = toPart(data as PartRow);
+  if (!part.barcodes) return saved;
+  const { error: barcodeError } = await sb.rpc("set_repair_part_barcodes", {
+    p_part_id: Number(saved.id),
+    p_barcodes: part.barcodes,
+  });
+  if (barcodeError) {
+    throw new Error(`Part saved, but its barcodes were not. Run migration 20261107000096_supplier_barcodes.sql. (${barcodeError.message})`);
+  }
+  return { ...saved, barcodes: part.barcodes };
 }
 
 /**

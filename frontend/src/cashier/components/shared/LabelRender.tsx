@@ -1,6 +1,8 @@
 "use client";
 
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import Barcode from "react-barcode";
+import { barcodeClearArea } from "@/lib/inventory/barcodeArea";
 import {
   resolveTokens,
   type LabelElement,
@@ -52,20 +54,45 @@ export default function LabelRender({
         transformOrigin: "top left",
       }}
     >
-      {elements.map(el => (
-        <div
-          key={el.id}
-          style={{
-            position: "absolute",
-            left: mm(el.x), top: mm(el.y),
-            width: mm(el.w), height: mm(el.h),
-            overflow: "hidden",
-            boxSizing: "border-box",
-          }}
-        >
-          <ElementBody el={el} data={data} format={format} barWidth={barWidth} />
-        </div>
-      ))}
+      {elements.map(drawn => {
+        const el = drawn.type === "barcode" ? { ...drawn, ...barcodeClearArea(drawn, elements) } : drawn;
+        return (
+          <div
+            key={el.id}
+            style={{
+              position: "absolute",
+              left: mm(el.x), top: mm(el.y),
+              width: mm(el.w), height: mm(el.h),
+              overflow: "hidden",
+              boxSizing: "border-box",
+            }}
+          >
+            <ElementBody el={el} data={data} format={format} barWidth={barWidth} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Holds a barcode at the height its box was drawn. A code too long for the box
+ * gets squeezed to fit, and an SVG keeps its proportions by default, so a long
+ * SKU came out a fraction of the height of the short sample in the editor. Only
+ * the width has to give: a barcode's bars carry nothing in their height, and tall
+ * bars are what make it easy to scan.
+ *
+ * Set on the element rather than passed in because react-barcode offers no prop
+ * for it. The attribute is part of the markup, so it reaches the printed copy.
+ */
+function BarcodeBox({ children }: { children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    box.current?.querySelector("svg")?.setAttribute("preserveAspectRatio", "none");
+  });
+  return (
+    <div ref={box} style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      {children}
     </div>
   );
 }
@@ -118,7 +145,7 @@ function ElementBody({ el, data, format, barWidth }: {
       const usable = format === "EAN13" && !/^\d{12,13}$/.test(value) ? "CODE128" : format;
       const code = usable === "CODE39" ? value.toUpperCase() : value;
       return (
-        <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <BarcodeBox>
           <Barcode
             value={code || " "}
             format={usable}
@@ -132,7 +159,7 @@ function ElementBody({ el, data, format, barWidth }: {
             displayValue={el.showText}
             margin={0}
           />
-        </div>
+        </BarcodeBox>
       );
     }
 

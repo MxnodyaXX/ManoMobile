@@ -3,19 +3,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, MapPin, PackagePlus, Paperclip, Plus, Search, ShieldCheck, Trash2, Layers, Wrench } from "lucide-react";
 import { PART_CATEGORIES, useParts, type SparePart } from "@/cashier/contexts/PartsContext";
+import { useDevices } from "@/cashier/contexts/DevicesContext";
+import { useRepair } from "@/cashier/contexts/RepairContext";
+import { useAuth } from "@/lib/auth/AuthContext";
+import { useMyPermissions } from "@/lib/settings/staffRules";
+import { applyDeviceSuggestion, buildDeviceList, splitDevices, suggestDevices } from "@/lib/inventory/deviceSuggestions";
 import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
 import { useInventory } from "@/cashier/contexts/InventoryContext";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useToast } from "@/lib/ui/toast";
-import { matchScannedAccessory } from "@/lib/inventory/accessoryScan";
+import { matchScannedAccessory, matchScannedPart, normalizeScanCode } from "@/lib/inventory/accessoryScan";
 import {
-  PAY_METHODS, WARRANTY_START_LABEL, fetchTrips, finalisePurchaseInvoice, lineTotalOf, nextItemCode, savePurchaseInvoice,
+  PAY_METHODS, WARRANTY_START_LABEL, fetchTrips, finalisePurchaseInvoice, lineExtrasProblem, lineTotalOf, savePurchaseInvoice,
   savePurchaseTrip, today, uploadInvoiceAttachment, warrantyText,
   type InvoiceDetail, type NewPartDraft, type NewProductDraft, type PayMethod, type PurchaseTrip, type WarrantyStart,
 } from "@/lib/purchasing/api";
+import { nextItemCode } from "@/lib/inventory/itemCode";
 import { Btn, ErrorNote, Modal, Rs, ff, input, label } from "./ui";
-import { suggestPartName, suggestPartSku, suggestProductName } from "@/lib/inventory/productName";
+import { setPartBrand, suggestPartSku, suggestProductName } from "@/lib/inventory/productName";
 
 /**
  * New / edit-draft supplier invoice.
@@ -36,6 +42,8 @@ interface Line {
   np: NewProductDraft | null;
   partId: number | null;
   newPart: NewPartDraft | null;
+  barcode: string;         // off the supplier's label, if it has one
+  addDevices: string;      // more devices for an existing part, comma-separated
   description: string;
   qty: string;
   unitCost: string;
@@ -49,17 +57,28 @@ interface Line {
   swTerms: string;
   cwDays: string;          // "" = shop policy at the counter
   open: boolean;           // warranty panel expanded
+  done: boolean;           // finished, showing as one row
   search: string;
 }
 
 let keySeq = 0;
 const blankLine = (): Line => ({
-  key: ++keySeq, productId: null, np: null, partId: null, newPart: null, description: "", qty: "1", unitCost: "", expectedSellPrice: "",
+  key: ++keySeq, productId: null, np: null, partId: null, newPart: null, barcode: "", addDevices: "", description: "", qty: "1", unitCost: "", expectedSellPrice: "",
   discount: "", taxPct: "", updateSellingPrice: false, swDays: "", swStart: "invoice_date", swNotes: "", swTerms: "",
-  cwDays: "", open: false, search: "",
+  cwDays: "", open: false, done: false, search: "",
 });
 
 const num = (v: string) => { const x = parseFloat(v); return Number.isFinite(x) ? x : 0; };
+
+/**
+ * A scan that found nothing, then the item picked by hand, means this is the
+ * supplier's barcode for it: the search box already holds it, so keep it.
+ */
+const scannedBarcode = (l: Line, known: string[]) => {
+  const typed = l.search.trim();
+  if (!/^\d{6,}$/.test(typed) || known.some(k => normalizeScanCode(k) === normalizeScanCode(typed))) return l.barcode;
+  return typed;
+};
 
 export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClose, onSaved }: {
   existing?: InvoiceDetail;
@@ -70,6 +89,17 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
 }) {
   const { products, reload: reloadProducts } = useAccessories();
   const { parts, reload: reloadParts } = useParts();
+  const { devices } = useDevices();
+  const { jobs } = useRepair();
+  const { can } = useAuth();
+  const { isAdminCashier } = useMyPermissions();
+  const mayEditPartDevices = can("Admin") || isAdminCashier;
+  // Everything the shop has called a device: its parts, its phones, its repairs.
+  const knownDevices = useMemo(() => buildDeviceList([
+    ...parts.flatMap(p => p.compatibleWith),
+    ...devices.map(d => `${d.brand} ${d.name}`),
+    ...jobs.map(j => `${j.brand} ${j.model}`),
+  ]), [parts, devices, jobs]);
   const { suppliers, addSupplier, categories, subcategories, brands, addCategory, addSubcategory, addBrand, updateBrand } = useInventory();
   const { addEntry } = useCashRegister();
   const toast = useToast();
@@ -102,13 +132,14 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
   const [lines, setLines] = useState<Line[]>(() => existing
     ? existing.items.map(it => ({
         ...blankLine(),
-        productId: it.productId, np: it.newProduct, partId: it.partId, newPart: it.newPart, description: it.description,
+        productId: it.productId, np: it.newProduct, partId: it.partId, newPart: it.newPart, barcode: it.supplierBarcode, addDevices: it.addDevices.join(", "), description: it.description,
         qty: String(it.qty), unitCost: String(it.unitCost), expectedSellPrice: it.expectedSellPrice ? String(it.expectedSellPrice) : "",
         discount: it.discount ? String(it.discount) : "", taxPct: it.taxPct ? String(it.taxPct) : "",
         updateSellingPrice: it.updateSellingPrice,
         swDays: it.supplierWarrantyDays == null ? "" : String(it.supplierWarrantyDays), swStart: it.supplierWarrantyStart,
         swNotes: it.supplierWarrantyNotes, swTerms: it.supplierWarrantyTerms,
         cwDays: it.customerWarrantyDays == null ? "" : String(it.customerWarrantyDays),
+        done: true,
       }))
     : [blankLine()]);
   const [busy, setBusy] = useState<null | "draft" | "final" | "receive">(null);
@@ -125,6 +156,9 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
   }, []);
   useEffect(() => { (async () => { await loadTrips(); })(); }, [loadTrips]);
 
+  const [extrasProblem, setExtrasProblem] = useState<string | null>(null);
+  useEffect(() => { (async () => { setExtrasProblem(await lineExtrasProblem()); })(); }, []);
+
   async function createTrip() {
     if (!newTrip?.name.trim()) return;
     try {
@@ -139,6 +173,15 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
 
   const patch = (key: number, p: Partial<Line>) => setLines(prev => prev.map(l => l.key === key ? { ...l, ...p } : l));
 
+  /** Enough to fold it away. Saving still checks everything, and reopens a line with a problem. */
+  const lineReady = (l: Line) => {
+    const item = l.productId || l.partId
+      || (l.np && l.np.name.trim() && l.np.category && l.np.code.trim())
+      || (l.newPart && l.newPart.name.trim() && l.newPart.sku.trim());
+    return !!item && num(l.qty) > 0 && Number.isInteger(num(l.qty)) && l.unitCost.trim() !== "" && num(l.unitCost) >= 0;
+  };
+  const addLine = () => setLines(prev => [...prev.map(l => lineReady(l) ? { ...l, done: true } : l), blankLine()]);
+
   const totals = useMemo(() => {
     const sub = lines.reduce((s, l) => s + lineTotalOf({ qty: num(l.qty), unitCost: num(l.unitCost), discount: num(l.discount), taxPct: num(l.taxPct) }), 0);
     return { sub, total: Math.max(0, sub + num(expenses) - num(discount)) };
@@ -152,12 +195,14 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
 
   const pickProduct = (l: Line, p: AccessoryProduct) => patch(l.key, {
     productId: p.id, np: null, partId: null, newPart: null, search: "", description: p.name,
+    barcode: scannedBarcode(l, [p.code, p.labelBarcode, ...p.barcodes]),
     unitCost: l.unitCost || String(p.buyingPrice || ""),
     expectedSellPrice: l.expectedSellPrice || String(p.sellingPrice || ""),
   });
 
   const pickPart = (l: Line, p: SparePart) => patch(l.key, {
     partId: Number(p.id), newPart: null, productId: null, np: null, search: "", description: p.name,
+    barcode: scannedBarcode(l, [p.sku, p.partNo ?? "", ...(p.barcodes ?? [])]),
     unitCost: l.unitCost || String(p.costPrice || ""), expectedSellPrice: "",
   });
 
@@ -168,12 +213,12 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
   ];
 
   const startNewPart = (l: Line) => {
-    const partWord = /^\d{8,14}$/.test(l.search.trim()) ? "" : l.search.trim();
-    const name = partWord ? suggestPartName({ name: partWord, category: "Screen", compatibleWith: [] }) : "";
+    const name = /^\d{6,}$/.test(l.search.trim()) ? "" : l.search.trim();
     patch(l.key, {
       productId: null, np: null, partId: null, search: "", expectedSellPrice: "",
+      barcode: scannedBarcode(l, []),
       newPart: {
-        name, partWord, category: "Screen", brand: "", compatibleWith: [], reorderLevel: 5,
+        name, category: "Screen", brand: "", compatibleWith: [], reorderLevel: 5,
         sku: name ? suggestPartSku({ name, category: "Screen", compatibleWith: [] }, takenSkus(l.key)) : "",
       },
     });
@@ -223,11 +268,12 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
       const n = `Line ${i + 1}`;
       if (!l.productId && !l.np && !l.partId && !l.newPart) return `${n}: pick a product or part, or add it as a new one.`;
       if ((l.partId || l.newPart) && setupNeeded) return setupNeeded;
+      if (extrasProblem && (l.barcode.trim() || l.addDevices.trim())) return `${n}: ${extrasProblem}`;
       if (num(l.qty) <= 0 || !Number.isInteger(num(l.qty))) return `${n}: quantity must be a whole number above 0.`;
       if (l.unitCost.trim() === "" || num(l.unitCost) < 0) return `${n}: enter the buying price.`;
       if (num(l.discount) > num(l.qty) * num(l.unitCost)) return `${n}: the discount is more than the line.`;
       if (l.newPart && !l.partId) {
-        if (!l.newPart.name.trim() || !l.newPart.sku.trim()) return `${n}: enter the new part's model or what the part is.`;
+        if (!l.newPart.name.trim() || !l.newPart.sku.trim()) return `${n}: enter the new part's name.`;
         const sku = l.newPart.sku.trim().toLowerCase();
         if (parts.some(p => p.sku.toLowerCase() === sku) || skus.has(sku)) return `${n}: SKU ${l.newPart.sku} is already used.`;
         skus.add(sku);
@@ -266,7 +312,13 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
   async function submit(mode: "draft" | "final" | "receive") {
     if (busyRef.current) return;
     const problem = validate();
-    if (problem) { setError(problem); return; }
+    if (problem) {
+      setError(problem);
+      // Every per-line problem names its line, which may be folded away.
+      const at = /^Line (\d+):/.exec(problem);
+      if (at) setLines(prev => prev.map((l, i) => i === Number(at[1]) - 1 ? { ...l, done: false } : l));
+      return;
+    }
     busyRef.current = true;
     setBusy(mode);
     setError(null);
@@ -281,6 +333,9 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
         items: lines.map(l => ({
           productId: l.productId, newProduct: l.productId ? null : l.np,
           partId: l.partId, newPart: l.partId ? null : l.newPart,
+          // A new accessory has its own barcode box, kept with the new product.
+          supplierBarcode: l.np && !l.productId ? "" : l.barcode,
+          addDevices: l.partId ? splitDevices(l.addDevices) : [],
           description: l.partId ? (partById.get(l.partId)?.name ?? l.description)
             : l.newPart ? l.newPart.name
             : l.productId ? (productById.get(l.productId)?.name ?? l.description) : (l.np?.name ?? ""),
@@ -399,7 +454,7 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ ...label, marginBottom: 0 }}>Items ({lines.length})</span>
-            <Btn onClick={() => setLines(prev => [...prev, blankLine()])} style={{ padding: "6px 10px" }}><Plus size={12} /> Add item</Btn>
+            <Btn onClick={addLine} style={{ padding: "6px 10px" }}><Plus size={12} /> Add item</Btn>
           </div>
 
           {lines.map((l, idx) => {
@@ -424,21 +479,52 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
             })();
             const partHits = !q ? [] : parts.filter(x =>
               x.name.toLowerCase().includes(q) || x.sku.toLowerCase().includes(q) || (x.partNo ?? "").includes(q) ||
-              (x.brand ?? "").toLowerCase().includes(q) || x.compatibleWith.some(c => c.toLowerCase().includes(q))).slice(0, 8);
+              (x.brand ?? "").toLowerCase().includes(q) || x.compatibleWith.some(c => c.toLowerCase().includes(q)) ||
+              (x.barcodes ?? []).some(b => b.toLowerCase().includes(q))).slice(0, 8);
+
+            const removeLine = () => setLines(prev => prev.length > 1 ? prev.filter(x => x.key !== l.key) : prev);
+
+            if (l.done) {
+              const name = part?.name ?? l.newPart?.name ?? p?.name ?? l.np?.name ?? l.description;
+              const code = part?.sku ?? l.newPart?.sku ?? p?.code ?? l.np?.code ?? "";
+              const isNew = !!(l.newPart || l.np) && !l.partId && !l.productId;
+              return (
+                <div key={l.key} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", border: "1px solid var(--border)", borderRadius: 10, padding: "8px 12px", background: "var(--bg-surface)" }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)" }}>#{idx + 1}</span>
+                  {isPartLine && <Wrench size={12} color="#7c3aed" style={{ flexShrink: 0 }} />}
+                  <div style={{ flex: "1 1 180px", minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", overflowWrap: "anywhere" }}>{name}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", overflowWrap: "anywhere" }}>
+                      <span style={{ fontFamily: "monospace" }}>{code}</span>{isNew ? " · new" : ""} · {qty} × {Rs(num(l.unitCost))}
+                    </div>
+                  </div>
+                  <strong style={{ fontSize: 13, color: "var(--text-primary)", whiteSpace: "nowrap" }}>{Rs(lt)}</strong>
+                  <Btn onClick={() => patch(l.key, { done: false })} style={{ padding: "4px 9px", fontSize: 11.5 }}>Edit</Btn>
+                  <button onClick={removeLine} title="Remove line" aria-label={`Remove ${name}`} disabled={lines.length === 1}
+                    style={{ background: "none", border: "none", color: "#dc2626", cursor: lines.length === 1 ? "not-allowed" : "pointer", opacity: lines.length === 1 ? 0.4 : 1, display: "flex" }}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              );
+            }
 
             return (
               <div key={l.key} style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12, background: "var(--bg-surface)", display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)" }}>#{idx + 1}</span>
-                  <button onClick={() => setLines(prev => prev.length > 1 ? prev.filter(x => x.key !== l.key) : prev)} title="Remove line" disabled={lines.length === 1}
-                    style={{ background: "none", border: "none", color: "#dc2626", cursor: lines.length === 1 ? "not-allowed" : "pointer", opacity: lines.length === 1 ? 0.4 : 1 }}>
-                    <Trash2 size={14} />
-                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Btn kind="primary" onClick={() => patch(l.key, { done: true })} disabled={!lineReady(l)} title={lineReady(l) ? "Finished with this item" : "Pick the item and enter its quantity and buying price first"} style={{ padding: "4px 10px", fontSize: 11.5 }}>Done</Btn>
+                    <button onClick={removeLine} title="Remove line" disabled={lines.length === 1}
+                      style={{ background: "none", border: "none", color: "#dc2626", cursor: lines.length === 1 ? "not-allowed" : "pointer", opacity: lines.length === 1 ? 0.4 : 1 }}>
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Product or part: existing, new, or not chosen yet */}
                 {part ? (
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, padding: "9px 12px", borderRadius: 9, border: "1px solid rgba(124,58,237,0.35)", background: "rgba(124,58,237,0.06)" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "9px 12px", borderRadius: 9, border: "1px solid rgba(124,58,237,0.35)", background: "rgba(124,58,237,0.06)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "#7c3aed" }}>
                         <Wrench size={12} /> Existing repair part — new batch will be created
@@ -448,7 +534,17 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
                         {part.sku} · {part.category} · {part.stock} in stock · last cost {Rs(part.costPrice)}
                       </div>
                     </div>
-                    <Btn onClick={() => patch(l.key, { partId: null })} style={{ padding: "5px 9px", fontSize: 11.5 }}>Change</Btn>
+                    <Btn onClick={() => patch(l.key, { partId: null, addDevices: "" })} style={{ padding: "5px 9px", fontSize: 11.5 }}>Change</Btn>
+                    </div>
+                    <div style={{ fontSize: 11.5, color: "var(--text-secondary)", overflowWrap: "anywhere" }}>
+                      <strong>Fits:</strong> {part.compatibleWith.length ? part.compatibleWith.join(", ") : "no devices listed yet"}
+                    </div>
+                    {mayEditPartDevices && (
+                      <div>
+                        <span style={label}>Add more compatible devices (optional)</span>
+                        <DevicesInput value={l.addDevices} onChange={addDevices => patch(l.key, { addDevices })} known={knownDevices.filter(d => !part.compatibleWith.some(c => c.toLowerCase() === d.toLowerCase()))} placeholder="Added to this part when the invoice is finalised" />
+                      </div>
+                    )}
                   </div>
                 ) : l.newPart ? (
                   <NewPartFields
@@ -456,6 +552,7 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
                     onChange={newPart => patch(l.key, { newPart })}
                     onCancel={() => patch(l.key, { newPart: null })}
                     taken={takenSkus(l.key)}
+                    knownDevices={knownDevices}
                     isMobile={isMobile}
                   />
                 ) : p ? (
@@ -497,8 +594,7 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
                         e.preventDefault();
                         const exact = matchScannedAccessory(products, e.currentTarget.value);
                         if (exact.length === 1) { pickProduct(l, exact[0]); return; }
-                        const code = e.currentTarget.value.trim().toLowerCase();
-                        const partExact = parts.filter(x => x.sku.toLowerCase() === code || x.partNo === code);
+                        const partExact = matchScannedPart(parts, e.currentTarget.value);
                         if (partExact.length === 1) pickPart(l, partExact[0]);
                       }}
                       placeholder="Search accessories and repair parts by name, barcode, code or SKU — or scan the box"
@@ -564,6 +660,19 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
                   </div>
                 </div>
 
+                {!(l.np && !l.productId) && (
+                  <div>
+                    <span style={label}>Supplier&apos;s barcode (optional)</span>
+                    <input
+                      value={l.barcode}
+                      onChange={e => patch(l.key, { barcode: e.target.value })}
+                      onKeyDown={e => { if (e.key === "Enter") e.preventDefault(); }}
+                      placeholder="Scan the supplier's label, if it has one"
+                      style={input}
+                    />
+                  </div>
+                )}
+
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "center", fontSize: 11.5, color: "var(--text-muted)" }}>
                   {qty > 0 && <span>Cost/unit {Rs(Math.round(landed * 100) / 100)}</span>}
                   {sell > 0 && qty > 0 && (
@@ -617,6 +726,9 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
               </div>
             );
           })}
+          {lines.length > 3 && (
+            <Btn onClick={addLine} style={{ alignSelf: "flex-start", padding: "6px 10px" }}><Plus size={12} /> Add item</Btn>
+          )}
         </div>
 
         {/* ── Totals + payment + notes ── */}
@@ -690,23 +802,64 @@ function WarrantySelect({ value, onChange, emptyLabel }: { value: string; onChan
   );
 }
 
+/** A comma-separated device list that offers the models the shop already knows. */
+function DevicesInput({ value, onChange, known, placeholder }: {
+  value: string;
+  onChange: (text: string) => void;
+  known: string[];
+  placeholder: string;
+}) {
+  const [focused, setFocused] = useState(false);
+  const hits = focused ? suggestDevices(known, value) : [];
+  return (
+    <div>
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onKeyDown={e => { if (e.key === "Enter") e.preventDefault(); }}
+        placeholder={placeholder}
+        autoComplete="off"
+        style={input}
+      />
+      {hits.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6 }}>
+          {hits.map(d => (
+            <button
+              key={d}
+              type="button"
+              // Before the box loses focus, or the list would go first.
+              onMouseDown={e => { e.preventDefault(); onChange(applyDeviceSuggestion(value, d)); }}
+              style={{ padding: "4px 9px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: ff }}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** A repair part not in the catalogue yet. Its name and SKU follow the same format as the parts screen. */
-function NewPartFields({ np, onChange, onCancel, taken, isMobile }: {
+function NewPartFields({ np, onChange, onCancel, taken, knownDevices, isMobile }: {
   np: NewPartDraft;
   onChange: (np: NewPartDraft) => void;
   onCancel: () => void;
   taken: string[];
+  knownDevices: string[];
   isMobile: boolean;
 }) {
   const [devicesText, setDevicesText] = useState(np.compatibleWith.join(", "));
   const g = (cols: string): React.CSSProperties => ({ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : cols, gap: 10 });
 
   function apply(change: Partial<NewPartDraft>, text = devicesText) {
-    const next = { ...np, ...change, compatibleWith: text.split(",").map(s => s.trim()).filter(Boolean) };
-    const known = next.compatibleWith.length > 0 || next.partWord.trim() !== "";
-    const parts = { name: next.partWord, category: next.category, compatibleWith: next.compatibleWith, brand: next.brand };
-    const name = known ? suggestPartName(parts) : "";
-    onChange({ ...next, name, sku: name ? suggestPartSku({ ...parts, name }, taken) : "" });
+    const next = { ...np, ...change, compatibleWith: splitDevices(text) };
+    // The brand goes inside the name; everything else about the name is as typed.
+    const name = change.brand !== undefined ? setPartBrand(next.name, np.brand, change.brand, next.category) : next.name;
+    const part = { name, category: next.category, compatibleWith: next.compatibleWith, brand: next.brand };
+    onChange({ ...next, name, sku: name.trim() ? suggestPartSku(part, taken) : "" });
   }
 
   return (
@@ -718,12 +871,15 @@ function NewPartFields({ np, onChange, onCancel, taken, isMobile }: {
         <Btn onClick={onCancel} style={{ padding: "4px 8px", fontSize: 11 }}>Pick existing instead</Btn>
       </div>
       <div>
-        <span style={label}>Compatible devices, most common model first</span>
-        <input value={devicesText} onChange={e => { setDevicesText(e.target.value); apply({}, e.target.value); }} placeholder="e.g. Samsung M02s, Samsung A02s" style={input} />
+        <span style={label}>Part name</span>
+        <input value={np.name} onChange={e => apply({ name: e.target.value })} placeholder="e.g. Samsung M02s Display" style={input} />
       </div>
-      <div style={g("1fr 1fr 1fr 0.6fr")}>
+      <div>
+        <span style={label}>Compatible devices (optional)</span>
+        <DevicesInput value={devicesText} onChange={text => { setDevicesText(text); apply({}, text); }} known={knownDevices} placeholder="e.g. Samsung M02s, Samsung A02s" />
+      </div>
+      <div style={g("1fr 1fr 0.6fr")}>
         <div><span style={label}>Brand (optional)</span><input value={np.brand} onChange={e => apply({ brand: e.target.value })} placeholder="e.g. Crown" style={input} /></div>
-        <div><span style={label}>Part (optional)</span><input value={np.partWord} onChange={e => apply({ partWord: e.target.value })} placeholder={np.category === "Screen" ? "e.g. Display" : np.category} style={input} /></div>
         <div>
           <span style={label}>Category</span>
           <select value={np.category} onChange={e => apply({ category: e.target.value })} style={input}>
@@ -733,9 +889,9 @@ function NewPartFields({ np, onChange, onCancel, taken, isMobile }: {
         <div><span style={label}>Reorder at</span><input value={String(np.reorderLevel)} onChange={e => apply({ reorderLevel: Math.max(0, parseInt(e.target.value.replace(/\D/g, "") || "0", 10)) })} inputMode="numeric" style={input} /></div>
       </div>
       <div style={{ fontSize: 12, color: "var(--text-secondary)", overflowWrap: "anywhere" }}>
-        {np.name
-          ? <>Will be added as <strong>{np.name}</strong> · SKU <strong style={{ fontFamily: "monospace" }}>{np.sku}</strong>. An Admin can edit these on the parts screen afterwards.</>
-          : "Enter a model or what the part is, and the name and SKU fill in."}
+        {np.name.trim()
+          ? <>SKU <strong style={{ fontFamily: "monospace" }}>{np.sku}</strong>. An Admin can change it on the parts screen afterwards.</>
+          : "Enter the part name and the SKU fills in."}
       </div>
     </div>
   );
@@ -899,7 +1055,7 @@ function NewProductFields({ np, onChange, onUpdate, onSaveCategory, onSaveSubcat
         </div>
         <div><span style={label}>Compatible model</span><input value={np.model} onChange={e => set({ model: e.target.value })} placeholder="e.g. Universal" style={input} /></div>
         <div>
-          <span style={label}>Packaging barcode(s)</span>
+          <span style={label}>Supplier / box barcode(s)</span>
           <input value={np.barcodes.join(", ")} onChange={e => set({ barcodes: e.target.value.split(/[,\s]+/).filter(Boolean) })} placeholder="Scan the box — comma between several" style={input} />
         </div>
         <div><span style={label}>Min stock</span><input value={String(np.minStock)} onChange={e => set({ minStock: Math.max(0, parseInt(e.target.value.replace(/\D/g, "") || "0", 10)) })} inputMode="numeric" style={input} /></div>

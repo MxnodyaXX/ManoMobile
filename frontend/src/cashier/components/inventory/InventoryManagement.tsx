@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { Fragment, useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
   Smartphone, Package, AlertTriangle, XCircle,
   Plus, Search, Edit2, Trash2, X, Check,
   BarChart3, ArrowUpCircle, ArrowDownCircle, Sliders,
-  ChevronDown, ChevronRight, ShieldAlert, ShieldCheck, Truck, Tag, CornerDownRight, Wrench, Layers, Printer,
+  ChevronDown, ChevronRight, ShieldAlert, ShieldCheck, Truck, Tag, CornerDownRight, Wrench, Layers, Printer, PackagePlus,
 } from "lucide-react";
 import PurchasingHub from "@/cashier/components/purchasing/PurchasingHub";
 import ProductBatchesModal from "@/cashier/components/purchasing/ProductBatchesModal";
@@ -24,6 +24,9 @@ import { useToast } from "@/lib/ui/toast";
 import { useTableSort, SortHeader } from "@/lib/ui/useTableSort";
 import RepairPartsManager from "@/admin/components/inventory/RepairPartsManager";
 import RenameProductsModal from "./RenameProductsModal";
+import { AddOldStockModal, BatchPanel, BatchToggle, useStockBatches } from "@/cashier/components/purchasing/StockBatchRows";
+import { categoryAbbr, nextItemCode } from "@/lib/inventory/itemCode";
+import { accessoryBarcodeOptions, pickBarcode } from "@/lib/inventory/accessoryScan";
 import { buildProductName, readExistingName, suggestProductName, variantOf } from "@/lib/inventory/productName";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -101,21 +104,6 @@ const selectStyle: React.CSSProperties = {
   fontSize: 13, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none",
 };
 
-function getCategoryAbbr(cat: string): string {
-  return cat.split(/[\s/\-–]+/).filter(w => w.length > 0).map(w => w[0].toUpperCase()).join("");
-}
-
-function generateCode(cat: string, existing: AccessoryProduct[]): string {
-  const abbr = getCategoryAbbr(cat);
-  if (!abbr) return "";
-  const re = new RegExp(`^${abbr}-(\\d+)$`);
-  let max = 0;
-  for (const p of existing) {
-    const m = p.code.match(re);
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  }
-  return `${abbr}-${String(max + 1).padStart(3, "0")}`;
-}
 
 // ─── ComboField ───────────────────────────────────────────────────────────────
 
@@ -1791,7 +1779,7 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
   function handleCategoryPick(cat: string, subcat: string) {
     setForm(f => {
       if (f.category === cat) return { ...f, subcategory: subcat };
-      const newCode = cat ? generateCode(cat, existingProducts.filter(p => p.id !== f.id)) : "";
+      const newCode = cat ? nextItemCode(cat, existingProducts.filter(p => p.id !== f.id).map(p => p.code)) : "";
       return { ...f, category: cat, subcategory: subcat, brand: "", code: newCode };
     });
   }
@@ -1952,7 +1940,7 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
                 type="text"
                 value={form.code}
                 onChange={e => set("code", e.target.value)}
-                placeholder={form.category ? `${getCategoryAbbr(form.category)}-001` : "Select category first"}
+                placeholder={form.category ? `${categoryAbbr(form.category)}-001` : "Select category first"}
                 disabled={anyMismatch}
                 style={{ ...inputStyle, borderColor: errors.code ? "#dc2626" : "var(--border)", opacity: anyMismatch ? 0.45 : 1, cursor: anyMismatch ? "not-allowed" : "text" }}
               />
@@ -1972,7 +1960,7 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
           </div>
           {/* Row 3b: Packaging barcodes */}
           <div>
-            <label style={labelStyle}>Packaging Barcodes (optional)</label>
+            <label style={labelStyle}>Supplier / Box Barcodes (optional)</label>
             <div style={{ display: "flex", gap: 8 }}>
               <input
                 type="text"
@@ -3010,6 +2998,9 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
   const [labelProduct, setLabelProduct] = useState<AccessoryProduct | null>(null);
   const [batchesProduct, setBatchesProduct] = useState<AccessoryProduct | null>(null);
   const [renaming, setRenaming] = useState(false);
+  const [oldStockProduct, setOldStockProduct] = useState<AccessoryProduct | null>(null);
+  const stockBatches = useStockBatches("accessory");
+  const { reload: reloadProducts } = useAccessories();
   const { can } = useAuth();
 
   const { categories: categoryList, subcategories: subcategoryList } = useInventory();
@@ -3157,12 +3148,16 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
                 const m = p.sellingPrice - p.buyingPrice;
                 const mp = marginPct(p.buyingPrice, p.sellingPrice);
                 return (
-                  <tr key={p.id} style={{ background: isOut ? "rgba(220,38,38,0.04)" : isLow ? "rgba(180,83,9,0.04)" : "transparent" }}>
+                  <Fragment key={p.id}>
+                  <tr style={{ background: isOut ? "rgba(220,38,38,0.04)" : isLow ? "rgba(180,83,9,0.04)" : "transparent" }}>
                     <td style={{ ...tdBase, fontFamily: "monospace", fontWeight: 700, fontSize: 12 }}>
                       {p.code}
                       {p.labelBarcode && <div style={{ fontWeight: 400, fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }}>{p.labelBarcode}</div>}
                     </td>
-                    <td style={{ ...tdBase, fontWeight: 600, whiteSpace: "nowrap" }}>{p.name}</td>
+                    <td style={{ ...tdBase, fontWeight: 600, whiteSpace: "nowrap" }}>
+                      {p.name}
+                      <BatchToggle count={stockBatches.of(p.id).length} open={stockBatches.isOpen(p.id)} onClick={() => stockBatches.toggle(p.id)} />
+                    </td>
                     <td style={tdBase}>{p.brand}</td>
                     <td style={tdBase}>
                       <span style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", fontSize: 11, padding: "2px 8px", borderRadius: 6 }}>{p.category}</span>
@@ -3191,6 +3186,7 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
                         </button>
                         <button onClick={() => setLabelProduct(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Print barcode label"><Tag size={14} /></button>
                         <button onClick={() => setEditProduct(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Edit"><Edit2 size={14} /></button>
+                        <button onClick={() => setOldStockProduct(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Add old stock"><PackagePlus size={14} /></button>
                         <button onClick={() => setBatchesProduct(p)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4 }} title="Purchase batches and stock history">
                           <Layers size={14} />
                         </button>
@@ -3198,6 +3194,14 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
                       </div>
                     </td>
                   </tr>
+                  {stockBatches.isOpen(p.id) && stockBatches.of(p.id).length > 1 && (
+                    <tr>
+                      <td colSpan={13} style={{ ...tdBase, padding: "0 12px 8px" }}>
+                        <BatchPanel kind="accessory" batches={stockBatches.of(p.id)} onChanged={() => { void stockBatches.reload(); void reloadProducts(); }} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -3234,9 +3238,25 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
       )}
       {renaming && <RenameProductsModal products={accessories} onClose={() => setRenaming(false)} />}
       {batchesProduct && <ProductBatchesModal product={batchesProduct} onClose={() => setBatchesProduct(null)} />}
+      {oldStockProduct && (
+        <AddOldStockModal
+          kind="accessory"
+          itemId={oldStockProduct.id}
+          name={oldStockProduct.name}
+          stock={oldStockProduct.stock}
+          onClose={() => setOldStockProduct(null)}
+          onDone={() => {
+            const id = oldStockProduct.id;
+            setOldStockProduct(null);
+            void reloadProducts();
+            void stockBatches.reload().then(() => { if (!stockBatches.isOpen(id)) stockBatches.toggle(id); });
+          }}
+        />
+      )}
       {labelProduct && (
         <BarcodeLabelModal
-          code={labelProduct.labelBarcode || labelProduct.code}
+          code={pickBarcode(accessoryBarcodeOptions(labelProduct), search)}
+          barcodeOptions={accessoryBarcodeOptions(labelProduct)}
           title={labelProduct.name}
           subtitle={`${labelProduct.brand} · ${labelProduct.model}`}
           price={Rs(labelProduct.sellingPrice)}

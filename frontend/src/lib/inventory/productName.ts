@@ -239,12 +239,20 @@ function skuModel(device: string): string {
 
 /**
  * A SKU in the shop's style: model, part, brand. M02S-D-CROWN, or M02S-D with no
- * brand. Stays free of the rest of the catalogue by counting up: M02S-D-CROWN-2.
+ * brand. The model comes from the part's name, since compatible devices can list
+ * anything it fits. Stays free of the rest of the catalogue by counting up:
+ * M02S-D-CROWN-2.
  */
 export function suggestPartSku(part: PartNameParts, taken: Iterable<string>): string {
   const base = words(partBaseName(part.name, part.brand));
-  const main = mainDevice(part.compatibleWith.filter(d => d.trim()), new Set(base.map(wordKey)));
-  const model = main ? skuModel(main) : skuPiece(base.find(w => /\d/.test(w)) ?? base[0] ?? "");
+  // What comes before the part itself: "Samsung M02s" out of "Samsung M02s Display".
+  const typeAt = base.findIndex(w => isPartTypeWord(w, part.category));
+  const before = typeAt >= 0 ? base.slice(0, typeAt) : base;
+  const digitAt = before.findIndex(w => /\d/.test(w));
+  const named = typeAt >= 0 ? before : digitAt >= 0 ? before.slice(0, digitAt + 1) : before.slice(0, 1);
+  // A name with no model in it ("Display") falls back on the devices it fits.
+  const devices = part.compatibleWith.filter(d => d.trim());
+  const model = skuModel(named.join(" ")) || (devices.length ? skuModel(mainDevice(devices, new Set(base.map(wordKey)))) : skuPiece(base[0] ?? ""));
   if (!model) return "";
   const sku = [model, PART_SKU_CODES[part.category] ?? "OT", skuPiece(part.brand ?? "")].filter(Boolean).join("-");
   const used = new Set([...taken].map(s => s.trim().toUpperCase()));

@@ -9,6 +9,7 @@ import { printLabelNode } from "@/cashier/utils/printLabel";
 import { SHOP_DETAILS } from "@/lib/shop";
 import LabelRender from "@/cashier/components/shared/LabelRender";
 import { fetchTemplateForLayout, fetchRepairTag, type BarcodeTemplate } from "@/lib/inventory/barcodeTemplates";
+import type { BarcodeOption } from "@/lib/inventory/accessoryScan";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 const PX_PER_MM = 96 / 25.4;
@@ -23,6 +24,11 @@ const MIN_BAR_HEIGHT = 14;
 interface BarcodeLabelModalProps {
   /** Value to encode as-is (IMEI, product code, job id...) — no prefix is added here. */
   code: string;
+  /**
+   * Other barcodes this item can print, e.g. a supplier's. With more than one the
+   * dialog lets you switch, and `code` is the one it starts on.
+   */
+  barcodeOptions?: BarcodeOption[];
   /** Short line printed above the barcode, e.g. item name or device model. */
   title: string;
   /** Optional short line printed below the barcode, e.g. price or customer name. */
@@ -119,8 +125,9 @@ interface BarcodeLabelModalProps {
  * until it fits. Runs for both axes since a narrower label (38mm) can
  * overflow sideways even when a wider one (50mm) had enough slack.
  */
-export default function BarcodeLabelModal({ code, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, price, deviceName, modelNumber, accessory, part, passcode, phone, outsideDealer = false, silent = false, ask = false, onReady, onClose }: BarcodeLabelModalProps) {
+export default function BarcodeLabelModal({ code: startingCode, barcodeOptions, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, price, deviceName, modelNumber, accessory, part, passcode, phone, outsideDealer = false, silent = false, ask = false, onReady, onClose }: BarcodeLabelModalProps) {
   const hasPasscode = !!passcode && passcode.trim() !== "";
+  const [code, setCode] = useState(startingCode);
   const { barcodeSettings: s } = useInventory();
   const labelRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -502,6 +509,28 @@ export default function BarcodeLabelModal({ code, title, subtitle, variant = "si
               <span style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: ff, lineHeight: 1.5 }}>
                 This doesn&apos;t reliably fit on a {labelW}×{labelH}mm label — content will still overflow slightly. Try a larger label, a shorter code, or turn off &quot;Show Text Below&quot; in Admin → Barcode.
               </span>
+            </div>
+          )}
+
+          {barcodeOptions && barcodeOptions.length > 1 && (
+            <div style={{ width: "100%" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6, fontFamily: ff }}>Barcode to print</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {barcodeOptions.map(o => {
+                  const on = o.value === code;
+                  return (
+                    <button
+                      key={o.value}
+                      onClick={() => setCode(o.value)}
+                      aria-pressed={on}
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "7px 10px", borderRadius: 8, border: `1px solid ${on ? "var(--accent)" : "var(--border)"}`, background: on ? "var(--accent-dim)" : "transparent", color: "var(--text-primary)", cursor: "pointer", fontFamily: ff, fontSize: 12, textAlign: "left" }}
+                    >
+                      <span style={{ fontWeight: 600, flexShrink: 0 }}>{o.label}</span>
+                      <span style={{ fontFamily: "monospace", fontSize: 11.5, overflowWrap: "anywhere", textAlign: "right" }}>{o.value}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 

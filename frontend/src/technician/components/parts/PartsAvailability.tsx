@@ -188,7 +188,8 @@ export default function PartsAvailability() {
     if (search) {
       const q = search.toLowerCase();
       if (!p.name.toLowerCase().includes(q) && !p.sku.toLowerCase().includes(q) &&
-          !p.compatibleWith.some(c => c.toLowerCase().includes(q))) return false;
+          !p.compatibleWith.some(c => c.toLowerCase().includes(q)) &&
+          !(p.barcodes ?? []).some(b => b.toLowerCase().includes(q))) return false;
     }
     return true;
   });

@@ -2,6 +2,7 @@
 
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { fetchAllRows } from "@/lib/supabase/fetchAll";
+import type { BatchKind, StockBatch } from "./batchRows";
 
 /**
  * Supplier invoices, purchase batches and supplier payments — the data side of
@@ -91,8 +92,6 @@ export interface NewPartDraft {
   category: string;
   brand: string;
   compatibleWith: string[];
-  /** What was typed for the part, e.g. Display. The name is built from it. */
-  partWord: string;
   reorderLevel: number;
 }
 
@@ -103,6 +102,9 @@ export interface PurchaseItem {
   newProduct: NewProductDraft | null;
   partId: number | null;
   newPart: NewPartDraft | null;
+  supplierBarcode: string;
+  /** Devices this line adds to an existing part when the invoice is finalised. */
+  addDevices: string[];
   description: string;
   qty: number;
   receivedQty: number;
@@ -308,7 +310,7 @@ const toNewPart = (v: unknown): NewPartDraft | null => {
   return {
     name: s(r.name), sku: s(r.sku), category: s(r.category) || "Other", brand: s(r.brand),
     compatibleWith: Array.isArray(r.compatible_with) ? (r.compatible_with as unknown[]).map(String) : [],
-    partWord: s(r.part_word), reorderLevel: r.reorder_level == null ? 5 : n(r.reorder_level),
+    reorderLevel: r.reorder_level == null ? 5 : n(r.reorder_level),
   };
 };
 
@@ -322,7 +324,8 @@ const toPartBatch = (r: Row): PartBatch => ({
 
 const toItem = (r: Row): PurchaseItem => ({
   id: n(r.id), invoiceId: n(r.invoice_id), productId: nn(r.product_id), newProduct: toNewProduct(r.new_product),
-  partId: nn(r.part_id), newPart: toNewPart(r.new_part),
+  partId: nn(r.part_id), newPart: toNewPart(r.new_part), supplierBarcode: s(r.supplier_barcode),
+  addDevices: Array.isArray(r.add_devices) ? (r.add_devices as unknown[]).map(String) : [],
   description: s(r.description), qty: n(r.qty), receivedQty: n(r.received_qty), unitCost: n(r.unit_cost),
   expectedSellPrice: n(r.expected_sell_price), discount: n(r.discount), taxPct: n(r.tax_pct),
   lineTotal: n(r.line_total), updateSellingPrice: !!r.update_selling_price,
@@ -466,6 +469,62 @@ export async function fetchPartMovements(partId: string, limit = 100): Promise<P
     }));
 }
 
+/**
+ * Every item's batches with stock left, for the expanding rows. Empty rather than
+ * an error if the tables aren't there: the list itself must still show.
+ */
+export async function fetchActiveBatches(kind: BatchKind): Promise<StockBatch[]> {
+  if (!isSupabaseConfigured()) return [];
+  const table = kind === "part" ? "repair_part_batches" : "accessory_batches";
+  const itemColumn = kind === "part" ? "part_id" : "product_id";
+  try {
+    const rows = await fetchAllRows<Row>((from, to) => sb().from(table)
+      .select("*, purchase_invoices(invoice_no)")
+      .gt("qty_available", 0).neq("status", "Reversed")
+      .order("id").range(from, to));
+    return rows.map(r => ({
+      id: n(r.id), itemId: String(r[itemColumn]), batchNo: s(r.batch_no), source: r.source as StockBatch["source"],
+      manual: r.manual === true, dateUnknown: r.date_unknown === true, supplierName: s(r.supplier_name),
+      invoiceNo: r.purchase_invoices ? s((r.purchase_invoices as Row).invoice_no) : undefined,
+      receivedOn: s(r.received_on), qtyReceived: n(r.qty_received), qtyAvailable: n(r.qty_available), unitCost: n(r.unit_cost),
+      supplierWarrantyDays: nn(r.supplier_warranty_days), note: s(r.note),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function oldStockError(error: { message: string; code?: string }): Error {
+  return new Error(/add_old|remove_old|Could not find the function/i.test(error.message)
+    ? "Old stock isn't set up in the database yet — run migration 20261107000098_add_old_stock.sql."
+    : error.message);
+}
+
+export async function addOldStock(kind: BatchKind, itemId: string | number, qty: number, unitCost: number, date: string | null, note: string): Promise<void> {
+  const args = { p_qty: qty, p_unit_cost: unitCost, p_received_on: date, p_note: note.trim() };
+  const { error } = kind === "part"
+    ? await sb().rpc("add_old_part_stock", { p_part_id: Number(itemId), ...args })
+    : await sb().rpc("add_old_accessory_stock", { p_product_id: Number(itemId), ...args });
+  if (error) throw oldStockError(error);
+}
+
+export async function removeOldStock(kind: BatchKind, batchId: number): Promise<void> {
+  const { error } = await sb().rpc(kind === "part" ? "remove_old_part_stock" : "remove_old_accessory_stock", { p_batch_id: batchId });
+  if (error) throw oldStockError(error);
+}
+
+/**
+ * Why an invoice line can't keep a supplier's barcode or added devices yet, if it
+ * can't. An older save function would ignore them without saying so.
+ */
+export async function lineExtrasProblem(): Promise<string | null> {
+  if (!isSupabaseConfigured()) return null;
+  const { error } = await sb().from("purchase_invoice_items").select("supplier_barcode, add_devices").limit(0);
+  return error
+    ? "Supplier barcodes and added devices can't be saved yet. Run migrations 20261107000096_supplier_barcodes.sql and 20261107000097_invoice_line_part_devices.sql, then reload this page."
+    : null;
+}
+
 export async function fetchTrips(): Promise<PurchaseTrip[]> {
   if (!isSupabaseConfigured()) return [];
   return check<Row[]>(await sb().from("purchase_trips").select("*")
@@ -517,6 +576,8 @@ export interface ItemDraft {
   newProduct: NewProductDraft | null;
   partId: number | null;
   newPart: NewPartDraft | null;
+  supplierBarcode: string;
+  addDevices: string[];
   description: string;
   qty: number;
   unitCost: number;
@@ -566,10 +627,12 @@ export async function savePurchaseInvoice(d: InvoiceDraft): Promise<number> {
     } : null,
     items: d.items.map(i => ({
       product_id: i.productId,
+      supplier_barcode: i.supplierBarcode.trim(),
+      add_devices: i.partId ? i.addDevices : [],
       part_id: i.partId,
       new_part: i.partId || !i.newPart ? null : {
         name: i.newPart.name.trim(), sku: i.newPart.sku.trim(), category: i.newPart.category, brand: i.newPart.brand.trim(),
-        compatible_with: i.newPart.compatibleWith, part_word: i.newPart.partWord, reorder_level: i.newPart.reorderLevel,
+        compatible_with: i.newPart.compatibleWith, reorder_level: i.newPart.reorderLevel,
       },
       new_product: i.productId ? null : i.newProduct && {
         name: i.newProduct.name.trim(), code: i.newProduct.code.trim(), category: i.newProduct.category,
@@ -656,23 +719,3 @@ export async function attachmentUrl(path: string): Promise<string | null> {
   return error ? null : data.signedUrl;
 }
 
-// ── Item codes for new products ───────────────────────────────────────────────
-
-/** "Data Cable" -> "DC". Same rule as the Add Product form. */
-export function categoryAbbr(cat: string): string {
-  return cat.split(/[\s/\-–]+/).filter(w => w.length > 0).map(w => w[0].toUpperCase()).join("");
-}
-
-/** Next free ABBR-NNN code, counting both the catalogue and codes already
- *  taken by other new lines on the same invoice. */
-export function nextItemCode(cat: string, takenCodes: string[]): string {
-  const abbr = categoryAbbr(cat);
-  if (!abbr) return "";
-  const re = new RegExp(`^${abbr}-(\d+)$`, "i");
-  let max = 0;
-  for (const c of takenCodes) {
-    const m = c.match(re);
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  }
-  return `${abbr}-${String(max + 1).padStart(3, "0")}`;
-}

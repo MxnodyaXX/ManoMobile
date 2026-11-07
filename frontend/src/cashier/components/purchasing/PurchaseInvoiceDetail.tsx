@@ -137,6 +137,8 @@ export default function PurchaseInvoiceDetail({ invoiceId, onClose, onEdit, onCh
                     {!it.productId && it.newProduct && <Badge tone="green">New product · {it.newProduct.code}</Badge>}
                     {!it.partId && it.newPart && <Badge tone="green">New repair part · {it.newPart.sku}</Badge>}
                     {it.partId && <Badge>Repair part</Badge>}
+                    {it.addDevices.length > 0 && <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{inv.status === "Draft" ? "Will add" : "Added"} devices: {it.addDevices.join(", ")}</div>}
+                    {it.supplierBarcode && <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Supplier&apos;s barcode: <span style={{ fontFamily: "monospace" }}>{it.supplierBarcode}</span></div>}
                     {it.updateSellingPrice && <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Updates the selling price on receipt</div>}
                   </td>
                   <td style={{ ...td, textAlign: "right" }}>{it.qty}</td>

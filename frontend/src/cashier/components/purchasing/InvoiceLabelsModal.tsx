@@ -9,6 +9,7 @@ import { printLabelsNode } from "@/cashier/utils/printLabel";
 import { useToast } from "@/lib/ui/toast";
 import { buildLabelRows, type LabelRow } from "@/lib/purchasing/labelRows";
 import { partLabelTokens } from "@/lib/repair/partLabel";
+import { accessoryBarcodeOptions, partBarcodeOptions } from "@/lib/inventory/accessoryScan";
 import type { InvoiceDetail } from "@/lib/purchasing/api";
 import { Btn, Modal, Rs, input } from "./ui";
 
@@ -32,6 +33,7 @@ export default function InvoiceLabelsModal({ detail, onClose }: { detail: Invoic
 
   const [copies, setCopies] = useState<Record<string, number>>(() => Object.fromEntries(rows.map(r => [r.key, r.qty])));
   const [off, setOff] = useState<Set<string>>(new Set());
+  const [printCode, setPrintCode] = useState<Record<string, string>>({});
   const [queue, setQueue] = useState<LabelRow[] | null>(null);
   const [done, setDone] = useState(0);
   const [jobSize, setJobSize] = useState(0);
@@ -45,6 +47,8 @@ export default function InvoiceLabelsModal({ detail, onClose }: { detail: Invoic
   const partLabels = labelsFor("part");
   const boxBarcodes = rows.filter(r => r.hasBoxBarcode).length;
 
+  const optionsOf = (r: LabelRow) => r.kind === "accessory" ? accessoryBarcodeOptions(r.product) : partBarcodeOptions(r.part);
+  const codeOf = (r: LabelRow) => printCode[r.key] ?? optionsOf(r)[0].value;
   const printing = queue !== null;
   const current = queue?.[0] ?? null;
 
@@ -91,6 +95,17 @@ export default function InvoiceLabelsModal({ detail, onClose }: { detail: Invoic
             <span style={{ fontFamily: "monospace" }}>{r.code}</span> · {r.qty} on this invoice{r.hasBoxBarcode ? " · box has a barcode" : ""}
           </div>
         </div>
+        {optionsOf(r).length > 1 && (
+          <select
+            value={codeOf(r)}
+            disabled={!on}
+            onChange={e => setPrintCode(c => ({ ...c, [r.key]: e.target.value }))}
+            aria-label={`Barcode for ${r.name}`}
+            style={{ ...input, width: 104, flexShrink: 0, padding: "6px 4px", fontSize: 11, opacity: on ? 1 : 0.4 }}
+          >
+            {optionsOf(r).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        )}
         <input
           type="number" min={0} max={MAX_COPIES}
           value={countOf(r)}
@@ -170,7 +185,7 @@ export default function InvoiceLabelsModal({ detail, onClose }: { detail: Invoic
         <BarcodeLabelModal
           key={current.key}
           variant="accessory"
-          code={current.product.labelBarcode || current.product.code}
+          code={codeOf(current)}
           title={current.product.name}
           subtitle={`${current.product.brand} · ${current.product.model}`}
           price={Rs(current.product.sellingPrice)}
@@ -184,7 +199,7 @@ export default function InvoiceLabelsModal({ detail, onClose }: { detail: Invoic
         <BarcodeLabelModal
           key={current.key}
           variant="part"
-          code={current.part.sku}
+          code={codeOf(current)}
           title={current.part.name}
           subtitle={current.part.category}
           part={partLabelTokens(current.part)}

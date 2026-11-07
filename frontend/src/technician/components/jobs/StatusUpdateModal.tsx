@@ -19,6 +19,8 @@ import { fetchJobTransfers, transferCost, type AgentTransfer } from "@/lib/repai
 import { useWarranty, type WarrantyScope } from "@/cashier/contexts/WarrantyContext";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
 import { requestUnitCost, typedPartCost } from "@/lib/repair/partCost";
+import { matchScannedPart } from "@/lib/inventory/accessoryScan";
+import { addPartLine, parsePartLine, savedPartLines, setPartLineQty } from "@/lib/repair/partLines";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -284,6 +286,7 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
       return {
         id: r.id,
         name: r.partName,
+        sku: r.partSku,
         qty: r.quantity,
         unitCost,
         lineTotal: unitCost * r.quantity,
@@ -333,26 +336,21 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
   // and whether the list is open.
   const [partQuery, setPartQuery] = useState("");
   const [partListOpen, setPartListOpen] = useState(false);
-  const partMatches = partQuery.trim()
-    ? catalog.filter(p => `${p.name} ${p.sku} ${p.category}`.toLowerCase().includes(partQuery.trim().toLowerCase())).slice(0, 8)
+  // An exact code first, so a scanned barcode finds its part and nothing else.
+  const scannedParts = matchScannedPart(catalog, partQuery);
+  const partMatches = scannedParts.length > 0
+    ? scannedParts.slice(0, 8)
+    : partQuery.trim()
+    ? catalog.filter(p => `${p.name} ${p.sku} ${p.category} ${(p.barcodes ?? []).join(" ")}`.toLowerCase().includes(partQuery.trim().toLowerCase())).slice(0, 8)
     : catalog.slice(0, 8);
   /**
    * Add a catalogue part as a line. Picking the same part again bumps its
    * count ("×2") rather than repeating the line — the receipt reads better
-   * and the analytics count it once per fitting either way.
+   * and the analytics count it once per fitting either way. The line remembers
+   * its SKU: another type with the same name is a different line.
    */
-  const addCataloguePart = (name: string) => {
-    setPartsUsedText(text => {
-      const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-      const i = lines.findIndex(l => l === name || l.startsWith(`${name} ×`));
-      if (i >= 0) {
-        const m = /×(\d+)$/.exec(lines[i]);
-        lines[i] = `${name} ×${(m ? Number(m[1]) : 1) + 1}`;
-      } else {
-        lines.push(name);
-      }
-      return lines.join("\n");
-    });
+  const addCataloguePart = (part: { name: string; sku: string }) => {
+    setPartsUsedText(text => addPartLine(text, part));
     setPartQuery("");
     setPartListOpen(false);
   };
@@ -360,32 +358,25 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
   /**
    * The parts named in the box, priced.
    *
-   * A line is "Name" or "Name ×N". It is matched to the catalogue by name, so
-   * a part picked from the list carries its cost into the job's margin the
-   * same way an approved request does; a part typed that the catalogue does
-   * not have is listed unpriced rather than counted as free. A line that
-   * repeats an approved request (the box is prefilled from those) is skipped,
-   * so nothing is costed twice.
+   * A line picked from the list knows its SKU, so it carries that exact part's
+   * cost into the job's margin and comes out of that part's stock. A line without
+   * one (from before this, or prefilled from an approved request) is matched by
+   * name; one the catalogue does not have is listed unpriced rather than counted
+   * as free. A line that repeats an approved request is skipped, so nothing is
+   * costed twice.
    */
   const typedPartLines = partsUsedText.split("\n").map(l => l.trim()).filter(Boolean).flatMap((line, i) => {
-    const m = /^(.*?)(?:\s*×\s*(\d+))?$/.exec(line);
-    const name = (m?.[1] ?? line).trim();
-    const qty = Math.max(1, Number(m?.[2] ?? 1));
-    if (jobPartLines.some(l => l.name.trim().toLowerCase() === name.toLowerCase())) return [];
-    const cat = catalog.find(p => p.name.trim().toLowerCase() === name.toLowerCase())
+    const { key, name, sku, qty } = parsePartLine(line);
+    if (!sku && jobPartLines.some(l => l.name.trim().toLowerCase() === name.toLowerCase())) return [];
+    const picked = sku ? catalog.find(p => p.sku === sku) : undefined;
+    const cat = picked
+      ?? catalog.find(p => p.name.trim().toLowerCase() === name.toLowerCase())
       ?? catalog.find(p => p.formerNames?.some(old => old.trim().toLowerCase() === name.toLowerCase()));
-    const unitCost = cat ? typedPartCost(cat) : 0;
-    return [{ id: `typed-${i}`, name, qty, unitCost, lineTotal: unitCost * qty, priced: !!cat, installed: true, typed: true as const, sku: cat?.sku ?? null }];
+    const unitCost = picked ? picked.costPrice : cat ? typedPartCost(cat) : 0;
+    return [{ id: `typed-${i}`, key, name, qty, unitCost, lineTotal: unitCost * qty, priced: !!cat, installed: true, typed: true as const, sku: cat?.sku ?? null }];
   });
   const allPartLines = [...jobPartLines.map(l => ({ ...l, typed: false as const })), ...typedPartLines];
-  const setTypedPartQty = (name: string, qty: number) => {
-    setPartsUsedText(text => text.split("\n").map(l => l.trim()).filter(Boolean)
-      .flatMap(l => {
-        const base = l.replace(/\s*×\s*\d+$/, "").trim();
-        if (base.toLowerCase() !== name.toLowerCase()) return [l];
-        return qty <= 0 ? [] : [qty === 1 ? base : `${base} ×${qty}`];
-      }).join("\n"));
-  };
+  const setTypedPartQty = (key: string, qty: number) => setPartsUsedText(text => setPartLineQty(text, key, qty));
   const partsCost    = allPartLines.reduce((sum, l) => sum + l.lineTotal, 0);
   const unpricedPart = allPartLines.some(l => !l.priced);
   const [futureFaults, setFutureFaults]   = useState("");
@@ -601,7 +592,7 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
           description: "Completed directly — the job was never started in the system, so start and finish are the same moment",
         });
       }
-      const partsList = partsUsedText.split("\n").map(s => s.trim()).filter(Boolean);
+      const partsList = savedPartLines(partsUsedText);
       if (partsList.length) completedPatch.partsUsed = partsList;
       if (futureFaults.trim()) completedPatch.futureFaults = futureFaults.trim();
       // What the technician charged. Written unconditionally — including zero,
@@ -1516,8 +1507,16 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                           onChange={e => { setPartQuery(e.target.value); setPartListOpen(true); }}
                           onFocus={() => setPartListOpen(true)}
                           onBlur={() => window.setTimeout(() => setPartListOpen(false), 150)}
-                          onKeyDown={e => { if (e.key === "Enter" && partMatches[0]) { e.preventDefault(); addCataloguePart(partMatches[0].name); } if (e.key === "Escape") setPartListOpen(false); }}
-                          placeholder="Search parts by name, SKU or category…"
+                          onKeyDown={e => {
+                            if (e.key === "Enter" && partMatches[0]) {
+                              e.preventDefault();
+                              // Several parts sharing one barcode: the list asks which.
+                              if (scannedParts.length > 1) setPartListOpen(true);
+                              else addCataloguePart(partMatches[0]);
+                            }
+                            if (e.key === "Escape") setPartListOpen(false);
+                          }}
+                          placeholder="Search parts by name, SKU, category or scan a barcode…"
                           style={inputStyle}
                         />
                         {partListOpen && partMatches.length > 0 && (
@@ -1527,7 +1526,7 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                                 key={p.id}
                                 type="button"
                                 onMouseDown={e => e.preventDefault()}
-                                onClick={() => addCataloguePart(p.name)}
+                                onClick={() => addCataloguePart(p)}
                                 style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 11px", border: "none", borderBottom: "1px solid var(--border)", background: "transparent", cursor: "pointer", textAlign: "left", fontFamily: ff }}
                                 onMouseEnter={e => { e.currentTarget.style.background = "var(--bg-secondary)"; }}
                                 onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
@@ -1565,16 +1564,16 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
                             </div>
                             {l.typed && (
                               <div style={{ display: "inline-flex", alignItems: "center", gap: 2, border: "1px solid var(--border)", borderRadius: 7, padding: "0 2px" }}>
-                                <button type="button" onClick={() => setTypedPartQty(l.name, l.qty - 1)} title={l.qty === 1 ? "Remove" : "One fewer"} style={{ width: 22, height: 22, border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>−</button>
+                                <button type="button" onClick={() => setTypedPartQty(l.key, l.qty - 1)} title={l.qty === 1 ? "Remove" : "One fewer"} style={{ width: 22, height: 22, border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>−</button>
                                 <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-primary)", minWidth: 14, textAlign: "center" }}>{l.qty}</span>
-                                <button type="button" onClick={() => setTypedPartQty(l.name, l.qty + 1)} title="One more" style={{ width: 22, height: 22, border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>+</button>
+                                <button type="button" onClick={() => setTypedPartQty(l.key, l.qty + 1)} title="One more" style={{ width: 22, height: 22, border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>+</button>
                               </div>
                             )}
                             <span style={{ fontSize: 12.5, fontWeight: 700, color: l.priced ? "var(--text-primary)" : "var(--text-muted)", minWidth: 70, textAlign: "right" }}>
                               {l.priced ? `Rs. ${l.lineTotal.toLocaleString()}` : "—"}
                             </span>
                             {l.typed && (
-                              <button type="button" onClick={() => setTypedPartQty(l.name, 0)} title="Take this part off the job" aria-label={`Remove ${l.name}`} style={{ width: 22, height: 22, border: "none", background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>×</button>
+                              <button type="button" onClick={() => setTypedPartQty(l.key, 0)} title="Take this part off the job" aria-label={`Remove ${l.name}`} style={{ width: 22, height: 22, border: "none", background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>×</button>
                             )}
                           </div>
                         ))}
