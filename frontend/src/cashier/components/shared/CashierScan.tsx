@@ -58,6 +58,7 @@ export default function CashierScan({ onOpenJob, onIssueJob }: {
           variant="part"
           code={pickBarcode(partBarcodeOptions(label.part), label.scanned)}
           barcodeOptions={partBarcodeOptions(label.part)}
+          displayCode={label.part.sku}
           title={label.part.name}
           subtitle={label.part.category}
           part={partLabelTokens(label.part)}

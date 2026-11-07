@@ -29,6 +29,8 @@ interface BarcodeLabelModalProps {
    * dialog lets you switch, and `code` is the one it starts on.
    */
   barcodeOptions?: BarcodeOption[];
+  /** What a design prints as {{code}}, when that isn't what the bars encode. */
+  displayCode?: string;
   /** Short line printed above the barcode, e.g. item name or device model. */
   title: string;
   /** Optional short line printed below the barcode, e.g. price or customer name. */
@@ -125,7 +127,7 @@ interface BarcodeLabelModalProps {
  * until it fits. Runs for both axes since a narrower label (38mm) can
  * overflow sideways even when a wider one (50mm) had enough slack.
  */
-export default function BarcodeLabelModal({ code: startingCode, barcodeOptions, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, price, deviceName, modelNumber, accessory, part, passcode, phone, outsideDealer = false, silent = false, ask = false, onReady, onClose }: BarcodeLabelModalProps) {
+export default function BarcodeLabelModal({ code: startingCode, barcodeOptions, displayCode, title, subtitle, variant = "simple", jobId, dealerJobNo, fault, imei, price, deviceName, modelNumber, accessory, part, passcode, phone, outsideDealer = false, silent = false, ask = false, onReady, onClose }: BarcodeLabelModalProps) {
   const hasPasscode = !!passcode && passcode.trim() !== "";
   const [code, setCode] = useState(startingCode);
   const { barcodeSettings: s } = useInventory();
@@ -317,7 +319,8 @@ export default function BarcodeLabelModal({ code: startingCode, barcodeOptions, 
       <LabelRender
         elements={design.elements}
         data={{
-          code,
+          code: displayCode ?? code,
+          barcodeValue: code,
           jobId: jobId ?? code,
           dealerJobNo: dealerJobNo ?? "",
           customer: subtitle ?? "",

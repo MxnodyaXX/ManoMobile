@@ -8,6 +8,7 @@ import {
 import { useParts, PART_CATEGORIES, type SparePart, type PartCategory } from "@/cashier/contexts/PartsContext";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import { useTech, type PartRequestStatus } from "@/technician/contexts/TechContext";
+import { partCodeMatches } from "@/lib/inventory/accessoryScan";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -189,7 +190,8 @@ export default function PartsAvailability() {
       const q = search.toLowerCase();
       if (!p.name.toLowerCase().includes(q) && !p.sku.toLowerCase().includes(q) &&
           !p.compatibleWith.some(c => c.toLowerCase().includes(q)) &&
-          !(p.barcodes ?? []).some(b => b.toLowerCase().includes(q))) return false;
+          !(p.barcodes ?? []).some(b => b.toLowerCase().includes(q)) &&
+          !partCodeMatches(p, q)) return false;
     }
     return true;
   });

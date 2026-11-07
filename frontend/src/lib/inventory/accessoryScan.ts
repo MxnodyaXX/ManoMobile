@@ -59,9 +59,26 @@ function withSupplierCodes(own: BarcodeOption, supplierCodes: string[]): Barcode
 export const accessoryBarcodeOptions = (p: Pick<AccessoryProduct, "labelBarcode" | "code" | "barcodes">) =>
   withSupplierCodes({ value: p.labelBarcode || p.code, label: "Our label" }, p.barcodes);
 
-/** The barcodes a label for this part can print. The shop's own comes first. */
-export const partBarcodeOptions = (p: Pick<SparePart, "sku" | "barcodes">) =>
-  withSupplierCodes({ value: p.sku, label: "Our SKU" }, p.barcodes ?? []);
+/**
+ * What a part's own barcode encodes: its number, as five digits. An SKU can be too
+ * long for a 38mm label to hold bars a scanner can read. The number is short,
+ * unique and never changes, and leading zeros don't matter to a scan, so 01012
+ * finds part 1012. Past 99999 it simply grows. A part with no number yet uses its SKU.
+ */
+export const partScanCode = (p: Pick<SparePart, "sku" | "partNo">) =>
+  p.partNo ? p.partNo.padStart(5, "0") : p.sku;
+
+/** The barcodes a label for this part can print. The short number comes first. */
+export function partBarcodeOptions(p: Pick<SparePart, "sku" | "partNo" | "barcodes">): BarcodeOption[] {
+  const own = partScanCode(p);
+  const skuToo = own === p.sku ? [] : [{ value: p.sku, label: "SKU" }];
+  const [first, ...suppliers] = withSupplierCodes({ value: own, label: own === p.sku ? "SKU" : "Part number" }, p.barcodes ?? []);
+  return [first, ...skuToo, ...suppliers];
+}
+
+/** Whether a part's own codes or its barcodes match what's in a search box. */
+export const partCodeMatches = (p: SparePart, search: string) =>
+  matchScannedPart([p], search).length > 0;
 
 /** Starts on what was scanned, if it's one of these. Otherwise the shop's own. */
 export function pickBarcode(options: BarcodeOption[], scanned = ""): string {

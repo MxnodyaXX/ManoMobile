@@ -200,6 +200,7 @@ export default function InvoiceLabelsModal({ detail, onClose }: { detail: Invoic
           key={current.key}
           variant="part"
           code={codeOf(current)}
+          displayCode={current.part.sku}
           title={current.part.name}
           subtitle={current.part.category}
           part={partLabelTokens(current.part)}

@@ -61,6 +61,7 @@ const ACCESSORY_SAMPLE: LabelData = {
 /** A part label sits on a parts bin — no job, no customer, no selling price. */
 const PART_SAMPLE: LabelData = {
   code: "SCR-0042",
+  barcodeValue: "01042",
   partNo: "1042",
   title: "Redmi 9C Display",
   subtitle: "Screen",

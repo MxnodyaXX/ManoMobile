@@ -13,7 +13,7 @@ import { useInventory } from "@/cashier/contexts/InventoryContext";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useToast } from "@/lib/ui/toast";
-import { matchScannedAccessory, matchScannedPart, normalizeScanCode } from "@/lib/inventory/accessoryScan";
+import { matchScannedAccessory, matchScannedPart, normalizeScanCode, partCodeMatches } from "@/lib/inventory/accessoryScan";
 import {
   PAY_METHODS, WARRANTY_START_LABEL, fetchTrips, finalisePurchaseInvoice, lineExtrasProblem, lineTotalOf, savePurchaseInvoice,
   savePurchaseTrip, today, uploadInvoiceAttachment, warrantyText,
@@ -480,7 +480,7 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
             const partHits = !q ? [] : parts.filter(x =>
               x.name.toLowerCase().includes(q) || x.sku.toLowerCase().includes(q) || (x.partNo ?? "").includes(q) ||
               (x.brand ?? "").toLowerCase().includes(q) || x.compatibleWith.some(c => c.toLowerCase().includes(q)) ||
-              (x.barcodes ?? []).some(b => b.toLowerCase().includes(q))).slice(0, 8);
+              (x.barcodes ?? []).some(b => b.toLowerCase().includes(q)) || partCodeMatches(x, q)).slice(0, 8);
 
             const removeLine = () => setLines(prev => prev.length > 1 ? prev.filter(x => x.key !== l.key) : prev);
 

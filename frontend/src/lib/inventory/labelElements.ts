@@ -63,6 +63,9 @@ export type LabelElement = TextElement | ImageElement | BarcodeElement | LineEle
  */
 export interface LabelData {
   code: string;
+  /** What the bars encode, when that isn't `code`: a part label shows its SKU as
+   *  {{code}} but encodes its short number. */
+  barcodeValue?: string;
   jobId?: string;
   /** The job number on the originating dealer's own docket, when the device
    *  came from another shop. Blank for Mano Mobile's own jobs — same rule
@@ -132,7 +135,7 @@ export interface LabelData {
 export const LABEL_TOKENS: { token: string; label: string; layouts?: string[] }[] = [
   { token: "{{jobId}}",       label: "Job number", layouts: ["repair"] },
   { token: "{{dealerJobNo}}", label: "Dealer's job number", layouts: ["repair"] },
-  { token: "{{code}}",        label: "Barcode value" },
+  { token: "{{code}}",        label: "Barcode value (SKU on part labels)" },
   { token: "{{customer}}",    label: "Customer name", layouts: ["repair"] },
   { token: "{{phone}}",       label: "Customer phone", layouts: ["repair"] },
   { token: "{{device}}",      label: "Device brand & model", layouts: ["repair", "device"] },

@@ -16,7 +16,7 @@ import { useMyPermissions } from "@/lib/settings/staffRules";
 import { partBaseName, partGroupKey, setPartBrand, suggestPartSku } from "@/lib/inventory/productName";
 import RenamePartsModal from "./RenamePartsModal";
 import { partLabelTokens } from "@/lib/repair/partLabel";
-import { partBarcodeOptions, pickBarcode } from "@/lib/inventory/accessoryScan";
+import { partBarcodeOptions, partCodeMatches, partScanCode, pickBarcode } from "@/lib/inventory/accessoryScan";
 import {
   useRackLayout, saveRackLayout, shelfCode, bayExists, bayCode, rowLetter,
   isHidden, RACK_MAX_ROWS, RACK_MAX_COLS, type RackLayout,
@@ -811,7 +811,7 @@ function BulkPartLabelsModal({ parts, onClose }: { parts: SparePart[]; onClose: 
                           </div>
                           {partBarcodeOptions(p).length > 1 && (
                             <select
-                              value={printCode[p.id] ?? p.sku}
+                              value={printCode[p.id] ?? partScanCode(p)}
                               disabled={!on}
                               onChange={e => setPrintCode(c => ({ ...c, [p.id]: e.target.value }))}
                               aria-label={`Barcode for ${p.name}`}
@@ -852,7 +852,8 @@ function BulkPartLabelsModal({ parts, onClose }: { parts: SparePart[]; onClose: 
         <BarcodeLabelModal
           key={current.id}
           variant="part"
-          code={printCode[current.id] ?? current.sku}
+          code={printCode[current.id] ?? partScanCode(current)}
+          displayCode={current.sku}
           title={current.name}
           subtitle={current.category}
           part={partLabelTokens(current)}
@@ -908,7 +909,7 @@ function PartsManager() {
     if (catFilter !== "All" && p.category !== catFilter) return false;
     if (search) {
       const q = search.toLowerCase();
-      if (!p.name.toLowerCase().includes(q) && !p.sku.toLowerCase().includes(q) && !(p.partNo ?? "").includes(q) && !(p.barcodes ?? []).some(b => b.toLowerCase().includes(q))) return false;
+      if (!p.name.toLowerCase().includes(q) && !p.sku.toLowerCase().includes(q) && !(p.partNo ?? "").includes(q) && !(p.barcodes ?? []).some(b => b.toLowerCase().includes(q)) && !partCodeMatches(p, q)) return false;
     }
     return true;
   });
@@ -1200,6 +1201,7 @@ function PartsManager() {
           variant="part"
           code={pickBarcode(partBarcodeOptions(labelPart), search)}
           barcodeOptions={partBarcodeOptions(labelPart)}
+          displayCode={labelPart.sku}
           title={labelPart.name}
           subtitle={labelPart.category}
           part={partLabelTokens(labelPart)}

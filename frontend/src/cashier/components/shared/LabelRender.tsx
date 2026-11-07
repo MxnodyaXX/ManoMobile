@@ -139,7 +139,7 @@ function ElementBody({ el, data, format, barWidth }: {
       );
 
     case "barcode": {
-      const value = resolveTokens("{{code}}", data) || data.code;
+      const value = data.barcodeValue || resolveTokens("{{code}}", data) || data.code;
       // EAN-13 only encodes 12-13 digits; anything else falls back so the
       // element renders instead of react-barcode throwing mid-print.
       const usable = format === "EAN13" && !/^\d{12,13}$/.test(value) ? "CODE128" : format;

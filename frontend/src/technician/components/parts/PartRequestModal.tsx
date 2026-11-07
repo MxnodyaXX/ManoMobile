@@ -5,6 +5,7 @@ import { Search, Package, X, Plus, Minus, CheckCircle } from "lucide-react";
 import { useTech } from "@/technician/contexts/TechContext";
 import { useParts, type SparePart } from "@/cashier/contexts/PartsContext";
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
+import { partCodeMatches } from "@/lib/inventory/accessoryScan";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -29,7 +30,8 @@ export default function PartRequestModal({ job, onClose }: { job: RepairJob; onC
       p.sku.toLowerCase().includes(q) ||
       p.category.toLowerCase().includes(q) ||
       p.compatibleWith.some(c => c.toLowerCase().includes(q)) ||
-      (p.barcodes ?? []).some(b => b.toLowerCase().includes(q))
+      (p.barcodes ?? []).some(b => b.toLowerCase().includes(q)) ||
+      partCodeMatches(p, q)
     );
   });
 
