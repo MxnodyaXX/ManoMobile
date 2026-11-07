@@ -97,6 +97,54 @@ function BarcodeBox({ children }: { children: ReactNode }) {
   );
 }
 
+const PT_TO_MM = 25.4 / 72;
+const LINE_HEIGHT = 1.15;
+// Below this a label's text can't be read, so it clips rather than shrinks further.
+const MIN_TEXT_SCALE = 0.55;
+
+/**
+ * Text that stays whole inside its box. A real value can be far longer than the
+ * sample it was designed with: a long SKU wrapped onto a second line its box had
+ * no room for, and the first line was lost behind whatever sat above it. A box
+ * only tall enough for one line now stays on one line, and anything too big
+ * shrinks to fit. The size is set on the element, so the printed copy has it too.
+ */
+function FittedText({ el, text }: { el: Extract<LabelElement, { type: "text" }>; text: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  const oneLine = el.h < el.fontSize * PT_TO_MM * LINE_HEIGHT * 2;
+  useLayoutEffect(() => {
+    const node = box.current;
+    if (!node) return;
+    let scale = 1;
+    node.style.fontSize = `${el.fontSize}pt`;
+    const tooBig = () => node.scrollWidth > node.clientWidth + 0.5 || node.scrollHeight > node.clientHeight + 0.5;
+    while (tooBig() && scale > MIN_TEXT_SCALE) {
+      scale -= 0.05;
+      node.style.fontSize = `${el.fontSize * scale}pt`;
+    }
+  });
+  return (
+    <div ref={box} style={{
+      width: "100%", height: "100%",
+      display: "flex", alignItems: "center",
+      justifyContent: el.align === "center" ? "center" : el.align === "right" ? "flex-end" : "flex-start",
+      fontSize: `${el.fontSize}pt`,
+      fontWeight: el.bold ? 800 : 500,
+      color: el.color,
+      fontFamily: el.fontFamily ?? DEFAULT_FONT_FAMILY,
+      lineHeight: LINE_HEIGHT,
+      textAlign: el.align,
+      overflow: "hidden",
+      // Long customer names must not push the box wider and shove the
+      // barcode off the label; they fit or clip at the box edge instead.
+      whiteSpace: oneLine ? "pre" : "pre-wrap",
+      wordBreak: oneLine ? "normal" : "break-word",
+    }}>
+      {text}
+    </div>
+  );
+}
+
 function ElementBody({ el, data, format, barWidth }: {
   el: LabelElement;
   data: LabelData;
@@ -105,26 +153,7 @@ function ElementBody({ el, data, format, barWidth }: {
 }) {
   switch (el.type) {
     case "text": {
-      const text = resolveTokens(el.text, data);
-      return (
-        <div style={{
-          width: "100%", height: "100%",
-          display: "flex", alignItems: "center",
-          justifyContent: el.align === "center" ? "center" : el.align === "right" ? "flex-end" : "flex-start",
-          fontSize: `${el.fontSize}pt`,
-          fontWeight: el.bold ? 800 : 500,
-          color: el.color,
-          fontFamily: el.fontFamily ?? DEFAULT_FONT_FAMILY,
-          lineHeight: 1.15,
-          textAlign: el.align,
-          // Long customer names must not push the box wider and shove the
-          // barcode off the label; they clip at the box edge instead.
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-        }}>
-          {text}
-        </div>
-      );
+      return <FittedText el={el} text={resolveTokens(el.text, data)} />;
     }
 
     case "image":
