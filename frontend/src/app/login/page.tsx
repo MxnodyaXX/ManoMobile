@@ -113,7 +113,7 @@ function LoginForm() {
           type="submit"
           disabled={busy}
           style={{
-            width: "100%", padding: "11px", borderRadius: 10, border: "none",
+            width: "100%", padding: "13px", borderRadius: 10, border: "none",
             background: "var(--accent)", color: "var(--accent-fg)",
             fontSize: 14, fontWeight: 700, fontFamily: ff,
             cursor: busy ? "wait" : "pointer", opacity: busy ? 0.7 : 1,

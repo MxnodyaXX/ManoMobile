@@ -44,6 +44,14 @@ export interface SparePart {
   location: string;
   /** Who this stock line is bought from. Blank when not recorded. */
   supplier?: string;
+  /** Names it had before, so older jobs that typed one can still be costed.
+   *  Undefined until migration 20261107000093 is applied. */
+  formerNames?: string[];
+  /** Who made this type, e.g. Crown. Also in the name.
+   *  Undefined until migration 20261107000094 is applied. */
+  brand?: string;
+  /** Its cost when batches began, for older jobs that only typed its name. */
+  legacyCost?: number;
 }
 
 export const PART_CATEGORIES: PartCategory[] = [
@@ -56,6 +64,8 @@ export type PartRequestStatus = "Pending" | "Approved" | "Issued" | "Rejected";
 
 export interface PartRequest {
   id: string;
+  /** What each unit cost when issued. Undefined until then, or before migration 20261107000095. */
+  unitCost?: number;
   jobId: string;
   jobDevice: string;
   technicianName: string;

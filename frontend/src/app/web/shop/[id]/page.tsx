@@ -30,7 +30,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="mx-auto max-w-7xl px-5 pb-24 pt-8 md:px-8">
-      <Link href="/web/shop" className="inline-flex items-center gap-2 text-[12px] text-neutral-500 hover:text-neutral-950">
+      <Link href="/web/shop" className="inline-flex min-h-10 items-center gap-2 text-[12px] text-neutral-500 hover:text-neutral-950">
         <ArrowLeft size={14} /> Back to shop
       </Link>
 

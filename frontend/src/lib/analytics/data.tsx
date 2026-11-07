@@ -14,6 +14,7 @@ import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/Access
 import { useParts, type SparePart, type PartRequest } from "@/cashier/contexts/PartsContext";
 import { useAdmin, type Supplier, type PurchaseOrder } from "@/admin/contexts/AdminContext";
 import { fetchPurchaseAnalytics } from "@/lib/purchasing/analytics";
+import { fetchTrips, type PurchaseTrip } from "@/lib/purchasing/api";
 
 type PurchaseAnalytics = Awaited<ReturnType<typeof fetchPurchaseAnalytics>>;
 
@@ -39,6 +40,8 @@ export interface SaleLine {
   unitPrice: number;
   discount: number;
   lineTotal: number;
+  /** What each unit cost when sold. Undefined where that isn't on record. */
+  unitCost?: number;
 }
 
 export interface CreditEntryLite {
@@ -84,6 +87,8 @@ export interface SoldDevice { id: number; invoiceNo: string; buyingPrice: number
 export interface AnalyticsData {
   sales: SaleTx[];
   saleLines: SaleLine[];
+  /** Buying trips, for what they cost. Empty before migration 20261107000095. */
+  trips: PurchaseTrip[];
   creditEntries: CreditEntryLite[];
   cashReturns: CashReturn[];
   sms: SmsRecord[];
@@ -134,11 +139,13 @@ async function fetchSoldDevices(): Promise<SoldDevice[]> {
 async function fetchAllSaleLines(): Promise<SaleLine[]> {
   const data = await fetchAllRows<Row>((from, to) => sbc()
     .from("sale_items")
-    .select("id, invoice_no, kind, reference_id, description, qty, unit_price, discount, line_total")
+    // "*" so this still reads before migration 20261107000095 adds unit_cost.
+    .select("*")
     .order("id", { ascending: false })
     .range(from, to));
   return data.map(r => ({
     id: Number(r.id), invoiceNo: String(r.invoice_no), kind: r.kind as SaleItemKind, referenceId: str(r.reference_id),
+    unitCost: r.unit_cost == null ? undefined : num(r.unit_cost),
     description: String(r.description ?? ""), qty: num(r.qty), unitPrice: num(r.unit_price), discount: num(r.discount), lineTotal: num(r.line_total),
   }));
 }
@@ -193,9 +200,11 @@ async function readLedgers() {
   const safe = async <T,>(name: string, p: Promise<T>, empty: T): Promise<T> => {
     try { return await p; } catch (e) { problems.push(`${name}: ${e instanceof Error ? e.message : String(e)}`); return empty; }
   };
-  const [sales, saleLines, creditEntries, cashReturns, sms, events, soldDevices, purchasing] = await Promise.all([
+  const [sales, saleLines, trips, creditEntries, cashReturns, sms, events, soldDevices, purchasing] = await Promise.all([
     safe("sales", fetchSales(), [] as SaleTx[]),
     safe("sale lines", fetchAllSaleLines(), [] as SaleLine[]),
+    // Not reported as a problem: no trips table just means no trips yet.
+    fetchTrips().catch(() => [] as PurchaseTrip[]),
     safe("credit entries", fetchAllCreditEntries(), [] as CreditEntryLite[]),
     safe("cash returns", fetchCashReturns(5000), [] as CashReturn[]),
     safe("SMS log", fetchSms(), [] as SmsRecord[]),
@@ -205,7 +214,7 @@ async function readLedgers() {
     // read; AdminContext's in-memory lists stand in.
     safe("supplier purchases", fetchPurchaseAnalytics(), null as PurchaseAnalytics | null),
   ]);
-  return { data: { sales, saleLines, creditEntries, cashReturns, sms, events, soldDevices, purchasing }, problems };
+  return { data: { sales, saleLines, trips, creditEntries, cashReturns, sms, events, soldDevices, purchasing }, problems };
 }
 
 export function AnalyticsProvider({ children }: { children: ReactNode }) {
@@ -219,8 +228,8 @@ export function AnalyticsProvider({ children }: { children: ReactNode }) {
 
   // `loaded` rides with the data it describes, so there is one state write
   // per read rather than a loading flag set from inside an effect.
-  const [own, setOwn] = useState<{ loaded: boolean; sales: SaleTx[]; saleLines: SaleLine[]; creditEntries: CreditEntryLite[]; cashReturns: CashReturn[]; sms: SmsRecord[]; events: JobEvent[]; soldDevices: SoldDevice[]; purchasing: PurchaseAnalytics | null }>({
-    loaded: !configured, sales: [], saleLines: [], creditEntries: [], cashReturns: [], sms: [], events: [], soldDevices: [], purchasing: null,
+  const [own, setOwn] = useState<{ loaded: boolean; sales: SaleTx[]; saleLines: SaleLine[]; trips: PurchaseTrip[]; creditEntries: CreditEntryLite[]; cashReturns: CashReturn[]; sms: SmsRecord[]; events: JobEvent[]; soldDevices: SoldDevice[]; purchasing: PurchaseAnalytics | null }>({
+    loaded: !configured, sales: [], saleLines: [], trips: [], creditEntries: [], cashReturns: [], sms: [], events: [], soldDevices: [], purchasing: null,
   });
   const [error, setError] = useState<string | null>(null);
 

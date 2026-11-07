@@ -104,7 +104,7 @@ export default function WarrantyPolicies({ policies, onChanged, error }: { polic
       {error && <div style={{ padding: "11px 14px", borderRadius: 10, background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.35)", fontSize: 12.5, color: "var(--text-secondary)" }}>{error}</div>}
       {!isAdminCashier && <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Only an Admin or Admin Cashier can change these.</div>}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(340px, 100%), 1fr))", gap: 14 }}>
         {KINDS.map(k => {
           const p = policies.find(x => x.kind === k.id && !x.category);
           const Icon = k.icon;

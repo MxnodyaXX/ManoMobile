@@ -69,6 +69,8 @@ export default function PosScreen({ cashierName, onLogout }: { cashierName: stri
 
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>(ALL);
+  // Phones only: products and cart take turns, see the bar at the bottom.
+  const [phoneView, setPhoneView] = useState<"products" | "cart">("products");
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [heldOpen, setHeldOpen] = useState(false);
   const [heldSales, setHeldSales] = useState<HeldSale[]>([]);
@@ -289,7 +291,7 @@ export default function PosScreen({ cashierName, onLogout }: { cashierName: stri
       />
 
       <div className="flex min-h-0 flex-1">
-        <main className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
+        <main className={`min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4 md:flex md:p-6 ${phoneView === "products" ? "flex" : "hidden"}`}>
           <SearchBar
             query={query}
             onQueryChange={setQuery}
@@ -305,6 +307,7 @@ export default function PosScreen({ cashierName, onLogout }: { cashierName: stri
           />
         </main>
 
+        <div className={`h-full w-full min-w-0 md:block md:w-auto md:max-w-md md:flex-1 ${phoneView === "cart" ? "block" : "hidden"}`}>
         <CartPanel
           cart={cart}
           billNo={billNo}
@@ -323,6 +326,19 @@ export default function PosScreen({ cashierName, onLogout }: { cashierName: stri
           onCharge={() => { setCompleteError(null); setPaymentOpen(true); }}
           onPrint={() => printReceipt(snapshotReceipt(billNo ?? "—", cart.paidAmount, true))}
         />
+        </div>
+      </div>
+
+      <div className="flex shrink-0 gap-2 border-t border-slate-200 bg-white p-2 md:hidden dark:border-slate-800 dark:bg-slate-950">
+        {([["products", "Products"], ["cart", `Cart · ${cart.lines.reduce((n, l) => n + l.qty, 0)}`]] as const).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setPhoneView(id)}
+            className={`h-11 flex-1 rounded-lg text-sm font-semibold ${phoneView === id ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "text-slate-600 dark:text-slate-300"}`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       {paymentOpen && (

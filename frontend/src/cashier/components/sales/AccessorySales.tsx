@@ -974,7 +974,8 @@ function Step1({
               <div
                 key={p.id}
                 style={{
-                  display: "flex", alignItems: "center", gap: 14, padding: "12px 16px",
+                  display: "flex", alignItems: "center", gap: isMobile ? 10 : 14, padding: isMobile ? "12px" : "12px 16px",
+                  flexWrap: isMobile ? "wrap" : undefined,
                   borderRadius: 10,
                   border: `1px solid ${inCart ? "var(--accent)" : "var(--border)"}`,
                   background: inCart ? "rgba(var(--accent-rgb,232,232,232),0.04)" : "var(--bg-card)",
@@ -990,12 +991,13 @@ function Step1({
                   {createElement(categoryIcon(p.category), { size: 18, strokeWidth: 1.6 })}
                 </div>
 
-                {/* Main info */}
-                <div style={{ flex: 1, minWidth: 0 }}>
+                {/* Main info — on a phone it has the top line to itself (the icon
+                    beside it), and the price and Add drop to their own line. */}
+                <div style={{ flex: isMobile ? "1 1 calc(100% - 52px)" : 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", minWidth: 0 }}>
                     <span style={{ fontSize: isMobile ? 13 : 13.5, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{p.name}</span>
                     {p.category && (
-                      <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 20, background: "var(--accent)", color: "var(--accent-fg)", fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: "0.04em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 20, background: "var(--accent)", color: "var(--accent-fg)", fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: "0.04em", textTransform: "uppercase", whiteSpace: "nowrap", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {[p.category, p.subcategory].filter(Boolean).join(" · ")}
                       </span>
                     )}
@@ -1017,7 +1019,7 @@ function Step1({
                 </div>
 
                 {/* Right: price + stock + actions */}
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5, flexShrink: 0 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: isMobile ? "flex-start" : "flex-end", gap: 5, flexShrink: 0, flex: isMobile ? 1 : undefined, minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                     Rs. {p.sellingPrice.toLocaleString()}
                   </div>

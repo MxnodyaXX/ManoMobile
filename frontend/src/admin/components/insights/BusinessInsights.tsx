@@ -13,6 +13,7 @@ import FilterBar from "@/cashier/components/dashboard/FilterBar";
 import { useRepair, type RepairJob } from "@/cashier/contexts/RepairContext";
 import { useParts } from "@/cashier/contexts/PartsContext";
 import { periodStart, issuedOn, type FigurePeriod } from "@/lib/repair/figures";
+import { requestUnitCost } from "@/lib/repair/partCost";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 // Reused from the rest of the app (ROLE_COLORS in AdminDashboard, VIEW_META in
@@ -318,7 +319,7 @@ export default function BusinessInsights() {
     const outstanding = outstandingJobs.reduce((s, j) => s + Math.max(0, j.estimatedCost - j.advancePaid), 0);
 
     const fulfilledRequests = partRequests.filter(r => r.status === "Approved" || r.status === "Issued");
-    const costOf = (r: typeof fulfilledRequests[number]) => (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity;
+    const costOf = (r: typeof fulfilledRequests[number]) => requestUnitCost(r, parts) * r.quantity;
     const partsCostRequests = fulfilledRequests.filter(r => realizedIds.has(r.jobId));
     const partsCostRows = partsCostRequests
       .map(r => {
@@ -327,7 +328,7 @@ export default function BusinessInsights() {
           jobId: r.jobId,
           jobDevice: job ? [job.brand, job.model].filter(Boolean).join(" ") : r.jobDevice,
           partName: r.partName, partSku: r.partSku, quantity: r.quantity,
-          unitCost: parts.find(p => p.sku === r.partSku)?.costPrice ?? 0,
+          unitCost: requestUnitCost(r, parts),
           lineCost: costOf(r),
         };
       })

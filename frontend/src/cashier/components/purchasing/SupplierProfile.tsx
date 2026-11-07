@@ -63,7 +63,7 @@ export default function SupplierProfile({ supplier, invoices, onBack, onOpenInvo
   const supplied = useMemo(() => {
     const byKey = new Map<string, SuppliedLine[]>();
     for (const l of lines.filter(x => x.invoiceStatus === "Open")) {
-      const key = l.productId ? `p${l.productId}` : `n${l.newProduct?.code ?? l.id}`;
+      const key = l.partId ? `r${l.partId}` : l.productId ? `p${l.productId}` : `n${l.newProduct?.code ?? l.id}`;
       byKey.set(key, [...(byKey.get(key) ?? []), l]);
     }
     return [...byKey.entries()].map(([key, ls]) => {

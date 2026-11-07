@@ -1674,7 +1674,10 @@ export default function NewRepairForm({ onClose, initialDraft, onStepChange }: {
   // covers text fields — a step whose first control is one of those custom
   // rows, e.g. the technician list inside Step 2's accordions, needs its own
   // tabIndex to be found here in DOM order instead.
+  // Not on a phone: there, focus means the on-screen keyboard (and on Step 1
+  // the dealer list) opening over the form before anyone has touched it.
   useEffect(() => {
+    if (window.matchMedia("(max-width: 768px)").matches) return;
     const id = requestAnimationFrame(() => {
       contentRef.current?.querySelector<HTMLElement>('input, textarea, select, [tabindex="0"]')?.focus({ preventScroll: true });
     });

@@ -23,6 +23,8 @@ import { printLabelsNode } from "@/cashier/utils/printLabel";
 import { useToast } from "@/lib/ui/toast";
 import { useTableSort, SortHeader } from "@/lib/ui/useTableSort";
 import RepairPartsManager from "@/admin/components/inventory/RepairPartsManager";
+import RenameProductsModal from "./RenameProductsModal";
+import { buildProductName, readExistingName, suggestProductName, variantOf } from "@/lib/inventory/productName";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1723,6 +1725,20 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
   const [anyMismatch, setAnyMismatch] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [variant, setVariant] = useState(() => variantOf(product?.name ?? ""));
+  // The name follows the fields until someone types their own. A product opened
+  // with an old-style name keeps it, and is offered the new one below the box.
+  const [nameAuto, setNameAuto] = useState(() => !product || product.name === buildProductName({ ...product, variant: variantOf(product.name) }));
+  const builtName = buildProductName({ ...form, variant });
+  const itemName = nameAuto ? builtName : form.name;
+  const suggestedName = nameAuto ? "" : suggestProductName(form);
+
+  function applySuggestedName() {
+    const parts = readExistingName(form);
+    setForm(f => ({ ...f, model: parts.model }));
+    setVariant(parts.variant);
+    setNameAuto(true);
+  }
 
   const set = (k: keyof AccessoryProduct, v: string | number) => setForm(f => ({ ...f, [k]: v }));
 
@@ -1810,7 +1826,7 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
   function validate() {
     const e: typeof errors = {};
     if (!form.code.trim()) e.code = "Code is required";
-    if (!form.name.trim()) e.name = "Name is required";
+    if (!itemName.trim()) e.name = "Name is required";
     if (!form.brand.trim()) e.brand = "Brand is required";
     if (!form.category.trim()) e.category = "Category is required";
     if (requiresSubcategory && !form.subcategory.trim()) e.subcategory = `Pick a subcategory under ${form.category}`;
@@ -1887,9 +1903,46 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
               onNewRequest={v => setApprovalReq({ entityType: "supplier", newName: v, presetBrandName: form.brand })}
             />
           </div>
-          {/* Row 3: Item Name + Auto-generated Item Code */}
+          {/* Row 3: what the name is built from */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            {field("Item Name", "name", "text", "e.g. Tempered Glass")}
+            {field("Compatible Model", "model", "text", "e.g. A03s / Universal")}
+            <div>
+              <label style={labelStyle}>Variant (optional)</label>
+              <input
+                type="text"
+                value={variant}
+                onChange={e => setVariant(e.target.value)}
+                placeholder="e.g. Black / Clear / 1m"
+                disabled={anyMismatch}
+                style={{ ...inputStyle, opacity: anyMismatch ? 0.45 : 1, cursor: anyMismatch ? "not-allowed" : undefined }}
+              />
+            </div>
+          </div>
+          {/* Row 4: Item Name + Auto-generated Item Code */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div>
+              <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 6 }}>
+                Item Name
+                {nameAuto && <span style={{ fontSize: 10, fontWeight: 700, background: "var(--accent-dim)", color: "var(--accent)", borderRadius: 4, padding: "1px 6px", letterSpacing: "0.04em" }}>AUTO</span>}
+              </label>
+              <input
+                type="text"
+                value={itemName}
+                onChange={e => { setNameAuto(false); set("name", e.target.value); }}
+                placeholder="Fills in from the fields above"
+                disabled={anyMismatch}
+                style={{ ...inputStyle, borderColor: errors.name ? "#dc2626" : "var(--border)", opacity: anyMismatch ? 0.45 : 1, cursor: anyMismatch ? "not-allowed" : undefined }}
+              />
+              {errors.name && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{errors.name}</div>}
+              {nameAuto
+                ? <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>Built from brand, model, category and variant — editable</div>
+                : suggestedName && suggestedName !== form.name && (
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3, overflowWrap: "anywhere" }}>
+                    Suggested: <strong style={{ color: "var(--text-secondary)" }}>{suggestedName}</strong>{" "}
+                    <button type="button" onClick={applySuggestedName} disabled={anyMismatch} style={{ background: "none", border: "none", padding: 0, color: "var(--accent)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Use this</button>
+                  </div>
+                )}
+            </div>
             <div>
               <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 6 }}>
                 Item Code
@@ -1967,8 +2020,6 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
               </div>
             )}
           </div>
-          {/* Row 4: Compatible Model */}
-          {field("Compatible Model", "model", "text", "e.g. iPhone 15 / Universal")}
           {/* Row 5: Pricing */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             {field("Buying Price (Rs.)", "buyingPrice", "number")}
@@ -1997,7 +2048,7 @@ function AddEditProductModal({ product, existingProducts, onSave, onClose }: {
                   const pending = barcodeInput.trim();
                   const barcodes = pending && !form.barcodes.some(b => normalizeScanCode(b) === normalizeScanCode(pending))
                     ? [...form.barcodes, pending] : form.barcodes;
-                  await onSave({ ...form, barcodes, id: form.id || 0 });
+                  await onSave({ ...form, name: itemName, barcodes, id: form.id || 0 });
                   onClose();
                 } catch (e) {
                   setSaveError(e instanceof Error ? e.message : String(e));
@@ -2164,9 +2215,9 @@ function OverviewTab({ devices, accessories }: { devices: DeviceItem[]; accessor
             <div style={{ width: 42, height: 42, borderRadius: 11, background: iconBg, display: "flex", alignItems: "center", justifyContent: "center", color: iconColor, flexShrink: 0 }}>
               {icon}
             </div>
-            <div>
+            <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
               <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{title}</div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text-primary)", lineHeight: 1.1, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{main}</div>
+              <div style={{ fontSize: "clamp(15px, 4.6vw, 20px)", fontWeight: 800, color: "var(--text-primary)", lineHeight: 1.1, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{main}</div>
               <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 3, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{sub}</div>
             </div>
           </div>
@@ -2608,7 +2659,7 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
           { label: "Reserved", value: reserved, color: "#b45309", bg: "#fef3c7" },
           { label: "Stock Value", value: Rs(stockVal), color: "var(--accent)", bg: "var(--accent-dim)" },
         ] as const).map(({ label, value, color, bg }) => (
-          <div key={label} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 18px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div key={label} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 18px", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
             <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{label}</span>
             <span style={{ fontSize: 15, fontWeight: 800, color, background: bg, padding: "2px 10px", borderRadius: 8 }}>{value}</span>
           </div>
@@ -2620,11 +2671,11 @@ function MobileDevicesTab({ devices, loading, configured, saveDevice, deleteDevi
           <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
           <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by IMEI, name, brand, supplier…" style={{ ...inputStyle, paddingLeft: 36, width: "100%", boxSizing: "border-box" as const }} />
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} style={{ ...selectStyle, flex: isMobile ? 1 : undefined }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: isMobile ? "wrap" : undefined }}>
+          <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} style={{ ...selectStyle, flex: isMobile ? "1 1 130px" : undefined, minWidth: 0 }}>
             {brands.map(b => <option key={b}>{b}</option>)}
           </select>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ ...selectStyle, flex: isMobile ? 1 : undefined }}>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ ...selectStyle, flex: isMobile ? "1 1 130px" : undefined, minWidth: 0 }}>
             {([["All", "All"], ["Available", "available"], ["Reserved", "reserved"], ["Sold", "sold"], ["Return to company", "supplier_return"], ["Returned to company", "returned_to_supplier"]] as const).map(([label, v]) => <option key={v} value={v}>{label}</option>)}
           </select>
           {groups.length > 0 && (
@@ -2958,6 +3009,8 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
   const [deleteTarget, setDeleteTarget] = useState<AccessoryProduct | null>(null);
   const [labelProduct, setLabelProduct] = useState<AccessoryProduct | null>(null);
   const [batchesProduct, setBatchesProduct] = useState<AccessoryProduct | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const { can } = useAuth();
 
   const { categories: categoryList, subcategories: subcategoryList } = useInventory();
   const categories = useMemo(() => ["All", ...categoryList.map(c => c.name).sort()], [categoryList]);
@@ -3039,7 +3092,7 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
           { label: "Low Stock", value: lowStock, color: "#b45309", bg: "#fef3c7" },
           { label: "Out of Stock", value: outOfStock, color: "#dc2626", bg: "#fee2e2" },
         ] as const).map(({ label, value, color, bg }) => (
-          <div key={label} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 18px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div key={label} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 18px", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
             <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{label}</span>
             <span style={{ fontSize: 15, fontWeight: 800, color, background: bg, padding: "2px 10px", borderRadius: 8 }}>{value}</span>
           </div>
@@ -3064,6 +3117,11 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
           <div style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
             Value: <strong style={{ color: "var(--text-primary)" }}>{Rs(totalValue)}</strong>
           </div>
+          {can("Admin") && (
+            <button onClick={() => setRenaming(true)} style={{ padding: "9px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
+              Tidy Names
+            </button>
+          )}
           <button onClick={() => setEditProduct("new")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 16px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
             <Plus size={14} /> {isMobile ? "Add" : "Add Product"}
           </button>
@@ -3174,6 +3232,7 @@ function AccessoriesTab({ accessories, loading, configured, saveProduct, deleteP
           onClose={() => setDeleteTarget(null)}
         />
       )}
+      {renaming && <RenameProductsModal products={accessories} onClose={() => setRenaming(false)} />}
       {batchesProduct && <ProductBatchesModal product={batchesProduct} onClose={() => setBatchesProduct(null)} />}
       {labelProduct && (
         <BarcodeLabelModal

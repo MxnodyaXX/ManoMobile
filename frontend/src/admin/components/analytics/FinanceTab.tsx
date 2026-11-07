@@ -135,6 +135,7 @@ export default function FinanceTab({ window: w, previous }: TabProps) {
     { label: "Repair parts (by tag)", value: p.cogsParts, color: TONES.stock },
     { label: "Agent repairs", value: p.cogsAgents, color: TONES.cost },
     { label: "Technician charges", value: p.cogsLabour, color: TONES.people },
+    { label: "Buying trip costs", value: p.cogsTrips, color: TONES.time },
     { label: `Entered repair costs (${p.estimatedJobs} job${p.estimatedJobs === 1 ? "" : "s"})`, value: p.cogsEstimated, color: TONES.time },
   ];
   const streamParts = [

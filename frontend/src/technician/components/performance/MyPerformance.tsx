@@ -6,6 +6,7 @@ import { useRepair } from "@/cashier/contexts/RepairContext";
 import { useTech } from "@/technician/contexts/TechContext";
 import { useParts } from "@/cashier/contexts/PartsContext";
 import PerformanceCharts, { RANGES, type Range } from "@/technician/components/performance/PerformanceCharts";
+import { requestUnitCost } from "@/lib/repair/partCost";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -80,7 +81,7 @@ export default function MyPerformance() {
 
     // Parts cost
     const myRequests = partRequests.filter(r => myJobs.some(j => j.id === r.jobId));
-    const totalPartsCost = myRequests.reduce((s, r) => s + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+    const totalPartsCost = myRequests.reduce((s, r) => s + requestUnitCost(r, parts) * r.quantity, 0);
 
     // Escalations
     const myEsc = escalations.filter(e => myJobs.some(j => j.id === e.jobId));
@@ -237,7 +238,7 @@ export default function MyPerformance() {
                       <td style={{ padding: "8px 12px", color: "var(--text-primary)", fontFamily: ff, fontWeight: 600 }}>{r.partName}</td>
                       <td style={{ padding: "8px 12px", color: "var(--text-muted)", fontFamily: ff }}>{r.jobId}</td>
                       <td style={{ padding: "8px 12px", color: "var(--text-secondary)", fontFamily: ff }}>{r.quantity}</td>
-                      <td style={{ padding: "8px 12px", color: "#a78bfa", fontFamily: ff, fontWeight: 600 }}>Rs. {((part?.costPrice ?? 0) * r.quantity).toLocaleString()}</td>
+                      <td style={{ padding: "8px 12px", color: "#a78bfa", fontFamily: ff, fontWeight: 600 }}>Rs. {(requestUnitCost(r, parts) * r.quantity).toLocaleString()}</td>
                       <td style={{ padding: "8px 12px" }}>
                         <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 20, color: STATUS_COLOR[r.status] ?? TA, background: `${STATUS_COLOR[r.status] ?? TA}15`, fontFamily: ff }}>{r.status}</span>
                       </td>

@@ -70,7 +70,7 @@ export default function PhoneClaimsList({ refreshKey = 0 }: { refreshKey?: numbe
             {filter === "open" ? "No open phone claims. Start one from Check warranty." : "No phone claims yet."}
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(340px, 100%), 1fr))", gap: 12 }}>
             {shown.map(c => {
               const Icon = ICON[c.resolution];
               const color = STATUS_COLOR[c.status];

@@ -6,6 +6,7 @@ import type { InsightColumn, InsightRow, InsightSummary, InsightGroup } from "./
 import { labourForJob, describeRate } from "@/lib/repair/labour";
 import type { SaleTx } from "@/cashier/contexts/SalesContext";
 import type { EffectiveRules } from "@/lib/settings/staffRules";
+import { requestUnitCost } from "@/lib/repair/partCost";
 
 /** Rates keyed by technician name, since that is what a job records. */
 export type RateLookup = (technicianName: string) => EffectiveRules | null;
@@ -43,7 +44,7 @@ const device = (j: RepairJob) => [j.brand, j.model].filter(Boolean).join(" ") ||
 export function partsCostForJob(jobId: string, requests: PartRequest[], catalog: SparePart[]): number {
   return requests
     .filter(r => r.jobId === jobId && (r.status === "Approved" || r.status === "Issued"))
-    .reduce((sum, r) => sum + (catalog.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+    .reduce((sum, r) => sum + requestUnitCost(r, catalog) * r.quantity, 0);
 }
 
 /* ── Job-list breakdowns ─────────────────────────────────────────────────── */
@@ -218,7 +219,7 @@ export function partsCostInsight(
 ): InsightSpec {
   const ids = new Set(jobs.map(j => j.id));
   const used = requests.filter(r => ids.has(r.jobId) && (r.status === "Approved" || r.status === "Issued"));
-  const total = used.reduce((s, r) => s + (catalog.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+  const total = used.reduce((s, r) => s + requestUnitCost(r, catalog) * r.quantity, 0);
   const unpriced = used.filter(r => !catalog.find(p => p.sku === r.partSku)).length;
 
   return {
@@ -240,8 +241,8 @@ export function partsCostInsight(
           job: r.jobId,
           part: r.partName,
           qty: String(r.quantity),
-          unit: cat ? rs(cat.costPrice) : "no price",
-          line: cat ? rs(cat.costPrice * r.quantity) : "—",
+          unit: cat ? rs(requestUnitCost(r, catalog)) : "no price",
+          line: cat ? rs(requestUnitCost(r, catalog) * r.quantity) : "—",
         },
       };
     }),

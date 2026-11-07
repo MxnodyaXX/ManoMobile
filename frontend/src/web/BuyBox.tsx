@@ -30,13 +30,13 @@ export default function BuyBox({ p }: { p: PublicProduct }) {
         <button
           disabled={out}
           onClick={() => { add(line, qty); router.push("/web/cart?mode=pickup"); }}
-          className="inline-flex h-14 flex-1 items-center justify-center gap-2 rounded-full bg-neutral-950 text-[13px] font-medium text-white transition-transform hover:scale-[1.01] disabled:bg-neutral-200 disabled:text-neutral-400">
+          className="inline-flex h-14 items-center sm:flex-1 justify-center gap-2 rounded-full bg-neutral-950 text-[13px] font-medium text-white transition-transform hover:scale-[1.01] disabled:bg-neutral-200 disabled:text-neutral-400">
           <Store size={16} /> Reserve &amp; collect
         </button>
         <button
           disabled={out}
           onClick={() => { add(line, qty); setAdded(true); setTimeout(() => setAdded(false), 1600); }}
-          className="inline-flex h-14 flex-1 items-center justify-center gap-2 rounded-full border border-neutral-900/20 text-[13px] font-medium transition-colors hover:border-neutral-900 disabled:text-neutral-300">
+          className="inline-flex h-14 items-center sm:flex-1 justify-center gap-2 rounded-full border border-neutral-900/20 text-[13px] font-medium transition-colors hover:border-neutral-900 disabled:text-neutral-300">
           {added ? <><Check size={16} /> Added to basket</> : <>Add to basket</>}
         </button>
       </div>

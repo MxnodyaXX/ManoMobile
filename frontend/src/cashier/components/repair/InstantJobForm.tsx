@@ -342,7 +342,7 @@ export default function InstantJobForm({ onCreated, onCancel }: {
         // Locked rather than hidden: the cashier should still be able to read
         // back what they entered while the payment is taken.
         inert={locked || undefined}
-        style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 26, alignItems: "start", opacity: locked ? 0.55 : 1, pointerEvents: locked ? "none" : undefined }}
+        style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 26, alignItems: "start", opacity: locked ? 0.55 : 1, pointerEvents: locked ? "none" : undefined }}
       >
 
         {section("Who it is for", Users, "#60a5fa", (

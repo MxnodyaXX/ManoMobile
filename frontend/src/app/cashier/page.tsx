@@ -59,6 +59,7 @@ import ReceivedVsCompletedChart from "@/cashier/components/dashboard/charts/Rece
 import TechnicianWorkloadChart from "@/cashier/components/dashboard/charts/TechnicianWorkloadChart";
 import { useMyPermissions } from "@/lib/settings/staffRules";
 import TabTitle from "@/lib/ui/TabTitle";
+import { requestUnitCost } from "@/lib/repair/partCost";
 
 export type ActivePage =
   | "Home"
@@ -393,7 +394,7 @@ function RepairsStatGroup({ fig, dateLabel, onNavigate }: {
 
   const partsCost = partRequests
     .filter(r => fig.issuedJobIds.includes(r.jobId) && (r.status === "Approved" || r.status === "Issued"))
-    .reduce((sum, r) => sum + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+    .reduce((sum, r) => sum + requestUnitCost(r, parts) * r.quantity, 0);
 
   // Real labour cost, from each technician's rate — recorded on the job when
   // it was completed. This used to be charge-minus-parts, which is revenue,
@@ -410,7 +411,7 @@ function RepairsStatGroup({ fig, dateLabel, onNavigate }: {
   const prevParts = prev
     ? partRequests
         .filter(r => prev.issuedJobIds.includes(r.jobId) && (r.status === "Approved" || r.status === "Issued"))
-        .reduce((sum, r) => sum + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0)
+        .reduce((sum, r) => sum + requestUnitCost(r, parts) * r.quantity, 0)
     : 0;
   const prevLabour = prev
     ? prev.issuedJobs.reduce((sum, j) => sum + labourForJob(j, rateFor(j.technician || "")).amount, 0)

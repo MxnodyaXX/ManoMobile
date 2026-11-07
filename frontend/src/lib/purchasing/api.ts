@@ -33,8 +33,18 @@ export interface InitialPayment {
   notes: string;
 }
 
+export interface PurchaseTrip {
+  id: number;
+  name: string;
+  tripDate: string;
+  cost: number;
+  notes: string;
+}
+
 export interface PurchaseInvoice {
   id: number;
+  tripId: number | null;
+  tripName: string | null;
   ref: string;
   supplierId: number;
   supplierName: string;
@@ -74,11 +84,25 @@ export interface NewProductDraft {
   minStock: number;
 }
 
+/** A repair part not in the catalogue yet, created when the invoice is finalised. */
+export interface NewPartDraft {
+  name: string;
+  sku: string;
+  category: string;
+  brand: string;
+  compatibleWith: string[];
+  /** What was typed for the part, e.g. Display. The name is built from it. */
+  partWord: string;
+  reorderLevel: number;
+}
+
 export interface PurchaseItem {
   id: number;
   invoiceId: number;
   productId: number | null;
   newProduct: NewProductDraft | null;
+  partId: number | null;
+  newPart: NewPartDraft | null;
   description: string;
   qty: number;
   receivedQty: number;
@@ -119,6 +143,32 @@ export interface Batch {
   status: "Active" | "Depleted" | "Reversed";
   /** Filled where the query joins the invoice. */
   invoiceNo?: string;
+}
+
+export interface PartBatch {
+  id: number;
+  batchNo: string;
+  partId: number;
+  source: "purchase" | "opening" | "adjustment";
+  invoiceId: number | null;
+  supplierName: string;
+  receivedOn: string;
+  qtyReceived: number;
+  qtyAvailable: number;
+  unitCost: number;
+  status: "Active" | "Depleted" | "Reversed";
+  invoiceNo?: string;
+}
+
+export interface PartMovement {
+  id: number;
+  partId: number;
+  batchId: number | null;
+  kind: "purchase" | "opening" | "job" | "adjustment_in" | "adjustment_out" | "reversal";
+  qty: number;
+  unitCost: number | null;
+  note: string;
+  createdAt: string;
 }
 
 export interface StockMovement {
@@ -168,6 +218,7 @@ export interface InvoiceDetail {
   invoice: PurchaseInvoice;
   items: PurchaseItem[];
   batches: Batch[];
+  partBatches: PartBatch[];
   receipts: Receipt[];
   payments: SupplierPayment[];
   events: InvoiceEvent[];
@@ -223,7 +274,8 @@ const s = (v: unknown) => (v == null ? "" : String(v));
 const toInvoice = (r: Row): PurchaseInvoice => {
   const ip = r.initial_payment as Row | null;
   return {
-    id: n(r.id), ref: s(r.ref), supplierId: n(r.supplier_id), supplierName: s(r.supplier_name),
+    id: n(r.id), tripId: nn(r.trip_id), tripName: (r.trip_name as string | null) ?? null,
+    ref: s(r.ref), supplierId: n(r.supplier_id), supplierName: s(r.supplier_name),
     invoiceNo: s(r.invoice_no), invoiceDate: s(r.invoice_date), dueDate: (r.due_date as string | null) ?? null,
     status: r.status as InvoiceStatus, itemsSubtotal: n(r.items_subtotal), expenses: n(r.expenses),
     discount: n(r.discount), total: n(r.total), paid: n(r.paid), outstanding: n(r.outstanding),
@@ -250,8 +302,27 @@ const toNewProduct = (v: unknown): NewProductDraft | null => {
   };
 };
 
+const toNewPart = (v: unknown): NewPartDraft | null => {
+  if (!v || typeof v !== "object") return null;
+  const r = v as Row;
+  return {
+    name: s(r.name), sku: s(r.sku), category: s(r.category) || "Other", brand: s(r.brand),
+    compatibleWith: Array.isArray(r.compatible_with) ? (r.compatible_with as unknown[]).map(String) : [],
+    partWord: s(r.part_word), reorderLevel: r.reorder_level == null ? 5 : n(r.reorder_level),
+  };
+};
+
+const toPartBatch = (r: Row): PartBatch => ({
+  id: n(r.id), batchNo: s(r.batch_no), partId: n(r.part_id), source: r.source as PartBatch["source"],
+  invoiceId: nn(r.invoice_id), supplierName: s(r.supplier_name), receivedOn: s(r.received_on),
+  qtyReceived: n(r.qty_received), qtyAvailable: n(r.qty_available), unitCost: n(r.unit_cost),
+  status: r.status as PartBatch["status"],
+  invoiceNo: r.purchase_invoices ? s((r.purchase_invoices as Row).invoice_no) : undefined,
+});
+
 const toItem = (r: Row): PurchaseItem => ({
   id: n(r.id), invoiceId: n(r.invoice_id), productId: nn(r.product_id), newProduct: toNewProduct(r.new_product),
+  partId: nn(r.part_id), newPart: toNewPart(r.new_part),
   description: s(r.description), qty: n(r.qty), receivedQty: n(r.received_qty), unitCost: n(r.unit_cost),
   expectedSellPrice: n(r.expected_sell_price), discount: n(r.discount), taxPct: n(r.tax_pct),
   lineTotal: n(r.line_total), updateSellingPrice: !!r.update_selling_price,
@@ -289,6 +360,9 @@ const toMovement = (r: Row): StockMovement => ({
 
 /** Turns "relation does not exist" into what to actually do about it. */
 function explain(message: string, code?: string): string {
+  if (/purchase_trips|repair_part_batches|repair_part_stock_movements|trip_id|part_id/i.test(message)) {
+    return "Repair parts on invoices and trips aren't set up in the database yet — run migration 20261107000095_purchasing_repair_parts_and_trips.sql.";
+  }
   if (code === "PGRST205" || code === "42P01" || code === "PGRST202" || /Could not find the (table|function)|does not exist/i.test(message)) {
     return "Supplier purchasing isn't set up in the database yet — run migration 20261021000085_supplier_purchasing.sql.";
   }
@@ -322,10 +396,11 @@ export async function fetchInvoices(supplierId?: number): Promise<PurchaseInvoic
 }
 
 export async function fetchInvoiceDetail(id: number): Promise<InvoiceDetail> {
-  const [inv, items, batches, receipts, allocs, events] = await Promise.all([
+  const [inv, items, batches, partBatches, receipts, allocs, events] = await Promise.all([
     sb().from("purchase_invoice_summary").select("*").eq("id", id).single(),
     sb().from("purchase_invoice_items").select("*").eq("invoice_id", id).order("sort_order"),
     sb().from("accessory_batches").select("*").eq("invoice_id", id).order("id"),
+    sb().from("repair_part_batches").select("*").eq("invoice_id", id).order("id"),
     sb().from("purchase_receipts").select("*").eq("invoice_id", id).order("id"),
     sb().from("supplier_payment_allocations").select("payment_id").eq("invoice_id", id),
     sb().from("purchase_invoice_events").select("*").eq("invoice_id", id).order("id"),
@@ -338,6 +413,8 @@ export async function fetchInvoiceDetail(id: number): Promise<InvoiceDetail> {
     invoice: toInvoice(check<Row>(inv)),
     items: check<Row[]>(items).map(toItem),
     batches: check<Row[]>(batches).map(toBatch),
+    // Absent until migration 20261107000095: older invoices still open.
+    partBatches: partBatches.error ? [] : ((partBatches.data ?? []) as Row[]).map(toPartBatch),
     receipts: check<Row[]>(receipts).map(r => ({ id: n(r.id), invoiceId: n(r.invoice_id), receivedOn: s(r.received_on), note: s(r.note), createdAt: s(r.created_at) })),
     payments,
     events: check<Row[]>(events).map(e => ({ id: n(e.id), action: s(e.action), detail: s(e.detail), createdAt: s(e.created_at) })),
@@ -376,6 +453,37 @@ export async function fetchProductMovements(productId: number, limit = 100): Pro
     .eq("product_id", productId).order("created_at", { ascending: false }).limit(limit)).map(toMovement);
 }
 
+export async function fetchPartBatches(partId: string): Promise<PartBatch[]> {
+  return check<Row[]>(await sb().from("repair_part_batches").select("*, purchase_invoices(invoice_no)")
+    .eq("part_id", Number(partId)).order("received_on", { ascending: false }).order("id", { ascending: false })).map(toPartBatch);
+}
+
+export async function fetchPartMovements(partId: string, limit = 100): Promise<PartMovement[]> {
+  return check<Row[]>(await sb().from("repair_part_stock_movements").select("*")
+    .eq("part_id", Number(partId)).order("created_at", { ascending: false }).limit(limit)).map(r => ({
+      id: n(r.id), partId: n(r.part_id), batchId: nn(r.batch_id), kind: r.kind as PartMovement["kind"],
+      qty: n(r.qty), unitCost: nn(r.unit_cost), note: s(r.note), createdAt: s(r.created_at),
+    }));
+}
+
+export async function fetchTrips(): Promise<PurchaseTrip[]> {
+  if (!isSupabaseConfigured()) return [];
+  return check<Row[]>(await sb().from("purchase_trips").select("*")
+    .order("trip_date", { ascending: false }).order("id", { ascending: false })).map(r => ({
+      id: n(r.id), name: s(r.name), tripDate: s(r.trip_date), cost: n(r.cost), notes: s(r.notes),
+    }));
+}
+
+export async function savePurchaseTrip(t: { id: number | null; name: string; tripDate: string; cost: number; notes: string }): Promise<number> {
+  return Number(check(await sb().rpc("save_purchase_trip", {
+    p: { id: t.id, name: t.name.trim(), trip_date: t.tripDate, cost: t.cost, notes: t.notes.trim() },
+  })));
+}
+
+export async function deletePurchaseTrip(id: number): Promise<void> {
+  check(await sb().rpc("delete_purchase_trip", { p_id: id }));
+}
+
 /**
  * The customer warranty set on the batch each product will sell from next
  * (FIFO: the oldest batch with stock). Products whose next batch sets none are
@@ -407,6 +515,8 @@ export async function fetchNextBatchCustomerWarranty(productIds: number[]): Prom
 export interface ItemDraft {
   productId: number | null;
   newProduct: NewProductDraft | null;
+  partId: number | null;
+  newPart: NewPartDraft | null;
   description: string;
   qty: number;
   unitCost: number;
@@ -423,6 +533,7 @@ export interface ItemDraft {
 
 export interface InvoiceDraft {
   id: number | null;
+  tripId: number | null;
   supplierId: number | null;
   invoiceNo: string;
   invoiceDate: string;
@@ -439,6 +550,7 @@ export interface InvoiceDraft {
 export async function savePurchaseInvoice(d: InvoiceDraft): Promise<number> {
   const payload = {
     id: d.id,
+    trip_id: d.tripId,
     supplier_id: d.supplierId,
     invoice_no: d.invoiceNo.trim(),
     invoice_date: d.invoiceDate,
@@ -454,6 +566,11 @@ export async function savePurchaseInvoice(d: InvoiceDraft): Promise<number> {
     } : null,
     items: d.items.map(i => ({
       product_id: i.productId,
+      part_id: i.partId,
+      new_part: i.partId || !i.newPart ? null : {
+        name: i.newPart.name.trim(), sku: i.newPart.sku.trim(), category: i.newPart.category, brand: i.newPart.brand.trim(),
+        compatible_with: i.newPart.compatibleWith, part_word: i.newPart.partWord, reorder_level: i.newPart.reorderLevel,
+      },
       new_product: i.productId ? null : i.newProduct && {
         name: i.newProduct.name.trim(), code: i.newProduct.code.trim(), category: i.newProduct.category,
         subcategory: i.newProduct.subcategory, brand: i.newProduct.brand, model: i.newProduct.model,

@@ -24,6 +24,7 @@ import { useRepair } from "@/cashier/contexts/RepairContext";
 import { correctSalePayment } from "@/lib/sales/correctPayment";
 import { fetchSaleItems, type SaleItem } from "@/lib/sales/saleItems";
 import { useRebuiltInvoice } from "./rebuildInvoice";
+import ShrinkToFit from "@/lib/ui/ShrinkToFit";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
@@ -584,10 +585,12 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
                 </button>
               </div>
               <div style={{ background: "#525659", padding: 20, display: "flex", justifyContent: "center" }}>
-                <div
-                  style={{ background: "#fff", boxShadow: "0 4px 24px rgba(0,0,0,0.35)", maxWidth: "100%", overflowX: "auto" }}
-                  dangerouslySetInnerHTML={{ __html: doc.html }}
-                />
+                <ShrinkToFit>
+                  <div
+                    style={{ background: "#fff", boxShadow: "0 4px 24px rgba(0,0,0,0.35)" }}
+                    dangerouslySetInnerHTML={{ __html: doc.html }}
+                  />
+                </ShrinkToFit>
               </div>
             </>
           )}
@@ -603,9 +606,11 @@ function ReceiptModal({ tx, onClose }: { tx: SaleTx; onClose: () => void }) {
                 </p>
               </div>
               <div style={{ background: "#525659", padding: 20, marginTop: 16, display: "flex", justifyContent: "center" }}>
-                <div style={{ background: "#fff", boxShadow: "0 4px 24px rgba(0,0,0,0.35)", maxWidth: "100%", overflowX: "auto" }}>
-                  {rebuilt.render(rebuiltRef)}
-                </div>
+                <ShrinkToFit>
+                  <div style={{ background: "#fff", boxShadow: "0 4px 24px rgba(0,0,0,0.35)" }}>
+                    {rebuilt.render(rebuiltRef)}
+                  </div>
+                </ShrinkToFit>
               </div>
             </>
           )}

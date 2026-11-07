@@ -358,7 +358,7 @@ export default function PerformanceCharts({ jobs, range }: { jobs: RepairJob[]; 
         ["--viz-grid" as string]: pal.grid,
         ["--viz-axis" as string]: pal.axis,
         display: "grid", gap: 14, alignItems: "start",
-        gridTemplateColumns: "repeat(auto-fill, minmax(max(340px, 48%), 1fr))",
+        gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, max(340px, 48%)), 1fr))",
       }}
     >
       <ChartCard

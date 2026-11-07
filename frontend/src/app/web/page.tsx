@@ -204,7 +204,7 @@ export default async function HomePage() {
           </div>
           <form action="/track" className="flex w-full flex-col gap-3 sm:flex-row">
             <input name="job" required placeholder="e.g. RM-1008"
-              className="h-14 flex-1 rounded-full border border-neutral-300 bg-white px-6 text-[15px] outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-950" />
+              className="h-14 w-full rounded-full border border-neutral-300 sm:w-auto sm:flex-1 bg-white px-6 text-[15px] outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-950" />
             <button className="inline-flex h-14 items-center justify-center gap-2 rounded-full bg-neutral-950 px-8 text-[13px] font-medium text-white">
               Track <ArrowRight size={15} />
             </button>
@@ -219,10 +219,10 @@ export default async function HomePage() {
         <div data-reveal>
           <p className="text-[11px] uppercase tracking-[0.35em] text-neutral-400">Visit us</p>
           <h2 className={`${D} mt-4 text-[clamp(2rem,4vw,3.4rem)] font-extralight uppercase leading-[1]`}>Kurusa Junction</h2>
-          <div className="mt-10 flex flex-col gap-5 text-[14px]">
+          <div className="mt-10 flex flex-col gap-3 text-[14px] md:gap-5">
             <p className="flex gap-3"><MapPin size={18} strokeWidth={1.5} className="shrink-0" />{SHOP_DETAILS.address}</p>
-            <a href={`tel:${SHOP_DETAILS.phone.replace(/\s/g, "")}`} className="flex gap-3 hover:underline"><Phone size={18} strokeWidth={1.5} className="shrink-0" />{SHOP_DETAILS.phone}</a>
-            <a href={WHATSAPP} target="_blank" rel="noopener" className="flex gap-3 hover:underline"><MessageCircle size={18} strokeWidth={1.5} className="shrink-0" />Message us on WhatsApp</a>
+            <a href={`tel:${SHOP_DETAILS.phone.replace(/\s/g, "")}`} className="flex gap-3 py-2.5 hover:underline md:py-0"><Phone size={18} strokeWidth={1.5} className="shrink-0" />{SHOP_DETAILS.phone}</a>
+            <a href={WHATSAPP} target="_blank" rel="noopener" className="flex gap-3 py-2.5 hover:underline md:py-0"><MessageCircle size={18} strokeWidth={1.5} className="shrink-0" />Message us on WhatsApp</a>
           </div>
           <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${SHOP_DETAILS.name} ${SHOP_DETAILS.address}`)}`} target="_blank" rel="noopener"
             className="mt-10 inline-flex items-center gap-2 rounded-full border border-neutral-900/20 px-6 py-3 text-[13px] font-medium hover:border-neutral-900">
@@ -259,7 +259,7 @@ function SectionHead({ kicker, title, link }: { kicker: string; title: string; l
         <h2 className={`${D} mt-4 text-[clamp(2.2rem,5vw,4rem)] font-extralight uppercase leading-[0.95]`}>{title}</h2>
       </div>
       {link && (
-        <Link href={link.href} className="group inline-flex items-center gap-2 border-b border-neutral-900 pb-1 text-[13px] font-medium">
+        <Link href={link.href} className="group inline-flex min-h-10 items-center gap-2 border-b border-neutral-900 text-[13px] font-medium md:min-h-0 md:pb-1">
           {link.label} <ArrowRight size={14} className="transition-transform duration-300 group-hover:translate-x-1" />
         </Link>
       )}

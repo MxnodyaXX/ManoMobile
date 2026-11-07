@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, PackagePlus, Paperclip, Plus, Search, ShieldCheck, Trash2, Layers } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, MapPin, PackagePlus, Paperclip, Plus, Search, ShieldCheck, Trash2, Layers, Wrench } from "lucide-react";
+import { PART_CATEGORIES, useParts, type SparePart } from "@/cashier/contexts/PartsContext";
 import { useAccessories, type AccessoryProduct } from "@/cashier/contexts/AccessoriesContext";
 import { useInventory } from "@/cashier/contexts/InventoryContext";
 import { useCashRegister } from "@/cashier/contexts/CashRegisterContext";
@@ -9,19 +10,20 @@ import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useToast } from "@/lib/ui/toast";
 import { matchScannedAccessory } from "@/lib/inventory/accessoryScan";
 import {
-  PAY_METHODS, WARRANTY_START_LABEL, finalisePurchaseInvoice, lineTotalOf, nextItemCode, savePurchaseInvoice,
-  today, uploadInvoiceAttachment, warrantyText,
-  type InvoiceDetail, type NewProductDraft, type PayMethod, type WarrantyStart,
+  PAY_METHODS, WARRANTY_START_LABEL, fetchTrips, finalisePurchaseInvoice, lineTotalOf, nextItemCode, savePurchaseInvoice,
+  savePurchaseTrip, today, uploadInvoiceAttachment, warrantyText,
+  type InvoiceDetail, type NewPartDraft, type NewProductDraft, type PayMethod, type PurchaseTrip, type WarrantyStart,
 } from "@/lib/purchasing/api";
 import { Btn, ErrorNote, Modal, Rs, ff, input, label } from "./ui";
+import { suggestPartName, suggestPartSku, suggestProductName } from "@/lib/inventory/productName";
 
 /**
  * New / edit-draft supplier invoice.
  *
- * One screen for the whole bill: pick the supplier, then each line is either
- * an existing product (the delivery becomes a new batch of it — never a
- * duplicate product) or a new product described right here and created when
- * the invoice is finalised. Saving never moves stock; finalising locks the
+ * One screen for the whole bill: pick the supplier, then each line is an
+ * accessory or a repair part, either existing (the delivery becomes a new batch
+ * of it — never a duplicate) or new, described right here and created when the
+ * invoice is finalised. Saving never moves stock; finalising locks the
  * bill and creates the new products; receiving is what puts stock on the
  * shelf ("Finalise & receive all" does both when the goods came with the bill).
  */
@@ -32,6 +34,8 @@ interface Line {
   key: number;
   productId: number | null;
   np: NewProductDraft | null;
+  partId: number | null;
+  newPart: NewPartDraft | null;
   description: string;
   qty: string;
   unitCost: string;
@@ -50,7 +54,7 @@ interface Line {
 
 let keySeq = 0;
 const blankLine = (): Line => ({
-  key: ++keySeq, productId: null, np: null, description: "", qty: "1", unitCost: "", expectedSellPrice: "",
+  key: ++keySeq, productId: null, np: null, partId: null, newPart: null, description: "", qty: "1", unitCost: "", expectedSellPrice: "",
   discount: "", taxPct: "", updateSellingPrice: false, swDays: "", swStart: "invoice_date", swNotes: "", swTerms: "",
   cwDays: "", open: false, search: "",
 });
@@ -65,7 +69,8 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
   onSaved: (id: number) => void;
 }) {
   const { products, reload: reloadProducts } = useAccessories();
-  const { suppliers, addSupplier, categories, subcategories, brands } = useInventory();
+  const { parts, reload: reloadParts } = useParts();
+  const { suppliers, addSupplier, categories, subcategories, brands, addCategory, addSubcategory, addBrand, updateBrand } = useInventory();
   const { addEntry } = useCashRegister();
   const toast = useToast();
   const isMobile = useIsMobile();
@@ -89,10 +94,15 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
   const [payDate, setPayDate] = useState(inv?.initialPayment?.paidOn ?? today());
   const [payRef, setPayRef] = useState(inv?.initialPayment?.reference ?? "");
   const [fromDrawer, setFromDrawer] = useState(true);
+  const [tripId, setTripId] = useState<number | null>(inv?.tripId ?? null);
+  const [trips, setTrips] = useState<PurchaseTrip[]>([]);
+  // Trips and part lines arrive together in one migration, so this says for both.
+  const [setupNeeded, setSetupNeeded] = useState<string | null>(null);
+  const [newTrip, setNewTrip] = useState<null | { name: string; date: string; cost: string }>(null);
   const [lines, setLines] = useState<Line[]>(() => existing
     ? existing.items.map(it => ({
         ...blankLine(),
-        productId: it.productId, np: it.newProduct, description: it.description,
+        productId: it.productId, np: it.newProduct, partId: it.partId, newPart: it.newPart, description: it.description,
         qty: String(it.qty), unitCost: String(it.unitCost), expectedSellPrice: it.expectedSellPrice ? String(it.expectedSellPrice) : "",
         discount: it.discount ? String(it.discount) : "", taxPct: it.taxPct ? String(it.taxPct) : "",
         updateSellingPrice: it.updateSellingPrice,
@@ -107,6 +117,25 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
 
   const supplier = suppliers.find(s => s.name.toLowerCase() === supplierText.trim().toLowerCase()) ?? null;
   const productById = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
+  const partById = useMemo(() => new Map(parts.map(p => [Number(p.id), p])), [parts]);
+
+  const loadTrips = useCallback(async () => {
+    try { setTrips(await fetchTrips()); setSetupNeeded(null); }
+    catch (e) { setSetupNeeded(e instanceof Error ? e.message : String(e)); }
+  }, []);
+  useEffect(() => { (async () => { await loadTrips(); })(); }, [loadTrips]);
+
+  async function createTrip() {
+    if (!newTrip?.name.trim()) return;
+    try {
+      const created = await savePurchaseTrip({ id: null, name: newTrip.name, tripDate: newTrip.date, cost: num(newTrip.cost), notes: "" });
+      await loadTrips();
+      setTripId(created);
+      setNewTrip(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   const patch = (key: number, p: Partial<Line>) => setLines(prev => prev.map(l => l.key === key ? { ...l, ...p } : l));
 
@@ -122,13 +151,65 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
   ];
 
   const pickProduct = (l: Line, p: AccessoryProduct) => patch(l.key, {
-    productId: p.id, np: null, search: "", description: p.name,
+    productId: p.id, np: null, partId: null, newPart: null, search: "", description: p.name,
     unitCost: l.unitCost || String(p.buyingPrice || ""),
     expectedSellPrice: l.expectedSellPrice || String(p.sellingPrice || ""),
   });
 
+  const pickPart = (l: Line, p: SparePart) => patch(l.key, {
+    partId: Number(p.id), newPart: null, productId: null, np: null, search: "", description: p.name,
+    unitCost: l.unitCost || String(p.costPrice || ""), expectedSellPrice: "",
+  });
+
+  /** SKUs the catalogue and the other new part lines already hold. */
+  const takenSkus = (exceptKey?: number) => [
+    ...parts.map(p => p.sku),
+    ...lines.filter(l => l.key !== exceptKey && !l.partId && l.newPart).map(l => l.newPart!.sku),
+  ];
+
+  const startNewPart = (l: Line) => {
+    const partWord = /^\d{8,14}$/.test(l.search.trim()) ? "" : l.search.trim();
+    const name = partWord ? suggestPartName({ name: partWord, category: "Screen", compatibleWith: [] }) : "";
+    patch(l.key, {
+      productId: null, np: null, partId: null, search: "", expectedSellPrice: "",
+      newPart: {
+        name, partWord, category: "Screen", brand: "", compatibleWith: [], reorderLevel: 5,
+        sku: name ? suggestPartSku({ name, category: "Screen", compatibleWith: [] }, takenSkus(l.key)) : "",
+      },
+    });
+  };
+
+  const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+  /** Saved straight away, like the Add Product form: an existing name is just picked. */
+  async function saveCategory(name: string): Promise<string> {
+    const hit = categories.find(c => same(c.name, name));
+    if (hit && !hit.active) throw new Error(`"${hit.name}" is switched off. Turn it back on in Admin.`);
+    return hit ? hit.name : (await addCategory(name.trim())).name;
+  }
+
+  async function saveSubcategory(categoryName: string, name: string): Promise<string> {
+    const category = categories.find(c => c.name === categoryName);
+    if (!category) throw new Error("Pick the category first.");
+    const hit = subcategories.find(s => s.categoryId === category.id && same(s.name, name));
+    if (hit && !hit.active) throw new Error(`"${hit.name}" is switched off. Turn it back on in Admin.`);
+    return hit ? hit.name : (await addSubcategory({ name: name.trim(), categoryId: category.id })).name;
+  }
+
+  async function saveBrand(categoryName: string, name: string): Promise<string> {
+    const hit = brands.find(b => same(b.name, name));
+    if (hit && !hit.active) throw new Error(`"${hit.name}" is switched off. Turn it back on in Admin.`);
+    if (hit) {
+      // A phone brand can also make accessories: same brand, not a second one.
+      if (hit.type === "device") await updateBrand(hit.id, { name: hit.name, type: "both", categoryIds: hit.categoryIds });
+      return hit.name;
+    }
+    const category = categories.find(c => c.name === categoryName);
+    return (await addBrand({ name: name.trim(), type: "accessory", categoryIds: category ? [category.id] : [] })).name;
+  }
+
   const startNewProduct = (l: Line) => patch(l.key, {
-    productId: null, search: "",
+    productId: null, partId: null, newPart: null, search: "",
     np: { name: l.search.trim(), code: "", category: "", subcategory: "", brand: "", model: "", description: "", barcodes: /^\d{8,14}$/.test(l.search.trim()) ? [l.search.trim()] : [], minStock: 5 },
   });
 
@@ -137,12 +218,22 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
     if (!invoiceNo.trim()) return "Enter the supplier's invoice number.";
     if (lines.length === 0) return "Add at least one item.";
     const codes = new Set<string>();
+    const skus = new Set<string>();
     for (const [i, l] of lines.entries()) {
       const n = `Line ${i + 1}`;
-      if (!l.productId && !l.np) return `${n}: pick a product, or add it as a new product.`;
+      if (!l.productId && !l.np && !l.partId && !l.newPart) return `${n}: pick a product or part, or add it as a new one.`;
+      if ((l.partId || l.newPart) && setupNeeded) return setupNeeded;
       if (num(l.qty) <= 0 || !Number.isInteger(num(l.qty))) return `${n}: quantity must be a whole number above 0.`;
       if (l.unitCost.trim() === "" || num(l.unitCost) < 0) return `${n}: enter the buying price.`;
       if (num(l.discount) > num(l.qty) * num(l.unitCost)) return `${n}: the discount is more than the line.`;
+      if (l.newPart && !l.partId) {
+        if (!l.newPart.name.trim() || !l.newPart.sku.trim()) return `${n}: enter the new part's model or what the part is.`;
+        const sku = l.newPart.sku.trim().toLowerCase();
+        if (parts.some(p => p.sku.toLowerCase() === sku) || skus.has(sku)) return `${n}: SKU ${l.newPart.sku} is already used.`;
+        skus.add(sku);
+        const dup = parts.find(p => p.name.trim().toLowerCase() === l.newPart!.name.trim().toLowerCase() && (p.brand ?? "").trim().toLowerCase() === l.newPart!.brand.trim().toLowerCase());
+        if (dup) return `${n}: "${dup.name}" (${dup.sku}) is already in the catalogue. Select it instead, and this delivery becomes a new batch of it.`;
+      }
       if (l.np) {
         if (!l.np.name.trim()) return `${n}: the new product needs a name.`;
         if (!l.np.category) return `${n}: pick a category for the new product.`;
@@ -183,18 +274,21 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
       let att = attachment;
       if (file) { att = await uploadInvoiceAttachment(file); setAttachment(att); setFile(null); }
       const savedId = await savePurchaseInvoice({
-        id, supplierId: supplier!.id, invoiceNo, invoiceDate, dueDate,
+        id, tripId, supplierId: supplier!.id, invoiceNo, invoiceDate, dueDate,
         expenses: num(expenses), discount: num(discount), notes,
         attachmentPath: att?.path ?? null, attachmentName: att?.name ?? null,
         initialPayment: num(payAmount) > 0 ? { amount: num(payAmount), method: payMethod, paidOn: payDate, reference: payRef.trim(), notes: "" } : null,
         items: lines.map(l => ({
           productId: l.productId, newProduct: l.productId ? null : l.np,
-          description: l.productId ? (productById.get(l.productId)?.name ?? l.description) : (l.np?.name ?? ""),
+          partId: l.partId, newPart: l.partId ? null : l.newPart,
+          description: l.partId ? (partById.get(l.partId)?.name ?? l.description)
+            : l.newPart ? l.newPart.name
+            : l.productId ? (productById.get(l.productId)?.name ?? l.description) : (l.np?.name ?? ""),
           qty: num(l.qty), unitCost: num(l.unitCost), expectedSellPrice: num(l.expectedSellPrice),
           discount: num(l.discount), taxPct: num(l.taxPct), updateSellingPrice: !!l.productId && l.updateSellingPrice,
           supplierWarrantyDays: l.swDays === "" ? null : num(l.swDays), supplierWarrantyStart: l.swStart,
           supplierWarrantyNotes: l.swNotes, supplierWarrantyTerms: l.swTerms,
-          customerWarrantyDays: l.cwDays === "" ? null : num(l.cwDays),
+          customerWarrantyDays: l.partId || l.newPart || l.cwDays === "" ? null : num(l.cwDays),
         })),
       });
       setId(savedId);
@@ -204,6 +298,7 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
           addEntry("out", `Supplier payment — ${supplier!.name} ${invoiceNo.trim()}`, num(payAmount));
         }
         void reloadProducts();
+        void reloadParts();
       }
       toast.success(
         mode === "draft" ? "Draft saved" : mode === "final" ? "Invoice finalised" : "Invoice finalised and stock received",
@@ -274,6 +369,32 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
           </div>
         </div>
 
+        {/* ── Trip ── */}
+        <div>
+          <span style={{ ...label, display: "flex", alignItems: "center", gap: 5 }}><MapPin size={11} /> Buying trip (optional)</span>
+          {setupNeeded ? (
+            <div style={{ fontSize: 12, color: "#b45309" }}>{setupNeeded}</div>
+          ) : newTrip ? (
+            <div style={grid("2fr 1fr 1fr auto")}>
+              <input value={newTrip.name} onChange={e => setNewTrip({ ...newTrip, name: e.target.value })} placeholder="e.g. Colombo" autoFocus style={input} />
+              <input type="date" value={newTrip.date} onChange={e => setNewTrip({ ...newTrip, date: e.target.value })} style={input} />
+              <input value={newTrip.cost} onChange={e => setNewTrip({ ...newTrip, cost: e.target.value })} inputMode="decimal" placeholder="Trip cost (bus, fuel…)" style={input} />
+              <div style={{ display: "flex", gap: 6 }}>
+                <Btn onClick={() => void createTrip()} disabled={!newTrip.name.trim()}>Add</Btn>
+                <Btn onClick={() => setNewTrip(null)}>Cancel</Btn>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <select value={tripId ?? ""} onChange={e => setTripId(e.target.value ? Number(e.target.value) : null)} style={{ ...input, flex: "1 1 220px", width: "auto" }}>
+                <option value="">Not part of a trip</option>
+                {trips.map(t => <option key={t.id} value={t.id}>{t.name} · {t.tripDate}</option>)}
+              </select>
+              <Btn onClick={() => setNewTrip({ name: "", date: invoiceDate || today(), cost: "" })} style={{ padding: "6px 10px" }}><Plus size={12} /> New trip</Btn>
+            </div>
+          )}
+        </div>
+
         {/* ── Lines ── */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -283,6 +404,8 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
 
           {lines.map((l, idx) => {
             const p = l.productId ? productById.get(l.productId) ?? null : null;
+            const part = l.partId ? partById.get(l.partId) ?? null : null;
+            const isPartLine = !!(l.partId || l.newPart);
             const qty = num(l.qty);
             const lt = lineTotalOf({ qty, unitCost: num(l.unitCost), discount: num(l.discount), taxPct: num(l.taxPct) });
             const landed = qty > 0 ? lt / qty : 0;
@@ -299,6 +422,9 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
                 x.category.toLowerCase().includes(q) || x.model.toLowerCase().includes(q) || x.labelBarcode.includes(q) ||
                 x.barcodes.some(b => b.toLowerCase().includes(q))).slice(0, 8);
             })();
+            const partHits = !q ? [] : parts.filter(x =>
+              x.name.toLowerCase().includes(q) || x.sku.toLowerCase().includes(q) || (x.partNo ?? "").includes(q) ||
+              (x.brand ?? "").toLowerCase().includes(q) || x.compatibleWith.some(c => c.toLowerCase().includes(q))).slice(0, 8);
 
             return (
               <div key={l.key} style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12, background: "var(--bg-surface)", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -310,8 +436,29 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
                   </button>
                 </div>
 
-                {/* Product: existing, new, or not chosen yet */}
-                {p ? (
+                {/* Product or part: existing, new, or not chosen yet */}
+                {part ? (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, padding: "9px 12px", borderRadius: 9, border: "1px solid rgba(124,58,237,0.35)", background: "rgba(124,58,237,0.06)" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "#7c3aed" }}>
+                        <Wrench size={12} /> Existing repair part — new batch will be created
+                      </div>
+                      <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-primary)", marginTop: 3 }}>{part.name}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                        {part.sku} · {part.category} · {part.stock} in stock · last cost {Rs(part.costPrice)}
+                      </div>
+                    </div>
+                    <Btn onClick={() => patch(l.key, { partId: null })} style={{ padding: "5px 9px", fontSize: 11.5 }}>Change</Btn>
+                  </div>
+                ) : l.newPart ? (
+                  <NewPartFields
+                    np={l.newPart}
+                    onChange={newPart => patch(l.key, { newPart })}
+                    onCancel={() => patch(l.key, { newPart: null })}
+                    taken={takenSkus(l.key)}
+                    isMobile={isMobile}
+                  />
+                ) : p ? (
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, padding: "9px 12px", borderRadius: 9, border: "1px solid rgba(37,99,235,0.35)", background: "rgba(37,99,235,0.06)" }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "#2563eb" }}>
@@ -328,6 +475,10 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
                   <NewProductFields
                     np={l.np}
                     onChange={np => patch(l.key, { np })}
+                    onUpdate={change => setLines(prev => prev.map(x => x.key === l.key && x.np ? { ...x, np: { ...x.np, ...change } } : x))}
+                    onSaveCategory={saveCategory}
+                    onSaveSubcategory={saveSubcategory}
+                    onSaveBrand={saveBrand}
                     onCancel={() => patch(l.key, { np: null })}
                     categories={categories.filter(c => c.active).map(c => c.name)}
                     subcategories={subcategories.filter(sc => sc.active && sc.categoryId === categories.find(c => c.name === l.np!.category)?.id).map(sc => sc.name)}
@@ -345,9 +496,12 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
                         if (e.key !== "Enter") return;
                         e.preventDefault();
                         const exact = matchScannedAccessory(products, e.currentTarget.value);
-                        if (exact.length === 1) pickProduct(l, exact[0]);
+                        if (exact.length === 1) { pickProduct(l, exact[0]); return; }
+                        const code = e.currentTarget.value.trim().toLowerCase();
+                        const partExact = parts.filter(x => x.sku.toLowerCase() === code || x.partNo === code);
+                        if (partExact.length === 1) pickPart(l, partExact[0]);
                       }}
-                      placeholder="Search our products by name, barcode, item code, brand or category — or scan the box"
+                      placeholder="Search accessories and repair parts by name, barcode, code or SKU — or scan the box"
                       style={{ ...input, paddingLeft: 30 }}
                     />
                     {q && (
@@ -362,17 +516,37 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
                             <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{x.stock} in stock · {Rs(x.sellingPrice)}</span>
                           </button>
                         ))}
+                        {partHits.map(x => (
+                          <button key={x.id} onClick={() => pickPart(l, x)}
+                            style={{ display: "flex", justifyContent: "space-between", width: "100%", gap: 10, padding: "8px 12px", border: "none", borderBottom: "1px solid var(--border)", background: "transparent", cursor: "pointer", textAlign: "left", fontFamily: ff }}>
+                            <span style={{ minWidth: 0 }}>
+                              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)" }}><Wrench size={11} color="#7c3aed" style={{ flexShrink: 0 }} /> {x.name}</span>
+                              <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>Repair part · {x.sku} · {x.category}</span>
+                            </span>
+                            <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{x.stock} in stock · {Rs(x.costPrice)}</span>
+                          </button>
+                        ))}
                         <button onClick={() => startNewProduct(l)}
                           style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "9px 12px", border: "none", background: "transparent", cursor: "pointer", color: "var(--accent)", fontSize: 12.5, fontWeight: 700, fontFamily: ff }}>
-                          <PackagePlus size={14} /> {hits.length ? "Not listed? " : "No match — "}Add &quot;{l.search.trim()}&quot; as a new product
+                          <PackagePlus size={14} /> {hits.length || partHits.length ? "Not listed? " : "No match — "}Add &quot;{l.search.trim()}&quot; as a new accessory
+                        </button>
+                        <button onClick={() => startNewPart(l)}
+                          style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "9px 12px", border: "none", borderTop: "1px solid var(--border)", background: "transparent", cursor: "pointer", color: "#7c3aed", fontSize: 12.5, fontWeight: 700, fontFamily: ff }}>
+                          <Wrench size={14} /> Add &quot;{l.search.trim()}&quot; as a new repair part
                         </button>
                       </div>
                     )}
                     {!q && (
-                      <button onClick={() => startNewProduct(l)}
-                        style={{ marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6, padding: 0, border: "none", background: "none", cursor: "pointer", color: "var(--accent)", fontSize: 12, fontWeight: 600, fontFamily: ff }}>
-                        <PackagePlus size={13} /> + Add New Product
-                      </button>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 6 }}>
+                        <button onClick={() => startNewProduct(l)}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: 0, border: "none", background: "none", cursor: "pointer", color: "var(--accent)", fontSize: 12, fontWeight: 600, fontFamily: ff }}>
+                          <PackagePlus size={13} /> + New accessory
+                        </button>
+                        <button onClick={() => startNewPart(l)}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: 0, border: "none", background: "none", cursor: "pointer", color: "#7c3aed", fontSize: 12, fontWeight: 600, fontFamily: ff }}>
+                          <Wrench size={13} /> + New repair part
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
@@ -381,7 +555,7 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
                 <div style={grid("0.7fr 1fr 1fr 0.9fr 0.7fr 1fr")}>
                   <div><span style={label}>Qty</span><input value={l.qty} onChange={e => patch(l.key, { qty: e.target.value })} inputMode="numeric" style={input} /></div>
                   <div><span style={label}>Buying price / unit</span><input value={l.unitCost} onChange={e => patch(l.key, { unitCost: e.target.value })} inputMode="decimal" placeholder="0" style={input} /></div>
-                  <div><span style={label}>Expected selling</span><input value={l.expectedSellPrice} onChange={e => patch(l.key, { expectedSellPrice: e.target.value })} inputMode="decimal" placeholder="0" style={input} /></div>
+                  {!isPartLine && <div><span style={label}>Expected selling</span><input value={l.expectedSellPrice} onChange={e => patch(l.key, { expectedSellPrice: e.target.value })} inputMode="decimal" placeholder="0" style={input} /></div>}
                   <div><span style={label}>Line discount</span><input value={l.discount} onChange={e => patch(l.key, { discount: e.target.value })} inputMode="decimal" placeholder="0" style={input} /></div>
                   <div><span style={label}>Tax %</span><input value={l.taxPct} onChange={e => patch(l.key, { taxPct: e.target.value })} inputMode="decimal" placeholder="0" style={input} /></div>
                   <div>
@@ -409,7 +583,7 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
                 <button onClick={() => patch(l.key, { open: !l.open })}
                   style={{ display: "flex", alignItems: "center", gap: 6, padding: 0, border: "none", background: "none", cursor: "pointer", color: "var(--text-secondary)", fontSize: 12, fontWeight: 600, fontFamily: ff, alignSelf: "flex-start" }}>
                   {l.open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                  <ShieldCheck size={13} /> Warranty — supplier: {l.swDays === "" ? "none" : warrantyText(num(l.swDays))} · customer: {l.cwDays === "" ? "shop policy" : warrantyText(num(l.cwDays))}
+                  <ShieldCheck size={13} /> Warranty — supplier: {l.swDays === "" ? "none" : warrantyText(num(l.swDays))}{!isPartLine && ` · customer: ${l.cwDays === "" ? "shop policy" : warrantyText(num(l.cwDays))}`}
                 </button>
                 {l.open && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingLeft: 4 }}>
@@ -424,10 +598,12 @@ export default function PurchaseInvoiceForm({ existing, presetSupplierId, onClos
                           {(Object.keys(WARRANTY_START_LABEL) as WarrantyStart[]).map(k => <option key={k} value={k}>{WARRANTY_START_LABEL[k]}</option>)}
                         </select>
                       </div>
-                      <div>
-                        <span style={label}>Customer warranty (from us)</span>
-                        <WarrantySelect value={l.cwDays} onChange={v => patch(l.key, { cwDays: v })} emptyLabel="Shop policy" />
-                      </div>
+                      {!isPartLine && (
+                        <div>
+                          <span style={label}>Customer warranty (from us)</span>
+                          <WarrantySelect value={l.cwDays} onChange={v => patch(l.key, { cwDays: v })} emptyLabel="Shop policy" />
+                        </div>
+                      )}
                     </div>
                     <div style={grid("1fr 1fr")}>
                       <div><span style={label}>Supplier warranty notes</span><input value={l.swNotes} onChange={e => patch(l.key, { swNotes: e.target.value })} placeholder="e.g. Replace only, bring box" style={input} /></div>
@@ -514,9 +690,104 @@ function WarrantySelect({ value, onChange, emptyLabel }: { value: string; onChan
   );
 }
 
-function NewProductFields({ np, onChange, onCancel, categories, subcategories, brands, suggestCode, isMobile }: {
+/** A repair part not in the catalogue yet. Its name and SKU follow the same format as the parts screen. */
+function NewPartFields({ np, onChange, onCancel, taken, isMobile }: {
+  np: NewPartDraft;
+  onChange: (np: NewPartDraft) => void;
+  onCancel: () => void;
+  taken: string[];
+  isMobile: boolean;
+}) {
+  const [devicesText, setDevicesText] = useState(np.compatibleWith.join(", "));
+  const g = (cols: string): React.CSSProperties => ({ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : cols, gap: 10 });
+
+  function apply(change: Partial<NewPartDraft>, text = devicesText) {
+    const next = { ...np, ...change, compatibleWith: text.split(",").map(s => s.trim()).filter(Boolean) };
+    const known = next.compatibleWith.length > 0 || next.partWord.trim() !== "";
+    const parts = { name: next.partWord, category: next.category, compatibleWith: next.compatibleWith, brand: next.brand };
+    const name = known ? suggestPartName(parts) : "";
+    onChange({ ...next, name, sku: name ? suggestPartSku({ ...parts, name }, taken) : "" });
+  }
+
+  return (
+    <div style={{ padding: "10px 12px", borderRadius: 9, border: "1px solid rgba(124,58,237,0.35)", background: "rgba(124,58,237,0.05)", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "#7c3aed" }}>
+          <Wrench size={12} /> New repair part — added to the catalogue when this invoice is finalised
+        </span>
+        <Btn onClick={onCancel} style={{ padding: "4px 8px", fontSize: 11 }}>Pick existing instead</Btn>
+      </div>
+      <div>
+        <span style={label}>Compatible devices, most common model first</span>
+        <input value={devicesText} onChange={e => { setDevicesText(e.target.value); apply({}, e.target.value); }} placeholder="e.g. Samsung M02s, Samsung A02s" style={input} />
+      </div>
+      <div style={g("1fr 1fr 1fr 0.6fr")}>
+        <div><span style={label}>Brand (optional)</span><input value={np.brand} onChange={e => apply({ brand: e.target.value })} placeholder="e.g. Crown" style={input} /></div>
+        <div><span style={label}>Part (optional)</span><input value={np.partWord} onChange={e => apply({ partWord: e.target.value })} placeholder={np.category === "Screen" ? "e.g. Display" : np.category} style={input} /></div>
+        <div>
+          <span style={label}>Category</span>
+          <select value={np.category} onChange={e => apply({ category: e.target.value })} style={input}>
+            {PART_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div><span style={label}>Reorder at</span><input value={String(np.reorderLevel)} onChange={e => apply({ reorderLevel: Math.max(0, parseInt(e.target.value.replace(/\D/g, "") || "0", 10)) })} inputMode="numeric" style={input} /></div>
+      </div>
+      <div style={{ fontSize: 12, color: "var(--text-secondary)", overflowWrap: "anywhere" }}>
+        {np.name
+          ? <>Will be added as <strong>{np.name}</strong> · SKU <strong style={{ fontFamily: "monospace" }}>{np.sku}</strong>. An Admin can edit these on the parts screen afterwards.</>
+          : "Enter a model or what the part is, and the name and SKU fill in."}
+      </div>
+    </div>
+  );
+}
+
+const ADD_NEW = "__add_new__";
+
+/** A name to save to the system, right where a dropdown was. */
+function AddOption({ placeholder, onSave, onCancel }: {
+  placeholder: string;
+  onSave: (name: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (busy || !name.trim()) return;
+    setBusy(true);
+    setError(null);
+    try { await onSave(name); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); setBusy(false); }
+  }
+
+  return (
+    <div>
+      <input
+        value={name}
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void save(); } if (e.key === "Escape") onCancel(); }}
+        placeholder={placeholder}
+        autoFocus
+        style={input}
+      />
+      <div style={{ display: "flex", gap: 6, marginTop: 5 }}>
+        <Btn kind="primary" onClick={() => void save()} disabled={busy || !name.trim()} style={{ padding: "4px 9px", fontSize: 11 }}>{busy ? "Saving…" : "Save"}</Btn>
+        <Btn onClick={onCancel} disabled={busy} style={{ padding: "4px 9px", fontSize: 11 }}>Cancel</Btn>
+      </div>
+      {error && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 4 }}>{error}</div>}
+    </div>
+  );
+}
+
+function NewProductFields({ np, onChange, onUpdate, onSaveCategory, onSaveSubcategory, onSaveBrand, onCancel, categories, subcategories, brands, suggestCode, isMobile }: {
   np: NewProductDraft;
   onChange: (np: NewProductDraft) => void;
+  /** For a save that finishes later: only these fields, on whatever the line holds by then. */
+  onUpdate: (change: Partial<NewProductDraft>) => void;
+  onSaveCategory: (name: string) => Promise<string>;
+  onSaveSubcategory: (category: string, name: string) => Promise<string>;
+  onSaveBrand: (category: string, name: string) => Promise<string>;
   onCancel: () => void;
   categories: string[];
   subcategories: string[];
@@ -526,6 +797,20 @@ function NewProductFields({ np, onChange, onCancel, categories, subcategories, b
 }) {
   const set = (p: Partial<NewProductDraft>) => onChange({ ...np, ...p });
   const g = (cols: string): React.CSSProperties => ({ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : cols, gap: 10 });
+  const suggestedName = np.category ? suggestProductName(np) : "";
+  const [adding, setAdding] = useState<null | "category" | "subcategory">(null);
+  const [brandBusy, setBrandBusy] = useState(false);
+  const [brandError, setBrandError] = useState<string | null>(null);
+  const brandIsNew = !!np.brand.trim() && !brands.some(b => b.trim().toLowerCase() === np.brand.trim().toLowerCase());
+
+  async function saveTypedBrand() {
+    if (brandBusy) return;
+    setBrandBusy(true);
+    setBrandError(null);
+    try { onUpdate({ brand: await onSaveBrand(np.category, np.brand) }); }
+    catch (e) { setBrandError(e instanceof Error ? e.message : String(e)); }
+    finally { setBrandBusy(false); }
+  }
   return (
     <div style={{ padding: "10px 12px", borderRadius: 9, border: "1px solid rgba(22,163,74,0.35)", background: "rgba(22,163,74,0.05)", display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -535,20 +820,68 @@ function NewProductFields({ np, onChange, onCancel, categories, subcategories, b
         <Btn onClick={onCancel} style={{ padding: "4px 8px", fontSize: 11 }}>Pick existing instead</Btn>
       </div>
       <div style={g("2fr 1.2fr 1.2fr 1fr")}>
-        <div style={{ gridColumn: isMobile ? "1 / -1" : undefined }}><span style={label}>Product name</span><input value={np.name} onChange={e => set({ name: e.target.value })} style={input} /></div>
+        <div style={{ gridColumn: isMobile ? "1 / -1" : undefined }}><span style={label}>Product name</span><input value={np.name} onChange={e => set({ name: e.target.value })} style={input} />
+          {suggestedName && suggestedName !== np.name && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3, overflowWrap: "anywhere" }}>
+              Suggested: <strong>{suggestedName}</strong>{" "}
+              <button type="button" onClick={() => set({ name: suggestedName })} style={{ background: "none", border: "none", padding: 0, color: "var(--accent)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: ff }}>Use this</button>
+            </div>
+          )}
+        </div>
         <div>
           <span style={label}>Category</span>
-          <select value={np.category} onChange={e => set({ category: e.target.value, subcategory: "", code: np.code && np.category === e.target.value ? np.code : suggestCode(e.target.value) })} style={input}>
-            <option value="">Choose…</option>
-            {categories.map(c => <option key={c}>{c}</option>)}
-          </select>
+          {adding === "category" ? (
+            <AddOption
+              placeholder="New category name"
+              onCancel={() => setAdding(null)}
+              onSave={async name => {
+                const saved = await onSaveCategory(name);
+                onUpdate({ category: saved, subcategory: "", code: suggestCode(saved) });
+                setAdding(null);
+              }}
+            />
+          ) : (
+            <select
+              value={np.category}
+              onChange={e => {
+                if (e.target.value === ADD_NEW) { setAdding("category"); return; }
+                set({ category: e.target.value, subcategory: "", code: np.code && np.category === e.target.value ? np.code : suggestCode(e.target.value) });
+              }}
+              style={input}
+            >
+              <option value="">Choose…</option>
+              {categories.map(c => <option key={c}>{c}</option>)}
+              <option value={ADD_NEW}>+ Add new category…</option>
+            </select>
+          )}
         </div>
         <div>
           <span style={label}>Subcategory</span>
-          <select value={np.subcategory} onChange={e => set({ subcategory: e.target.value })} style={input} disabled={subcategories.length === 0}>
-            <option value="">{subcategories.length ? "Choose…" : "—"}</option>
-            {subcategories.map(c => <option key={c}>{c}</option>)}
-          </select>
+          {adding === "subcategory" ? (
+            <AddOption
+              placeholder={`New subcategory under ${np.category}`}
+              onCancel={() => setAdding(null)}
+              onSave={async name => {
+                onUpdate({ subcategory: await onSaveSubcategory(np.category, name) });
+                setAdding(null);
+              }}
+            />
+          ) : (
+            <select
+              value={np.subcategory}
+              onChange={e => {
+                if (e.target.value === ADD_NEW) { setAdding("subcategory"); return; }
+                set({ subcategory: e.target.value });
+              }}
+              style={input}
+              disabled={!np.category}
+              title={np.category ? undefined : "Pick the category first"}
+            >
+              <option value="">{subcategories.length ? "Choose…" : "—"}</option>
+              {subcategories.map(c => <option key={c}>{c}</option>)}
+              <option value={ADD_NEW}>+ Add new subcategory…</option>
+            </select>
+          )}
         </div>
         <div><span style={label}>Item code</span><input value={np.code} onChange={e => set({ code: e.target.value })} placeholder="auto" style={input} /></div>
       </div>
@@ -557,6 +890,12 @@ function NewProductFields({ np, onChange, onCancel, categories, subcategories, b
           <span style={label}>Brand</span>
           <input list="pi-brands" value={np.brand} onChange={e => set({ brand: e.target.value })} style={input} />
           <datalist id="pi-brands">{brands.map(b => <option key={b} value={b} />)}</datalist>
+          {brandIsNew && (
+            <button type="button" onClick={() => void saveTypedBrand()} disabled={brandBusy} style={{ display: "block", marginTop: 4, padding: 0, border: "none", background: "none", color: "var(--accent)", fontSize: 11, fontWeight: 700, cursor: brandBusy ? "default" : "pointer", fontFamily: ff, textAlign: "left", overflowWrap: "anywhere" }}>
+              {brandBusy ? "Saving…" : `+ Save "${np.brand.trim()}" as a new brand`}
+            </button>
+          )}
+          {brandError && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 4 }}>{brandError}</div>}
         </div>
         <div><span style={label}>Compatible model</span><input value={np.model} onChange={e => set({ model: e.target.value })} placeholder="e.g. Universal" style={input} /></div>
         <div>

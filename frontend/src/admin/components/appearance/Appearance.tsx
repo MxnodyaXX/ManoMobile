@@ -212,7 +212,7 @@ export default function Appearance() {
         ) : (
           <div style={{
             display: "grid", gap: 12, alignItems: "stretch",
-            gridTemplateColumns: "repeat(auto-fill, minmax(max(230px, 32%), 1fr))",
+            gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, max(230px, 32%)), 1fr))",
           }}>
             {PALETTES.map(p => {
               const active = draft.palette === p.id;

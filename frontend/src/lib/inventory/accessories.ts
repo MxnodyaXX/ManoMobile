@@ -114,6 +114,22 @@ export async function saveAccessoryProduct(product: AccessoryProduct): Promise<A
 }
 
 /**
+ * Changes only the name. saveAccessoryProduct writes every column, so using it
+ * for a bulk rename could put back a stock count from before a sale on another
+ * till. Returns false, changing nothing, if someone renamed it in the meantime.
+ */
+export async function renameAccessoryProduct(id: number, oldName: string, newName: string): Promise<boolean> {
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("accessory_products")
+    .update({ name: newName.trim() })
+    .eq("id", id)
+    .eq("name", oldName)
+    .select("id");
+  if (error) throw new Error(error.message);
+  return (data ?? []).length > 0;
+}
+
+/**
  * Links one manufacturer barcode to a product — the "unknown barcode, which
  * product is this?" step at the counter. Linking a code the product already
  * has is a no-op, not an error.

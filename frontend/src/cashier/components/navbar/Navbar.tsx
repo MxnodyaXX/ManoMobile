@@ -8,6 +8,7 @@ import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 const pageTitles: Record<string, { title: string; sub: string }> = {
   "Home":                  { title: "Dashboard",         sub: "Overview" },
   "Repair Management":     { title: "Repair Management", sub: "Jobs & Tickets" },
+  "Warranty Center":       { title: "Warranty Center",   sub: "Warranties & Claims" },
   "Sales Management":      { title: "Sales Management",  sub: "Transactions" },
   "Inventory Management":  { title: "Inventory",         sub: "Stock & Parts" },
   "Customer Management":   { title: "Customers",         sub: "Profiles" },

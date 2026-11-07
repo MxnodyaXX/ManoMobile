@@ -476,6 +476,83 @@ select option { background: var(--bg-card); color: var(--text-primary); }
   }
 }
 
+/* ── A folded grid has no second column to span ───────────────────────────
+   A field marked span 2 inside a grid just folded to one column doesn't fill
+   it: the browser invents a second column to honour the span, and every field
+   above ends up a few pixels wide. */
+@media screen and (max-width: 480px) {
+  [style*="columns:1fr 1fr"]:not(.keep-cols) > [style*="grid-column"],
+  [style*="columns: 1fr 1fr"]:not(.keep-cols) > [style*="grid-column"],
+  [style*="repeat("]:not(.keep-cols):not([style*="auto-f"]) > [style*="grid-column"] {
+    grid-column: auto !important;
+  }
+}
+
+/* ── Line-item rows ───────────────────────────────────────────────────────
+   Quotation and purchase-order rows: a description and four small boxes side
+   by side, none of them usable on a phone. The description takes its own line
+   and the rest pair up beneath it. */
+@media screen and (max-width: 560px) {
+  [style*="columns:3fr 80px 120px 80px 100px 36px"],
+  [style*="columns: 3fr 80px 120px 80px 100px 36px"],
+  [style*="columns:2fr 1fr 1fr 1fr auto"],
+  [style*="columns: 2fr 1fr 1fr 1fr auto"] {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  [style*="columns:3fr 80px 120px 80px 100px 36px"] > :first-child,
+  [style*="columns: 3fr 80px 120px 80px 100px 36px"] > :first-child,
+  [style*="columns:2fr 1fr 1fr 1fr auto"] > :first-child,
+  [style*="columns: 2fr 1fr 1fr 1fr auto"] > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ── Inline grids can shrink ──────────────────────────────────────────────
+   A grid item won't go narrower than its content unless told it may, so one
+   long word pushes its whole column — and the page — past the edge of the
+   screen. That's how a two-column stat row ended up cut off on the right. */
+@media screen and (max-width: 768px) {
+  [style*="display:grid"] > *,
+  [style*="display: grid"] > * { min-width: 0; }
+}
+
+/* ── Tab strips scroll inside themselves ──────────────────────────────────
+   The segmented tab bars are flex rows sized width: fit-content, so with more
+   tabs than a phone has room for they push the whole page sideways. Capped at
+   the screen, the strip scrolls and the page stays still. Both spellings, for
+   the same reason as the grids above.
+   flex-shrink on the strip itself: overflow turns off a flex item's minimum
+   height, so inside a column it would otherwise be squashed flat. Anything else
+   sized fit-content (a header card) is only capped, so its text still wraps. */
+@media screen and (max-width: 768px) {
+  [style*="width:fit-content"]:not(.no-resp),
+  [style*="width: fit-content"]:not(.no-resp) { max-width: 100%; }
+  [style*="display:flex"][style*="width:fit-content"]:not(.no-resp):has(> button),
+  [style*="display: flex"][style*="width: fit-content"]:not(.no-resp):has(> button) {
+    flex-shrink: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  [style*="display:flex"][style*="width:fit-content"]:not(.no-resp):has(> button) > button,
+  [style*="display: flex"][style*="width: fit-content"]:not(.no-resp):has(> button) > button {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+}
+
+/* ── Uneven two-column layouts fold too ───────────────────────────────────
+   A chart beside a chart, written 1.25fr 1fr: on a phone each is too narrow to
+   read. Same matching as the even grids above. */
+@media screen and (max-width: 700px) {
+  [style*="columns:1.25fr 1fr"]:not(.keep-cols),
+  [style*="columns: 1.25fr 1fr"]:not(.keep-cols),
+  [style*="columns:1fr 2fr"]:not(.keep-cols),
+  [style*="columns: 1fr 2fr"]:not(.keep-cols) {
+    grid-template-columns: 1fr !important;
+  }
+}
+
 /* ── Nothing wider than the screen ────────────────────────────────────────
    The last resort, for whatever the three rules above did not recognise.
    `clip` rather than `hidden` on purpose: hidden would make the body a scroll

@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Ban, CheckCircle2, Edit2, PackageCheck, Paperclip, Wallet } from "lucide-react";
+import { Ban, CheckCircle2, Edit2, PackageCheck, Paperclip, Printer, Wallet } from "lucide-react";
 import { useAccessories } from "@/cashier/contexts/AccessoriesContext";
+import { useParts } from "@/cashier/contexts/PartsContext";
 import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 import { useRealtimeTable } from "@/lib/supabase/useRealtime";
 import { useToast } from "@/lib/ui/toast";
@@ -10,6 +11,7 @@ import {
   WARRANTY_START_LABEL, attachmentUrl, fetchInvoiceDetail, finalisePurchaseInvoice, paymentStatus, receivePurchaseInvoice,
   receivingStatus, today, voidPurchaseInvoice, voidSupplierPayment, warrantyText, type InvoiceDetail,
 } from "@/lib/purchasing/api";
+import InvoiceLabelsModal from "./InvoiceLabelsModal";
 import SupplierPaymentModal from "./SupplierPaymentModal";
 import { Badge, Btn, ErrorNote, Modal, Rs, Stat, fmtDate, input, label, paymentTone, receivingTone, td, th } from "./ui";
 
@@ -23,6 +25,7 @@ export default function PurchaseInvoiceDetail({ invoiceId, onClose, onEdit, onCh
   onChanged: () => void;
 }) {
   const { products, reload: reloadProducts } = useAccessories();
+  const { parts, reload: reloadParts } = useParts();
   const toast = useToast();
   const isMobile = useIsMobile();
   const [d, setD] = useState<InvoiceDetail | null>(null);
@@ -30,6 +33,7 @@ export default function PurchaseInvoiceDetail({ invoiceId, onClose, onEdit, onCh
   const [receiving, setReceiving] = useState(false);
   const [paying, setPaying] = useState(false);
   const [voiding, setVoiding] = useState(false);
+  const [printingLabels, setPrintingLabels] = useState(false);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
 
@@ -38,9 +42,9 @@ export default function PurchaseInvoiceDetail({ invoiceId, onClose, onEdit, onCh
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   }, [invoiceId]);
   useEffect(() => { (async () => { await load(); })(); }, [load]);
-  useRealtimeTable(["purchase_invoices", "supplier_payments", "accessory_batches"], load);
+  useRealtimeTable(["purchase_invoices", "supplier_payments", "accessory_batches", "repair_part_batches"], load);
 
-  const changed = () => { void load(); onChanged(); void reloadProducts(); };
+  const changed = () => { void load(); onChanged(); void reloadProducts(); void reloadParts(); };
 
   async function run(action: () => Promise<void>, ok: string): Promise<boolean> {
     if (busyRef.current) return false;
@@ -76,7 +80,7 @@ export default function PurchaseInvoiceDetail({ invoiceId, onClose, onEdit, onCh
     <Modal
       title={<span>{inv.supplierName} · {inv.invoiceNo} <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>{inv.ref}</span></span>}
       subtitle={<span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-        {fmtDate(inv.invoiceDate)}{inv.dueDate && ` · due ${fmtDate(inv.dueDate)}`}
+        {fmtDate(inv.invoiceDate)}{inv.dueDate && ` · due ${fmtDate(inv.dueDate)}`}{inv.tripName && ` · trip: ${inv.tripName}`}
         {inv.status === "Draft" ? <Badge>Draft</Badge> : inv.status === "Void" ? <Badge tone="red">Void</Badge> : <>
           <Badge tone={paymentTone(ps)}>{ps}</Badge><Badge tone={receivingTone(rs)}>{rs}</Badge>
         </>}
@@ -97,6 +101,7 @@ export default function PurchaseInvoiceDetail({ invoiceId, onClose, onEdit, onCh
             </>}
             {inv.status === "Open" && <>
               <Btn kind="danger" onClick={() => setVoiding(true)} disabled={busy}><Ban size={13} /> Void</Btn>
+              <Btn onClick={() => setPrintingLabels(true)} disabled={busy}><Printer size={13} /> Print labels</Btn>
               {inv.outstanding > 0.005 && <Btn onClick={() => setPaying(true)} disabled={busy}><Wallet size={13} /> Record payment</Btn>}
               {remaining > 0 && <Btn kind="primary" onClick={() => setReceiving(true)} disabled={busy}><PackageCheck size={13} /> Receive stock</Btn>}
             </>}
@@ -130,6 +135,8 @@ export default function PurchaseInvoiceDetail({ invoiceId, onClose, onEdit, onCh
                   <td style={td}>
                     <div style={{ fontWeight: 600 }}>{productName(it.productId, it.newProduct?.name ?? it.description)}</div>
                     {!it.productId && it.newProduct && <Badge tone="green">New product · {it.newProduct.code}</Badge>}
+                    {!it.partId && it.newPart && <Badge tone="green">New repair part · {it.newPart.sku}</Badge>}
+                    {it.partId && <Badge>Repair part</Badge>}
                     {it.updateSellingPrice && <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Updates the selling price on receipt</div>}
                   </td>
                   <td style={{ ...td, textAlign: "right" }}>{it.qty}</td>
@@ -148,7 +155,7 @@ export default function PurchaseInvoiceDetail({ invoiceId, onClose, onEdit, onCh
           </table>
         </Section>
 
-        {d.batches.length > 0 && (
+        {d.batches.length + d.partBatches.length > 0 && (
           <Section title="Batches created">
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
               <thead><tr><th style={th}>Batch</th><th style={th}>Product</th><th style={th}>Received</th><th style={{ ...th, textAlign: "right" }}>Qty</th><th style={{ ...th, textAlign: "right" }}>Left</th><th style={{ ...th, textAlign: "right" }}>Cost/unit</th><th style={th}>Status</th></tr></thead>
@@ -157,6 +164,17 @@ export default function PurchaseInvoiceDetail({ invoiceId, onClose, onEdit, onCh
                   <tr key={b.id}>
                     <td style={{ ...td, fontFamily: "monospace" }}>{b.batchNo}</td>
                     <td style={td}>{productName(b.productId, `#${b.productId}`)}</td>
+                    <td style={td}>{fmtDate(b.receivedOn)}</td>
+                    <td style={{ ...td, textAlign: "right" }}>{b.qtyReceived}</td>
+                    <td style={{ ...td, textAlign: "right" }}>{b.qtyAvailable}</td>
+                    <td style={{ ...td, textAlign: "right" }}>{Rs(b.unitCost)}</td>
+                    <td style={td}><Badge tone={b.status === "Active" ? "green" : b.status === "Reversed" ? "red" : "grey"}>{b.status}</Badge></td>
+                  </tr>
+                ))}
+                {d.partBatches.map(b => (
+                  <tr key={`part-${b.id}`}>
+                    <td style={{ ...td, fontFamily: "monospace" }}>{b.batchNo}</td>
+                    <td style={td}>{parts.find(p => Number(p.id) === b.partId)?.name ?? `Part #${b.partId}`}</td>
                     <td style={td}>{fmtDate(b.receivedOn)}</td>
                     <td style={{ ...td, textAlign: "right" }}>{b.qtyReceived}</td>
                     <td style={{ ...td, textAlign: "right" }}>{b.qtyAvailable}</td>
@@ -215,6 +233,7 @@ export default function PurchaseInvoiceDetail({ invoiceId, onClose, onEdit, onCh
       </div>
 
       {receiving && <ReceiveModal d={d} productName={productName} onClose={() => setReceiving(false)} onDone={() => { setReceiving(false); changed(); }} />}
+      {printingLabels && <InvoiceLabelsModal detail={d} onClose={() => setPrintingLabels(false)} />}
       {paying && (
         <SupplierPaymentModal
           supplierId={inv.supplierId} supplierName={inv.supplierName} invoices={[inv]} onlyInvoiceId={inv.id}
@@ -224,7 +243,7 @@ export default function PurchaseInvoiceDetail({ invoiceId, onClose, onEdit, onCh
       {voiding && (
         <VoidModal
           title={`Void ${inv.invoiceNo}?`}
-          body="Stock this invoice brought in is taken back out and its batches are marked Reversed. Only possible while none of that stock has been sold and no payment stands against it."
+          body="Stock this invoice brought in is taken back out and its batches are marked Reversed. Only possible while none of that stock has been sold or issued to a job, and no payment stands against it."
           onClose={() => setVoiding(false)}
           onConfirm={reason => run(() => voidPurchaseInvoice(inv.id, reason), "Invoice voided").then(() => setVoiding(false))}
         />

@@ -2,10 +2,11 @@
 
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import type { AnalyticsData } from "./data";
-import { live, partsCost, refunds as refundTotals } from "./overview";
+import { addFormerPartNames, live, partsCost, refunds as refundTotals } from "./overview";
 import { faultCategory } from "./repairs";
 import { customerKey } from "./sales";
 import { bucketsFor, daysBetween, delta, inWindow, type Delta, type Window } from "./window";
+import { typedPartCost } from "@/lib/repair/partCost";
 
 /**
  * What went wrong and what it cost — sections 20 (refunds), 21 (warranty)
@@ -178,7 +179,8 @@ export function partsKpis(d: AnalyticsData, w: Window): PartsKpis {
 }
 
 export function partsUsage(d: AnalyticsData, w: Window, keyOf: (j: RepairJob, part: string) => string): { name: string; value: number; cost: number }[] {
-  const byName = new Map(d.parts.map(p => [p.name.trim().toLowerCase(), p.costPrice]));
+  const byName = new Map(d.parts.map(p => [p.name.trim().toLowerCase(), typedPartCost(p)]));
+  addFormerPartNames(byName, d.parts);
   const m = new Map<string, { value: number; cost: number }>();
   for (const j of d.jobs) {
     if (!isFinished(j) || !inWindow(j.completedAt, w)) continue;

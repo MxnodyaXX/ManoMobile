@@ -47,6 +47,7 @@ import { useDeviceModelLookup } from "@/lib/repair/deviceModels";
 import { normaliseModelNumber } from "@/cashier/data/modelNumbers";
 import { phoneMatches } from "@/lib/repair/phoneSearch";
 import { docDate } from "@/lib/docDate";
+import { requestUnitCost } from "@/lib/repair/partCost";
 
 interface FinishJobData {
   actionTaken: string;
@@ -582,7 +583,7 @@ function PartsUsedModal({ job, onClose }: { job: RepairJob; onClose: () => void 
   const requests = partRequests.filter(r => r.jobId === job.id);
   const used = requests.filter(r => r.status === "Approved" || r.status === "Issued");
   const unresolved = requests.filter(r => r.status === "Pending" || r.status === "Rejected");
-  const total = used.reduce((s, r) => s + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+  const total = used.reduce((s, r) => s + requestUnitCost(r, parts) * r.quantity, 0);
 
   if (typeof document === "undefined") return null;
   return createPortal(
@@ -617,7 +618,7 @@ function PartsUsedModal({ job, onClose }: { job: RepairJob; onClose: () => void 
                 <tbody>
                   {used.map(r => {
                     const part = parts.find(p => p.sku === r.partSku);
-                    const lineCost = (part?.costPrice ?? 0) * r.quantity;
+                    const lineCost = requestUnitCost(r, parts) * r.quantity;
                     return (
                       <tr key={r.id} style={{ borderTop: "1px solid var(--border)" }}>
                         <td style={{ padding: "7px 10px", color: "var(--text-primary)" }}>
@@ -666,7 +667,7 @@ function JobCostCell({ job }: { job: RepairJob }) {
 
   const requests = partRequests.filter(r => r.jobId === job.id);
   const used = requests.filter(r => r.status === "Approved" || r.status === "Issued");
-  const partsCost = used.reduce((s, r) => s + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+  const partsCost = used.reduce((s, r) => s + requestUnitCost(r, parts) * r.quantity, 0);
   // Only what the technician actually entered. Jobs finished before labour was
   // recorded show a dash rather than a zero, which would read as "free".
   const labour = job.labourCost;
@@ -732,7 +733,7 @@ function PartsCostCell({ job }: { job: RepairJob }) {
   const [open, setOpen] = useState(false);
   const requests = partRequests.filter(r => r.jobId === job.id);
   const used = requests.filter(r => r.status === "Approved" || r.status === "Issued");
-  const cost = used.reduce((s, r) => s + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+  const cost = used.reduce((s, r) => s + requestUnitCost(r, parts) * r.quantity, 0);
 
   if (requests.length === 0) return <span style={{ fontSize: 12, color: "var(--text-muted)" }}>—</span>;
 
@@ -1417,7 +1418,7 @@ export function JobDetailsModal({ job, onClose, onFinishJob, onIssueJob, onCance
         </span>
         <span style={secHead}>{title}</span>
       </div>
-      <div style={{ padding: "11px 13px", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(230px, 1fr))", gap: "11px 16px", alignItems: "start" }}>
+      <div style={{ padding: "11px 13px", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(min(230px, 100%), 1fr))", gap: "11px 16px", alignItems: "start" }}>
         {children}
       </div>
     </div>

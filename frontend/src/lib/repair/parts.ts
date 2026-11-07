@@ -34,6 +34,12 @@ interface PartRow {
   location: string | null;
   /** Absent until migration 20261008000072 is applied. */
   supplier?: string | null;
+  /** Absent until migration 20261107000093 is applied. */
+  former_names?: string[] | null;
+  /** Absent until migration 20261107000094 is applied. */
+  brand?: string | null;
+  /** Absent until migration 20261107000095 is applied. */
+  legacy_cost?: number | string | null;
 }
 
 interface RequestRow {
@@ -49,6 +55,8 @@ interface RequestRow {
   requested_at: string;
   resolved_at: string | null;
   installed_at: string | null;
+  /** Absent until migration 20261107000095 is applied. */
+  unit_cost?: number | string | null;
 }
 
 // numeric(12,2) arrives as a string over PostgREST, so never trust the type.
@@ -67,6 +75,9 @@ function toPart(row: PartRow): SparePart {
     costPrice: num(row.cost_price),
     location: row.location ?? "",
     supplier: row.supplier ?? "",
+    formerNames: row.former_names ?? undefined,
+    brand: row.brand ?? undefined,
+    legacyCost: row.legacy_cost == null ? undefined : num(row.legacy_cost),
   };
 }
 
@@ -84,6 +95,7 @@ function toRequest(row: RequestRow): PartRequest {
     requestedAt: new Date(row.requested_at),
     resolvedAt: row.resolved_at ? new Date(row.resolved_at) : undefined,
     installedAt: row.installed_at ? new Date(row.installed_at) : undefined,
+    unitCost: row.unit_cost == null ? undefined : num(row.unit_cost),
   };
 }
 
@@ -120,6 +132,7 @@ export async function savePart(part: SparePart): Promise<SparePart> {
     cost_price: part.costPrice,
     location: part.location,
     supplier: (part.supplier ?? "").trim(),
+    brand: (part.brand ?? "").trim(),
   };
 
   const sb = getSupabaseBrowserClient();
@@ -131,11 +144,14 @@ export async function savePart(part: SparePart): Promise<SparePart> {
   ).select(PART_COLUMNS).single();
 
   let { data, error } = await run(payload);
-  // Supplier column not there yet (migration 20261008000072 not applied):
-  // save everything else rather than refuse the whole part.
-  if (error && /supplier/i.test(error.message)) {
-    const rest: Partial<typeof payload> = { ...payload };
-    delete rest.supplier;
+  // A newer column not there yet (migrations 20261008000072, 20261107000094 not
+  // applied): save everything else rather than refuse the whole part.
+  const rest: Partial<typeof payload> = { ...payload };
+  for (let tries = 0; error && tries < 2; tries++) {
+    const message = error.message;
+    const missing = (["supplier", "brand"] as const).find(c => c in rest && new RegExp(c, "i").test(message));
+    if (!missing) break;
+    delete rest[missing];
     ({ data, error } = await run(rest));
   }
 
@@ -150,11 +166,31 @@ export async function savePart(part: SparePart): Promise<SparePart> {
   return toPart(data as PartRow);
 }
 
+/**
+ * Renames all the types of one part in a single statement, so a failure can't
+ * leave them split into two groups. Only the name is written, so a stock count
+ * can't be put back to an older value. Returns false, changing nothing, if
+ * someone renamed them in the meantime.
+ */
+export async function renameRepairParts(ids: string[], oldNames: string[], newName: string): Promise<boolean> {
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("repair_parts")
+    .update({ name: newName.trim() })
+    .in("id", ids.map(Number))
+    .in("name", oldNames)
+    .select("id");
+  if (error) throw new Error(error.message);
+  return (data ?? []).length > 0;
+}
+
 export async function deletePart(id: string): Promise<void> {
   const { error } = await getSupabaseBrowserClient()
     .from("repair_parts")
     .delete()
     .eq("id", Number(id));
+  if (error?.code === "23503") {
+    throw new Error("This part was bought on a supplier invoice, so its history has to stay. Set its stock to 0 instead of deleting it.");
+  }
   if (error) throw new Error(error.message);
 }
 

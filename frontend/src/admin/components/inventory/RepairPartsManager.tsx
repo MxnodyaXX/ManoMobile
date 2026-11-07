@@ -2,7 +2,8 @@
 
 import { Fragment, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Edit2, Trash2, Search, AlertCircle, Tag, X, Grid3x3, EyeOff, Save, ChevronRight, ChevronDown, Layers, Printer } from "lucide-react";
+import { Plus, Edit2, Trash2, Search, AlertCircle, Tag, X, Grid3x3, EyeOff, Save, ChevronRight, ChevronDown, Layers, Printer, History } from "lucide-react";
+import PartBatchesModal from "@/cashier/components/purchasing/PartBatchesModal";
 import { useParts, PART_CATEGORIES, type SparePart, type PartCategory } from "@/cashier/contexts/PartsContext";
 import { useToast } from "@/lib/ui/toast";
 import BarcodeLabelModal from "@/cashier/components/shared/BarcodeLabelModal";
@@ -11,19 +12,16 @@ import { useInventory } from "@/cashier/contexts/InventoryContext";
 import { inputStyle, labelStyle, thStyle, tdStyle, btnAccent, DeleteConfirm } from "@/admin/components/shared/adminUi";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { useMyPermissions } from "@/lib/settings/staffRules";
+import { partBaseName, partGroupKey, setPartBrand, suggestPartName, suggestPartSku } from "@/lib/inventory/productName";
+import RenamePartsModal from "./RenamePartsModal";
+import { partLabelTokens } from "@/lib/repair/partLabel";
 import {
   useRackLayout, saveRackLayout, shelfCode, bayExists, bayCode, rowLetter,
   isHidden, RACK_MAX_ROWS, RACK_MAX_COLS, type RackLayout,
 } from "@/lib/settings/partsRack";
 
-/** What a designed part label can print — see LABEL_TOKENS. */
-const partLabelTokens = (p: SparePart) => ({
-  partNo: p.partNo ?? "",
-  category: p.category,
-  location: p.location,
-  compatible: p.compatibleWith.join(", "),
-  supplier: p.supplier ?? "",
-});
+const baseName = (p: SparePart) => partBaseName(p.name, p.brand);
+
 
 /**
  * The spare-parts catalogue.
@@ -334,9 +332,9 @@ function PartNameCombo({ value, onChange, groups, invalid }: {
 
   const q = value.trim().toUpperCase();
   const shown = q
-    ? groups.filter(g => g[0].name.toUpperCase().includes(q) || g.some(p => p.sku.toUpperCase().includes(q) || (p.partNo ?? "").includes(q)))
+    ? groups.filter(g => baseName(g[0]).toUpperCase().includes(q) || g.some(p => p.sku.toUpperCase().includes(q) || (p.partNo ?? "").includes(q)))
     : groups;
-  const exact = groups.some(g => g[0].name.trim().toUpperCase() === q);
+  const exact = groups.some(g => baseName(g[0]).toUpperCase() === q);
   const list = shown.slice(0, 50);
   const active = Math.min(hi, Math.max(0, list.length - 1));
 
@@ -363,7 +361,7 @@ function PartNameCombo({ value, onChange, groups, invalid }: {
           onKeyDown={e => {
             if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHi(h => Math.min(h + 1, list.length - 1)); }
             else if (e.key === "ArrowUp") { e.preventDefault(); setHi(h => Math.max(h - 1, 0)); }
-            else if (e.key === "Enter" && open && list[active]) { e.preventDefault(); choose(list[active][0].name); }
+            else if (e.key === "Enter" && open && list[active]) { e.preventDefault(); choose(baseName(list[active][0])); }
             else if (e.key === "Escape") setOpen(false);
           }}
           placeholder="Search parts, or type a new name"
@@ -399,14 +397,14 @@ function PartNameCombo({ value, onChange, groups, invalid }: {
                 <div
                   key={head.id}
                   onMouseEnter={() => setHi(i)}
-                  onClick={() => choose(head.name)}
+                  onClick={() => choose(baseName(head))}
                   style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8, cursor: "pointer", background: on ? "var(--accent-dim, rgba(96,165,250,0.12))" : "transparent" }}
                 >
                   <div style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-secondary)", border: "1px solid var(--border)", color: g.length > 1 ? "var(--accent)" : "var(--text-muted)" }}>
                     <Layers size={14} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mark(head.name)}</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mark(baseName(head))}</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
                       {g.map(p => (
                         <span key={p.id} style={{ fontFamily: "monospace", fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 5, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-secondary)" }}>{mark(p.sku)}</span>
@@ -449,9 +447,25 @@ function PartModal({ part, preset, onSave, onClose }: {
 }) {
   const blank: SparePart = { id: "", sku: "", name: "", category: "Screen", compatibleWith: [], stock: 0, reorderLevel: 5, costPrice: 0, location: "" };
   const [form, setForm] = useState<SparePart>(part ?? (preset
-    ? { ...blank, name: preset.name, category: preset.category, compatibleWith: preset.compatibleWith, reorderLevel: preset.reorderLevel, location: preset.location }
+    ? { ...blank, name: baseName(preset), category: preset.category, compatibleWith: preset.compatibleWith, reorderLevel: preset.reorderLevel, location: preset.location }
     : blank));
   const [compatText, setCompatText] = useState((part?.compatibleWith ?? preset?.compatibleWith ?? []).join(", "));
+  // A brand new part's name is built from these until someone types or picks one.
+  // Editing or adding a type only ever swaps the brand: types are grouped by name
+  // without it, so anything else moving by itself would split them up.
+  const [nameAuto, setNameAuto] = useState(!part && !preset);
+  const [partWord, setPartWord] = useState("");
+  const devices = compatText.split(",").map(s => s.trim()).filter(Boolean);
+  const builtName = devices.length || partWord.trim()
+    ? suggestPartName({ name: partWord, category: form.category, compatibleWith: devices, brand: form.brand })
+    : "";
+  const itemName = nameAuto ? builtName : form.name;
+
+  const changeBrand = (brand: string) => setForm(f => ({
+    ...f,
+    brand,
+    name: nameAuto ? f.name : setPartBrand(f.name, f.brand ?? "", brand, f.category),
+  }));
 
   /**
    * How full each bay is, for the rack below.
@@ -484,18 +498,40 @@ function PartModal({ part, preset, onSave, onClose }: {
     const m = new Map<string, SparePart[]>();
     for (const x of parts) {
       if (part && x.id === part.id) continue;
-      const k = x.name.trim().toUpperCase();
+      const k = partGroupKey(x);
       const l = m.get(k);
       if (l) l.push(x); else m.set(k, [x]);
     }
     return m;
   }, [parts, part]);
-  const sameName = partNames.get(form.name.trim().toUpperCase()) ?? [];
+  const itemKey = partGroupKey({ name: itemName, brand: form.brand });
+  const sameName = partNames.get(itemKey) ?? [];
+  const suggestion = !nameAuto && !preset && form.name.trim()
+    ? suggestPartName({ name: form.name, category: form.category, compatibleWith: devices, brand: form.brand })
+    : "";
+  // Not offered when it would pull this one away from its other types: renaming
+  // those belongs in Tidy Names, which moves them together.
+  const suggestedName = sameName.length === 0 || partGroupKey({ name: suggestion, brand: form.brand }) === itemKey ? suggestion : "";
+
+  // A new part's SKU comes from the system. Once saved it stays put, whatever
+  // happens to its name or brand, since it's printed on labels. Only an Admin can
+  // change it, by editing the part.
+  const { can } = useAuth();
+  const mayEditSku = !!part && can("Admin");
+  const skuValue = part
+    ? form.sku
+    : suggestPartSku({ name: itemName, category: form.category, compatibleWith: devices, brand: form.brand }, parts.map(x => x.sku));
+  const skuChanged = !!part && form.sku.trim() !== part.sku;
+
+  // Only people who ran the migration have somewhere to keep a brand.
+  const brandColumn = parts.length === 0 || parts.some(x => x.brand !== undefined);
+  const knownBrands = [...new Set(parts.map(x => (x.brand ?? "").trim()).filter(Boolean))].sort();
 
   const pickName = (name: string) => {
+    setNameAuto(false);
     set("name", name);
     setErrors(p => ({ ...p, name: undefined }));
-    const match = partNames.get(name.trim().toUpperCase());
+    const match = partNames.get(partGroupKey({ name }));
     // Only for a new part, and only into what has not been filled in yet.
     // Editing an existing part, or overwriting what was just typed, would be
     // a surprise.
@@ -503,7 +539,7 @@ function PartModal({ part, preset, onSave, onClose }: {
     const src = match[0];
     setForm(f => ({
       ...f,
-      name,
+      name: setPartBrand(name, "", f.brand ?? "", src.category),
       category: src.category,
       reorderLevel: f.reorderLevel === blank.reorderLevel ? src.reorderLevel : f.reorderLevel,
       location: f.location || src.location,
@@ -524,16 +560,15 @@ function PartModal({ part, preset, onSave, onClose }: {
 
   function validate() {
     const e: typeof errors = {};
-    if (!form.name.trim()) e.name = "Name is required";
-    if (!form.sku.trim()) e.sku = "SKU is required";
+    if (!itemName.trim()) e.name = "Name is required";
+    if (!skuValue.trim()) e.sku = part ? "SKU is required" : "Add a model or part name first";
     setErrors(e);
     return Object.keys(e).length === 0;
   }
 
   function handleSave() {
     if (!validate()) return;
-    const compatibleWith = compatText.split(",").map(s => s.trim()).filter(Boolean);
-    onSave({ ...form, compatibleWith });
+    onSave({ ...form, sku: skuValue, name: itemName, compatibleWith: devices });
   }
 
   return createPortal(
@@ -544,7 +579,7 @@ function PartModal({ part, preset, onSave, onClose }: {
             <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{part ? "Edit Part" : preset ? `Add a type of ${preset.name}` : "Add Repair Part"}</div>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
               {preset && !part
-                ? "Same name, so it is listed under the same part. Give it its own SKU — the quality or supplier, e.g. HD+ or CROWN."
+                ? "Same name, so it is listed under the same part. Give it its own brand or quality, e.g. HD+ or CROWN, and the SKU follows."
                 : "Spare-part stock consumed on repairs — separate from retail accessories. Parts with the same name are grouped as types of one part."}
             </div>
           </div>
@@ -555,8 +590,19 @@ function PartModal({ part, preset, onSave, onClose }: {
             <label style={labelStyle}>Part Name</label>
             {/* Type a new name, or open the list and pick an existing part to
                 add another type of it (a different supplier or quality). */}
-            <PartNameCombo value={form.name} onChange={pickName} groups={[...partNames.values()]} invalid={!!errors.name} />
+            <PartNameCombo value={itemName} onChange={pickName} groups={[...partNames.values()]} invalid={!!errors.name} />
             {errors.name && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{errors.name}</div>}
+            {nameAuto && (
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
+                {builtName ? "Built from the model, brand and part below. Type here to change it." : "Fills in from the model, brand and part below, or type a name."}
+              </div>
+            )}
+            {suggestedName && suggestedName !== form.name && (
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3, overflowWrap: "anywhere" }}>
+                Suggested: <strong style={{ color: "var(--text-secondary)" }}>{suggestedName}</strong>{" "}
+                <button type="button" onClick={() => set("name", suggestedName)} style={{ background: "none", border: "none", padding: 0, color: "var(--accent)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Use this</button>
+              </div>
+            )}
             {!errors.name && sameName.length > 0 && (
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 11, color: "var(--text-muted)", marginTop: 5 }}>
                 <Layers size={11} />
@@ -569,9 +615,21 @@ function PartModal({ part, preset, onSave, onClose }: {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <div>
-              <label style={labelStyle}>SKU</label>
-              <input type="text" value={form.sku} onChange={e => { set("sku", e.target.value); setErrors(p => ({ ...p, sku: undefined })); }} placeholder="e.g. SCR-IP13-001" style={{ ...inputStyle, borderColor: errors.sku ? "#dc2626" : "var(--border)" }} />
+              <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 6 }}>
+                SKU
+                {!part && <span style={{ fontSize: 10, fontWeight: 700, background: "var(--accent-dim)", color: "var(--accent)", borderRadius: 4, padding: "1px 6px", letterSpacing: "0.04em" }}>AUTO</span>}
+              </label>
+              <input
+                type="text"
+                value={skuValue}
+                readOnly={!mayEditSku}
+                onChange={e => { set("sku", e.target.value); setErrors(p => ({ ...p, sku: undefined })); }}
+                placeholder={part ? "" : "Fills in from the model and brand"}
+                style={{ ...inputStyle, borderColor: errors.sku ? "#dc2626" : "var(--border)", background: mayEditSku ? inputStyle.background : "var(--bg-secondary)", cursor: mayEditSku ? "text" : "default" }}
+              />
               {errors.sku && <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{errors.sku}</div>}
+              {!errors.sku && skuChanged && <div style={{ fontSize: 11, color: "#b45309", marginTop: 3 }}>Labels already printed still show {part?.sku}. Reprint them after saving.</div>}
+              {!errors.sku && part && !mayEditSku && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>Only an Admin can change this.</div>}
               {form.partNo && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>Part No. {form.partNo}</div>}
             </div>
             <div>
@@ -584,7 +642,21 @@ function PartModal({ part, preset, onSave, onClose }: {
           <div>
             <label style={labelStyle}>Compatible Devices</label>
             <input type="text" value={compatText} onChange={e => setCompatText(e.target.value)} placeholder="e.g. iPhone 13, iPhone 13 Pro" style={inputStyle} />
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Comma-separated — shown to technicians when they search for a part</div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Comma-separated, most common model first. Only that one goes in the name; technicians can search them all.</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div>
+              <label style={labelStyle}>Brand (optional)</label>
+              <input type="text" list="part-brands" value={form.brand ?? ""} onChange={e => changeBrand(e.target.value)} disabled={!brandColumn} placeholder="e.g. Crown" style={{ ...inputStyle, opacity: brandColumn ? 1 : 0.5 }} />
+              <datalist id="part-brands">{knownBrands.map(b => <option key={b} value={b} />)}</datalist>
+              {!brandColumn && <div style={{ fontSize: 11, color: "#b45309", marginTop: 4 }}>Run migration 20261107000094 to use brands.</div>}
+            </div>
+            {nameAuto && (
+              <div>
+                <label style={labelStyle}>Part (optional)</label>
+                <input type="text" value={partWord} onChange={e => setPartWord(e.target.value)} placeholder={form.category === "Other" ? "e.g. Power Button" : form.category === "Screen" ? "e.g. Display" : form.category} style={inputStyle} />
+              </div>
+            )}
           </div>
           <div>
             <label style={labelStyle}>Supplier</label>
@@ -804,6 +876,8 @@ function PartsManager() {
   const [deleteTarget, setDeleteTarget] = useState<SparePart | null>(null);
   const [labelPart, setLabelPart] = useState<SparePart | null>(null);
   const [rackOpen, setRackOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [batchesPart, setBatchesPart] = useState<SparePart | null>(null);
 
   /**
    * Whoever may maintain the catalogue may describe the rack it lives on —
@@ -843,13 +917,13 @@ function PartsManager() {
    * "M02 Display" from two suppliers is two rows in the catalogue — different
    * SKU, different cost, different quality (HD+, CROWN), counted separately —
    * but it is one part to whoever is looking for it. So rows that share a name
-   * are drawn as a single part with its types underneath. The name is the
-   * grouping, so no type is ever orphaned by a missing link.
+   * are drawn as a single part with its types underneath. The name without its
+   * brand is the grouping, so no type is ever orphaned by a missing link.
    */
   const groups = useMemo(() => {
     const m = new Map<string, SparePart[]>();
     for (const p of filtered) {
-      const key = p.name.trim().toUpperCase();
+      const key = partGroupKey(p);
       const list = m.get(key);
       if (list) list.push(p); else m.set(key, [p]);
     }
@@ -896,7 +970,7 @@ function PartsManager() {
       <td style={{ ...tdStyle, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{p.partNo || "—"}</td>
       <td style={tdStyle}>
         <div style={{ fontFamily: "monospace", fontSize: 12 }}>{p.sku}</div>
-        {p.supplier && <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }}>{p.supplier}</div>}
+        {(p.brand || p.supplier) && <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }}>{[p.brand, p.supplier].filter(Boolean).join(" · ")}</div>}
       </td>
       <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-secondary)" }}>{p.category}</td>
       <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-secondary)", maxWidth: 220 }}>{p.compatibleWith.length ? p.compatibleWith.join(", ") : "—"}</td>
@@ -906,6 +980,7 @@ function PartsManager() {
       <td style={tdStyle}>
         <div style={{ display: "flex", gap: 4 }}>
           {!asType && <button onClick={() => setAddTypeOf(p)} title="Add another type of this part (a different supplier or quality)" style={iconBtn}><Layers size={14} /></button>}
+          <button onClick={() => setBatchesPart(p)} title="Batches and stock history" style={iconBtn}><History size={14} /></button>
           <button onClick={() => setLabelPart(p)} title="Print part label" style={iconBtn}><Tag size={14} /></button>
           <button onClick={() => setModal(p)} title="Edit" style={iconBtn}><Edit2 size={14} /></button>
           <button onClick={() => setDeleteTarget(p)} title="Delete" style={{ ...iconBtn, color: "#dc2626" }}><Trash2 size={14} /></button>
@@ -930,7 +1005,7 @@ function PartsManager() {
           <td style={tdStyle}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               {open ? <ChevronDown size={14} color="var(--text-muted)" /> : <ChevronRight size={14} color="var(--text-muted)" />}
-              <span style={{ fontWeight: 700 }}>{head.name}</span>
+              <span style={{ fontWeight: 700 }}>{baseName(head)}</span>
               <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}>{g.items.length} types</span>
             </span>
           </td>
@@ -988,8 +1063,19 @@ function PartsManager() {
         >
           <Printer size={13} /> Print Labels
         </button>
+        {can("Admin") && (
+          <button
+            onClick={() => setRenaming(true)}
+            style={{ padding: "9px 15px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 12.5, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}
+          >
+            Tidy Names
+          </button>
+        )}
         <button onClick={() => setModal("new")} style={btnAccent}><Plus size={13} /> Add Part</button>
       </div>
+
+      {renaming && <RenamePartsModal parts={parts} onClose={() => setRenaming(false)} />}
+      {batchesPart && <PartBatchesModal part={batchesPart} onClose={() => setBatchesPart(null)} />}
 
       {rackOpen && (
         <RackLayoutModal
@@ -1015,7 +1101,7 @@ function PartsManager() {
           <thead><tr>
             <th style={thStyle}>Part</th><th style={thStyle}>No.</th><th style={thStyle}>SKU</th><th style={thStyle}>Category</th>
             <th style={thStyle}>Compatible With</th><th style={thStyle}>Stock</th><th style={thStyle}>Cost</th>
-            <th style={thStyle}>Location</th><th style={{ ...thStyle, width: 104 }}></th>
+            <th style={thStyle}>Location</th><th style={{ ...thStyle, width: 128 }}></th>
           </tr></thead>
           <tbody>
             {loading ? (

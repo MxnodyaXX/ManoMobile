@@ -11,6 +11,8 @@ import { useSales, type SaleTx } from "@/cashier/contexts/SalesContext";
 import { useRepair } from "@/cashier/contexts/RepairContext";
 import { useInvoiceDocument, printInvoiceDocument } from "@/lib/sales/invoiceDoc";
 import { exportToPdf, exportToExcel, exportToPng } from "@/cashier/utils/exportUtils";
+import ShrinkToFit from "@/lib/ui/ShrinkToFit";
+import { useIsMobile } from "@/cashier/hooks/useIsMobile";
 
 type InvoiceType   = "Sales" | "Repair" | "Return";
 type InvoiceStatus = "Paid" | "Unpaid" | "Voided" | "Partial";
@@ -113,7 +115,11 @@ function fmtDate(d: string) {
 }
 
 /* ── Invoice Detail + Print Modal ── */
+const docPage = (html: string) =>
+  `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#fff;font-family:Arial,Helvetica,sans-serif}</style></head><body>${html}</body></html>`;
+
 function InvoiceModal({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
+  const isMobile = useIsMobile();
   const typeCfg  = TYPE_CFG[inv.type];
   const TypeIcon = typeCfg.icon;
   const statusCfg = STATUS_CFG[inv.status];
@@ -185,9 +191,10 @@ function InvoiceModal({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
     <div style={{ position: "fixed", inset: 0, zIndex: 1010, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)" }} />
       <div style={{
-        position: "relative", zIndex: 1, width: 500,
+        position: "relative", zIndex: 1, width: 500, maxWidth: "calc(100vw - 24px)",
+        maxHeight: "calc(100dvh - 24px)", overflowY: "auto", boxSizing: "border-box",
         background: "var(--bg-card)", border: "1px solid var(--border)",
-        borderRadius: 16, padding: 28,
+        borderRadius: 16, padding: isMobile ? 18 : 28,
       }}>
         {/* Header */}
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 }}>
@@ -220,12 +227,25 @@ function InvoiceModal({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
             this page either way. */}
         {doc && (
           <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", marginBottom: 16, background: "#fff" }}>
-            <iframe
-              title={`Invoice ${inv.invoiceNo}`}
-              sandbox=""
-              srcDoc={`<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#fff;font-family:Arial,Helvetica,sans-serif}</style></head><body>${doc.html}</body></html>`}
-              style={{ width: "100%", height: 460, border: "none", display: "block", background: "#fff" }}
-            />
+            {isMobile ? (
+              // Sandboxed, so nothing inside can measure itself: laid out page-wide
+              // and scaled from out here instead of cutting the page off.
+              <ShrinkToFit>
+                <iframe
+                  title={`Invoice ${inv.invoiceNo}`}
+                  sandbox=""
+                  srcDoc={docPage(doc.html)}
+                  style={{ width: 800, height: 1000, border: "none", display: "block", background: "#fff" }}
+                />
+              </ShrinkToFit>
+            ) : (
+              <iframe
+                title={`Invoice ${inv.invoiceNo}`}
+                sandbox=""
+                srcDoc={docPage(doc.html)}
+                style={{ width: "100%", height: 460, border: "none", display: "block", background: "#fff" }}
+              />
+            )}
           </div>
         )}
 

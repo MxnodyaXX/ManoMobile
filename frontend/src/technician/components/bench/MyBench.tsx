@@ -667,7 +667,7 @@ export default function MyBench() {
                            caps the row at five, and 230px is where a compact
                            tile stops holding a job number, a device and its
                            buttons on one line. */
-                        gridTemplateColumns: "repeat(auto-fill, minmax(max(230px, 19%), 1fr))",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, max(230px, 19%)), 1fr))",
                       } : {
                         display: "grid",
                         gap: 14,
@@ -681,7 +681,7 @@ export default function MyBench() {
                            Inline on purpose: this laid out as one column per row
                            for a whole session because the stylesheet carrying it
                            had not reached the browser. */
-                        gridTemplateColumns: "repeat(auto-fill, minmax(max(260px, 24%), 1fr))",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, max(260px, 24%)), 1fr))",
                       }}>
                         {list.map(j => (
                           <BenchCard

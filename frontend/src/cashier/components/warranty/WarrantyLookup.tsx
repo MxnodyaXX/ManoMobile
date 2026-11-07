@@ -135,7 +135,7 @@ export default function WarrantyLookup({ policies, onPrintCard, onClaim, onPhone
                 </span>
               ))}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(340px, 100%), 1fr))", gap: 14 }}>
               {result.items.map(item => (
                 <CoverageCard
                   key={item.key} item={item} onPrintCard={onPrintCard} onClaim={onClaim} onPhoneClaim={setPhoneClaim}

@@ -12,6 +12,7 @@ import {
 import PurchaseInvoiceDetail from "./PurchaseInvoiceDetail";
 import PurchaseInvoiceForm from "./PurchaseInvoiceForm";
 import SupplierProfile from "./SupplierProfile";
+import TripsPanel from "./TripsPanel";
 import { Badge, Btn, ErrorNote, Rs, Stat, card, ff, fmtDate, input, paymentTone, receivingTone, td, th } from "./ui";
 
 /**
@@ -25,7 +26,7 @@ export default function PurchasingHub() {
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<"Suppliers" | "Invoices">("Suppliers");
+  const [view, setView] = useState<"Suppliers" | "Invoices" | "Trips">("Suppliers");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"All" | PaymentStatus>("All");
   const [supplierId, setSupplierId] = useState<number | null>(null);
@@ -137,14 +138,16 @@ export default function PurchasingHub() {
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: 4, padding: 3, ...card, borderRadius: 9 }}>
-          {(["Suppliers", "Invoices"] as const).map(v => (
+          {(["Suppliers", "Invoices", "Trips"] as const).map(v => (
             <button key={v} onClick={() => setView(v)} style={{ padding: "6px 14px", borderRadius: 7, border: "none", background: view === v ? "var(--accent)" : "transparent", color: view === v ? "var(--accent-fg)" : "var(--text-secondary)", fontWeight: 600, fontSize: 12.5, cursor: "pointer", fontFamily: ff }}>{v}</button>
           ))}
         </div>
-        <div style={{ position: "relative", flex: 1, minWidth: 180 }}>
-          <Search size={14} style={{ position: "absolute", left: 10, top: 10, color: "var(--text-muted)" }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder={view === "Suppliers" ? "Search suppliers" : "Search invoice no. or supplier"} style={{ ...input, paddingLeft: 30 }} />
-        </div>
+        {view !== "Trips" && (
+          <div style={{ position: "relative", flex: 1, minWidth: 180 }}>
+            <Search size={14} style={{ position: "absolute", left: 10, top: 10, color: "var(--text-muted)" }} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder={view === "Suppliers" ? "Search suppliers" : "Search invoice no. or supplier"} style={{ ...input, paddingLeft: 30 }} />
+          </div>
+        )}
         {view === "Invoices" && (
           <select value={filter} onChange={e => setFilter(e.target.value as typeof filter)} style={{ ...input, width: "auto" }}>
             {(["All", "Unpaid", "Partially Paid", "Overdue", "Paid", "Draft", "Void"] as const).map(f => <option key={f}>{f}</option>)}
@@ -152,7 +155,9 @@ export default function PurchasingHub() {
         )}
       </div>
 
-      {view === "Suppliers" ? (
+      {view === "Trips" ? (
+        <TripsPanel invoices={invoices} onOpenInvoice={setDetailId} />
+      ) : view === "Suppliers" ? (
         <div style={{ ...card, overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 680 }}>
             <thead><tr>

@@ -22,7 +22,7 @@ export interface StreamProfit { revenue: number; cost: number; profit: number; m
 
 export interface PnL {
   gross: number; discounts: number; refunds: number; net: number;
-  cogsAccessories: number; cogsDevices: number; cogsParts: number; cogsAgents: number; cogsLabour: number; cogsEstimated: number; estimatedJobs: number; cogs: number;
+  cogsAccessories: number; cogsDevices: number; cogsParts: number; cogsAgents: number; cogsLabour: number; cogsEstimated: number; estimatedJobs: number; cogsTrips: number; cogs: number;
   grossProfit: number; grossMargin: number | null;
   /** Share of accessory sales with no buying price on record. */
   unknownCostShare: number | null;
@@ -57,7 +57,7 @@ export function pnl(d: AnalyticsData, w: Window): PnL {
   const net = gross - ref;
   return {
     gross, discounts, refunds: ref, net,
-    cogsAccessories: c.accessories, cogsDevices: c.devices, cogsParts: c.parts, cogsAgents: c.agents, cogsLabour: c.labour, cogsEstimated: c.estimated, estimatedJobs: c.estimatedJobs,
+    cogsAccessories: c.accessories, cogsDevices: c.devices, cogsParts: c.parts, cogsAgents: c.agents, cogsLabour: c.labour, cogsEstimated: c.estimated, estimatedJobs: c.estimatedJobs, cogsTrips: c.trips,
     cogs: c.total,
     grossProfit: net - c.total, grossMargin: net > 0 ? (net - c.total) / net : null,
     unknownCostShare: c.revenue.accessories > 0 ? c.unknownAccessorySales / c.revenue.accessories : null,

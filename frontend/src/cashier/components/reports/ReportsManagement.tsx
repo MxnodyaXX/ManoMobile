@@ -74,7 +74,7 @@ function ReportFilters({
     color: "var(--text-primary)", fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none",
   };
   return (
-    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "nowrap" }}>
+    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <Calendar size={13} style={{ color: "var(--text-muted)" }} />
         <span style={{ fontSize: 12, color: "var(--text-muted)" }}>From</span>
@@ -634,7 +634,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
         borderBottom: "1px solid var(--border)",
         marginBottom: 4,
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <Calendar size={13} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
           <input
             type="date"
@@ -763,7 +763,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                 <div style={{ display: "flex", alignItems: "center", gap: 20, flexShrink: 0 }}>
                   <div style={{ textAlign: "right" }}>
                     <p style={{ fontSize: 16, fontWeight: 800, color, fontFamily: ff, margin: 0 }}>{fmtRs(total)}</p>
-                    <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff, margin: 0 }}>{Math.round((total / totalRevSR) * 100)}% of total revenue</p>
+                    <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff, margin: 0 }}>{totalRevSR ? Math.round((total / totalRevSR) * 100) : 0}% of total revenue</p>
                   </div>
                   <ChevronDown size={16} style={{ color: "var(--text-muted)", transition: "transform 0.2s", transform: isOpen ? "rotate(180deg)" : "rotate(0deg)" }} />
                 </div>
@@ -883,7 +883,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                 <div style={{ display: "flex", alignItems: "center", gap: 20, flexShrink: 0 }}>
                   <div style={{ textAlign: "right" }}>
                     <p style={{ fontSize: 16, fontWeight: 800, color, fontFamily: ff, margin: 0 }}>{fmtRs(total)}</p>
-                    <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff, margin: 0 }}>{Math.round((total / totalRevSR) * 100)}% of total revenue</p>
+                    <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff, margin: 0 }}>{totalRevSR ? Math.round((total / totalRevSR) * 100) : 0}% of total revenue</p>
                   </div>
                   <ChevronDown size={16} style={{ color: "var(--text-muted)", transition: "transform 0.2s", transform: isOpen ? "rotate(180deg)" : "rotate(0deg)" }} />
                 </div>
@@ -1009,7 +1009,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                 <div style={{ display: "flex", alignItems: "center", gap: 20, flexShrink: 0 }}>
                   <div style={{ textAlign: "right" }}>
                     <p style={{ fontSize: 16, fontWeight: 800, color, fontFamily: ff, margin: 0 }}>{fmtRs(total)}</p>
-                    <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff, margin: 0 }}>{Math.round((total / totalRevSR) * 100)}% of total revenue</p>
+                    <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff, margin: 0 }}>{totalRevSR ? Math.round((total / totalRevSR) * 100) : 0}% of total revenue</p>
                   </div>
                   <ChevronDown size={16} style={{ color: "var(--text-muted)", transition: "transform 0.2s", transform: isOpen ? "rotate(180deg)" : "rotate(0deg)" }} />
                 </div>
@@ -1140,7 +1140,7 @@ function SalesReport({ dateFrom, dateTo, setDateFrom, setDateTo }: FilterProps) 
                 <div style={{ display: "flex", alignItems: "center", gap: 20, flexShrink: 0 }}>
                   <div style={{ textAlign: "right" }}>
                     <p style={{ fontSize: 16, fontWeight: 800, color, fontFamily: ff, margin: 0 }}>{fmtRs(total)}</p>
-                    <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff, margin: 0 }}>{Math.round((total / totalRevSR) * 100)}% of total revenue</p>
+                    <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: ff, margin: 0 }}>{totalRevSR ? Math.round((total / totalRevSR) * 100) : 0}% of total revenue</p>
                   </div>
                   <ChevronDown size={16} style={{ color: "var(--text-muted)", transition: "transform 0.2s", transform: isOpen ? "rotate(180deg)" : "rotate(0deg)" }} />
                 </div>

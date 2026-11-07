@@ -30,7 +30,7 @@ export default function Nav() {
   return (
     <header className={`sticky top-0 z-40 border-b bg-white/95 transition-shadow duration-500 ${scrolled ? "border-neutral-200/70 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.15)]" : "border-transparent"}`}>
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-5 md:px-8">
-        <Link href="/web" className="flex items-center gap-2.5" onClick={() => setOpen(false)}>
+        <Link href="/web" className="flex min-h-10 items-center gap-2.5" onClick={() => setOpen(false)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/ManoMobileBlack.png" alt="" className="h-8 w-8 object-contain" />
           <span className="text-[15px] font-semibold tracking-tight text-neutral-950">Mano Mobile</span>

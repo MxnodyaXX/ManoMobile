@@ -29,6 +29,7 @@ import AddProductsModal, { extraLineTotal, type ExtraLine } from "@/cashier/comp
 import type { NewSaleItem } from "@/lib/sales/saleItems";
 import { phoneMatches } from "@/lib/repair/phoneSearch";
 import { docDate } from "@/lib/docDate";
+import ShrinkToFit from "@/lib/ui/ShrinkToFit";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -389,6 +390,7 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
       </div>
 
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+        <ShrinkToFit>
         <RepairInvoicePrintable
           ref={invoiceRef}
           invoiceNo={invoiceNo}
@@ -404,6 +406,7 @@ function InvoiceView({ invoiceNo, createdAt, dealer, customer, isCredit, amountR
           repairs={repairs}
           extras={extras}
         />
+        </ShrinkToFit>
       </div>
     </div>
   );
@@ -1647,7 +1650,7 @@ export default function RepairSales({ initialDealer, initialJobId }: {
             <InvoiceNoBadge refreshKey={invoiceNo} />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))", gap: 16, alignItems: "start" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(290px, 100%), 1fr))", gap: 16, alignItems: "start" }}>
 
             {/* ── Bill Info ── */}
             <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 0 }}>

@@ -25,6 +25,7 @@ import { rulesForTechnician, type EffectiveRules } from "@/lib/settings/staffRul
 import { useToast } from "@/lib/ui/toast";
 import { useJobSlot } from "@/lib/repair/useJobSlot";
 import { phoneMatches } from "@/lib/repair/phoneSearch";
+import { requestUnitCost } from "@/lib/repair/partCost";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -635,7 +636,7 @@ export default function MyJobs() {
                       {(() => {
                         const jobReqs = partRequests.filter(r => r.jobId === job.id);
                         if (jobReqs.length === 0) return null;
-                        const partsCost = jobReqs.reduce((s, r) => s + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+                        const partsCost = jobReqs.reduce((s, r) => s + requestUnitCost(r, parts) * r.quantity, 0);
                         return (
                           <p style={{ fontSize: 10.5, color: "#a78bfa", fontFamily: ff, marginTop: 2 }}>
                             +Rs. {partsCost.toLocaleString()} parts
@@ -756,7 +757,7 @@ export default function MyJobs() {
                   {isExpanded && (() => {
                     const meta = jobMeta[job.id];
                     const jobReqs = partRequests.filter(r => r.jobId === job.id);
-                    const partsCost = jobReqs.reduce((s, r) => s + (parts.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity, 0);
+                    const partsCost = jobReqs.reduce((s, r) => s + requestUnitCost(r, parts) * r.quantity, 0);
                     const REQ_COLORS: Record<string, string> = { Pending: "#fbbf24", Approved: TA, Issued: "#60a5fa", Rejected: "#f87171" };
                     return (
                       <tr key={`${job.id}-expanded`} style={{ borderBottom: "1px solid var(--border)", background: job.status === "Issued" ? `${TA}06` : "var(--bg-secondary)" }}>

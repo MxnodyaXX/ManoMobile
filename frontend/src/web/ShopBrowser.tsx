@@ -43,10 +43,10 @@ export default function ShopBrowser({ products }: { products: PublicProduct[] })
             <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search chargers, cables, covers, your phone model…"
               className="h-12 w-full rounded-full border border-neutral-200 bg-neutral-50 pl-11 pr-10 text-[14px] outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-900 focus:bg-white" />
-            {q && <button onClick={() => setQ("")} aria-label="Clear" className="absolute right-4 top-1/2 -translate-y-1/2 text-neutral-400"><X size={15} /></button>}
+            {q && <button onClick={() => setQ("")} aria-label="Clear" className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center text-neutral-400"><X size={15} /></button>}
           </div>
           <div className="flex items-center gap-3">
-            <label className="flex cursor-pointer items-center gap-2 text-[12px] text-neutral-600">
+            <label className="flex min-h-10 cursor-pointer items-center gap-2 text-[12px] text-neutral-600">
               <input type="checkbox" checked={inStock} onChange={e => setInStock(e.target.checked)} className="h-4 w-4 accent-neutral-950" />
               In stock only
             </label>
@@ -65,7 +65,7 @@ export default function ShopBrowser({ products }: { products: PublicProduct[] })
         <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
           {["All", ...categories].map(c => (
             <button key={c} onClick={() => setCat(c)}
-              className={`shrink-0 rounded-full border px-4 py-2 text-[12px] transition-colors ${cat === c ? "border-neutral-950 bg-neutral-950 text-white" : "border-neutral-200 text-neutral-600 hover:border-neutral-400"}`}>
+              className={`min-h-10 shrink-0 rounded-full border px-4 py-2 text-[12px] transition-colors ${cat === c ? "border-neutral-950 bg-neutral-950 text-white" : "border-neutral-200 text-neutral-600 hover:border-neutral-400"}`}>
               {c}
             </button>
           ))}

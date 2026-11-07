@@ -121,7 +121,7 @@ export default function PendingCollection() {
             </p>
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(340px, 100%), 1fr))", gap: 14 }}>
             {filtered.map(job => {
               const meta = jobMeta[job.id];
               const balanceDue = job.estimatedCost - job.advancePaid;

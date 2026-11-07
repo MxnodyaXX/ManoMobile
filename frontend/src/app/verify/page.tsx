@@ -33,7 +33,7 @@ const CSS = `
 .vp .brand{font-weight:800;font-size:15px;letter-spacing:-.02em}
 .vp .brand small{display:block;font-size:11.5px;color:var(--muted);font-weight:500;letter-spacing:0}
 .vp .secure{margin-left:auto;font-size:11.5px;font-weight:600;color:var(--ok);background:var(--ok-tint);padding:5px 10px;border-radius:999px;white-space:nowrap}
-.vp .shell{max-width:720px;margin:0 auto;padding:22px 16px;display:grid;gap:16px}
+.vp .shell{max-width:720px;margin:0 auto;padding:22px 16px;display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
 .vp .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px}
 .vp .card h2{font-size:16px;font-weight:700;margin-bottom:12px}
 .vp .hero{color:#fff;border-radius:18px;background:linear-gradient(135deg,#232323,#141414 55%,#000);padding:22px 20px;box-shadow:0 14px 34px rgba(0,0,0,.28)}
@@ -64,7 +64,7 @@ const CSS = `
 .vp .search input::placeholder{text-transform:none}
 .vp .search button{padding:12px 18px;border-radius:12px;border:0;background:#141414;color:#fff;font-weight:700}
 .vp .muted{color:var(--muted);font-size:13.5px}
-.vp .contact a{color:var(--ink);font-weight:700;text-decoration:none}
+.vp .contact a{display:inline-block;padding:12px 0;color:var(--ink);font-weight:700;text-decoration:none}
 `;
 
 type State = "Active" | "Expired" | "None" | "Void";

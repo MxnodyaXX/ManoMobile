@@ -5,6 +5,7 @@ import { ClipboardList, CheckCircle2, Box, TrendingUp, Wallet, CalendarClock } f
 import type { RepairJob } from "@/cashier/contexts/RepairContext";
 import type { PartRequest, SparePart } from "@/cashier/contexts/PartsContext";
 import InsightModal, { type InsightColumn, type InsightRow, type InsightSummary } from "@/cashier/components/dashboard/InsightModal";
+import { requestUnitCost } from "@/lib/repair/partCost";
 
 const ff = "'Plus Jakarta Sans', sans-serif";
 
@@ -122,7 +123,7 @@ export default function PersonalInsights({ jobs, partRequests, catalog, technici
     r => ids.has(r.jobId) && (r.status === "Approved" || r.status === "Issued"),
   );
   const costOf = (r: PartRequest) =>
-    (catalog.find(p => p.sku === r.partSku)?.costPrice ?? 0) * r.quantity;
+    requestUnitCost(r, catalog) * r.quantity;
 
   const partsCost = usedParts.reduce((t, r) => t + costOf(r), 0);
   const revenue   = done.reduce((t, j) => t + j.estimatedCost, 0);
@@ -215,7 +216,7 @@ export default function PersonalInsights({ jobs, partRequests, catalog, technici
           dim: !cat,
           cells: {
             job: r.jobId, part: r.partName, qty: String(r.quantity),
-            unit: cat ? rs(cat.costPrice) : "no price",
+            unit: cat ? rs(requestUnitCost(r, catalog)) : "no price",
             line: cat ? rs(costOf(r)) : "—",
           },
         };
@@ -338,7 +339,7 @@ export default function PersonalInsights({ jobs, partRequests, catalog, technici
           dim: !cat,
           cells: {
             job: r.jobId, part: r.partName, qty: String(r.quantity),
-            unit: cat ? rs(cat.costPrice) : "no price",
+            unit: cat ? rs(requestUnitCost(r, catalog)) : "no price",
             line: cat ? rs(costOf(r)) : "—",
           },
         };

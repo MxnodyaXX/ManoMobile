@@ -579,7 +579,7 @@ export default function PastJobForm({ onCreated, onCancel }: {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(310px, 1fr))", gap: 14, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(310px, 100%), 1fr))", gap: 14, alignItems: "start" }}>
 
         {stack(<>
           {section("When and from", CalendarClock, "#f59e0b", (

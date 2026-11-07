@@ -34,6 +34,16 @@ export function unitsSold(d: AnalyticsData, w: Window): Map<string, number> {
   return m;
 }
 
+/** What the accessories sold in a window cost, at what they cost when sold. */
+function soldCostOf(d: AnalyticsData, w: Window): number {
+  const nos = new Set(live(d.sales, w).map(s => s.invoiceNo));
+  const price = new Map(d.products.map(p => [String(p.id), p.buyingPrice]));
+  return d.saleLines.reduce((t, l) => {
+    if (l.kind !== "accessory" || !l.referenceId || !nos.has(l.invoiceNo)) return t;
+    return t + (l.unitCost ?? price.get(l.referenceId) ?? 0) * l.qty;
+  }, 0);
+}
+
 /** When each product last sold, all time. */
 export function lastSold(d: AnalyticsData): Map<string, string> {
   const dateOf = new Map(d.sales.filter(s => s.status !== "Voided").map(s => [s.invoiceNo, s.date]));
@@ -52,7 +62,7 @@ export function stockKpis(d: AnalyticsData, w: Window, now = new Date()): StockK
   const costValue = d.products.reduce((t, p) => t + p.stock * p.buyingPrice, 0);
   const retailValue = d.products.reduce((t, p) => t + p.stock * p.sellingPrice, 0);
   const soldUnits = Array.from(sold.values()).reduce((a, b) => a + b, 0);
-  const soldCost = d.products.reduce((t, p) => t + (sold.get(String(p.id)) ?? 0) * p.buyingPrice, 0);
+  const soldCost = soldCostOf(d, w);
   const spanDays = Math.max(1, (Math.min(w.to.getTime(), now.getTime()) - Math.max(w.from.getTime(), 0)) / DAY);
   const turnover = costValue > 0 ? (soldCost / costValue) * (365 / spanDays) : null;
   const units = d.products.reduce((t, p) => t + Math.max(0, p.stock), 0);

@@ -7,6 +7,7 @@ import type { AnalyticsData } from "./data";
 /** What a repair's cost is read from — enough of AnalyticsData to use it outside Analytics. */
 export type CostSources = Pick<AnalyticsData, "parts" | "partRequests">;
 import { bucketsFor, daysSince, delta, inWindow, parseWhen, type Delta, type Window } from "./window";
+import { typedPartCost } from "@/lib/repair/partCost";
 
 /**
  * The figures on the Analytics Overview, and the alerts and sentences that
@@ -72,11 +73,26 @@ export const creditCollected = (d: AnalyticsData, w: Window) =>
  * typed "parts used" list; those fall back to a name match, quantity included
  * ("M02 Display ×2").
  */
+/**
+ * Adds the names parts used to have to a name-to-cost lookup, so jobs that typed
+ * an old name still cost the same after a rename. A part with that name today wins.
+ */
+export function addFormerPartNames(byName: Map<string, number>, parts: CostSources["parts"]): void {
+  const former = new Map<string, number>();
+  for (const p of parts) {
+    for (const old of p.formerNames ?? []) {
+      const k = old.trim().toLowerCase();
+      if (!byName.has(k)) former.set(k, Math.max(former.get(k) ?? 0, typedPartCost(p)));
+    }
+  }
+  for (const [k, cost] of former) byName.set(k, cost);
+}
+
 export function partsCost(job: RepairJob, d: CostSources): number {
   const issued = d.partRequests.filter(r => r.jobId === job.id && (r.status === "Approved" || r.status === "Issued"));
   if (issued.length > 0) {
     const bySku = new Map(d.parts.map(p => [p.sku.trim().toUpperCase(), p.costPrice]));
-    return issued.reduce((t, r) => t + (bySku.get(r.partSku.trim().toUpperCase()) ?? 0) * r.quantity, 0);
+    return issued.reduce((t, r) => t + (r.unitCost ?? bySku.get(r.partSku.trim().toUpperCase()) ?? 0) * r.quantity, 0);
   }
   if (!job.partsUsed?.length) return 0;
   const byName = new Map<string, number>();
@@ -84,8 +100,9 @@ export function partsCost(job: RepairJob, d: CostSources): number {
     const k = p.name.trim().toLowerCase();
     // Several tags under one name: the dearest, so an unknown type is never
     // read as the cheaper one and profit is not flattered.
-    byName.set(k, Math.max(byName.get(k) ?? 0, p.costPrice));
+    byName.set(k, Math.max(byName.get(k) ?? 0, typedPartCost(p)));
   }
+  addFormerPartNames(byName, d.parts);
   return job.partsUsed.reduce((t, line) => {
     const m = line.trim().match(/^(.*?)\s*[×x]\s*(\d+)$/i);
     const name = (m ? m[1] : line).trim().toLowerCase();
@@ -137,6 +154,8 @@ export interface CostOfSales {
   labour: number;
   /** Admin estimates, on finished jobs with no parts or technician cost recorded. */
   estimated: number;
+  /** What buying trips themselves cost, counted in the period of the trip. */
+  trips: number;
   estimatedJobs: number;
   total: number;
   /** Sales whose cost is not on record, so they count as all profit. */
@@ -155,7 +174,8 @@ export function costOfSales(d: AnalyticsData, w: Window): CostOfSales {
   for (const l of d.saleLines) {
     if (l.kind !== "accessory" || !invoiceNos.has(l.invoiceNo)) continue;
     accessoryRevenue += l.lineTotal;
-    const c = l.referenceId ? productCost.get(l.referenceId) : undefined;
+    // What it cost when sold, so buying at a new price leaves old sales alone.
+    const c = l.unitCost ?? (l.referenceId ? productCost.get(l.referenceId) : undefined);
     if (c === undefined) unknownAccessorySales += l.lineTotal; else accessories += c * l.qty;
   }
 
@@ -191,12 +211,13 @@ export function costOfSales(d: AnalyticsData, w: Window): CostOfSales {
     if (j.estimatedRepairCost != null) estimatedJobs += 1;
   }
   const agents = finished.reduce((t, j) => t + (d.agentCosts[j.id] ?? 0), 0);
+  const trips = d.trips.filter(t => inWindow(t.tripDate, w)).reduce((s, t) => s + t.cost, 0);
   const repairs = sold.filter(s => s.category === "Repair").reduce((t, s) => t + s.total, 0);
   const total = sold.reduce((t, s) => t + s.total, 0);
 
   return {
-    accessories, devices, parts, agents, labour, estimated, estimatedJobs,
-    total: accessories + devices + parts + agents + labour + estimated,
+    accessories, devices, parts, agents, labour, estimated, estimatedJobs, trips,
+    total: accessories + devices + parts + agents + labour + estimated + trips,
     unknownAccessorySales, unknownPhoneSales,
     revenue: {
       accessories: accessoryRevenue, phones: phoneRevenue, repairs,
@@ -378,7 +399,7 @@ export function alerts(d: AnalyticsData, w: Window, now = new Date()): Alert[] {
     { id: "payables",   tone: "amber", count: d.suppliers.filter(s => s.balance > 0).length, label: "Supplier payments due", hint: "Suppliers with a balance owed" },
     { id: "warranty",   tone: "red",   count: d.jobs.filter(j => j.rejobOf && inWindow(j.createdAt, w)).length, label: "Warranty returns", hint: `Re-jobs opened · ${w.label.toLowerCase()}` },
     { id: "refunds",    tone: "amber", count: ref.count, label: "High refund activity", hint: revenue ? `${((ref.amount / revenue) * 100).toFixed(1)}% of revenue refunded` : "Refunds in the window" },
-    { id: "negative",   tone: "red",   count: d.saleLines.filter(l => l.kind === "accessory" && invoiceNos.has(l.invoiceNo) && l.referenceId && cost.has(l.referenceId) && l.lineTotal < (cost.get(l.referenceId) ?? 0) * l.qty).length, label: "Negative-margin sales", hint: "Accessory lines sold below buying price" },
+    { id: "negative",   tone: "red",   count: d.saleLines.filter(l => l.kind === "accessory" && invoiceNos.has(l.invoiceNo) && l.referenceId && (l.unitCost !== undefined || cost.has(l.referenceId)) && l.lineTotal < (l.unitCost ?? cost.get(l.referenceId) ?? 0) * l.qty).length, label: "Negative-margin sales", hint: "Accessory lines sold below buying price" },
     { id: "unassigned", tone: "blue",  count: d.jobs.filter(j => j.status === "Non-Issued" && (!j.technician || j.technician.trim().toLowerCase() === "unassigned")).length, label: "Unassigned repair jobs", hint: "Waiting for a technician" },
     { id: "notstarted", tone: "amber", count: d.jobs.filter(j => j.status === "Non-Issued" && j.technician && j.technician.trim().toLowerCase() !== "unassigned").length, label: "Assigned but not started", hint: "On a bench, untouched" },
     { id: "uncollected", tone: "red",  count: d.jobs.filter(j => j.status === "Completed" && (daysSince(j.completedAt) ?? 0) > 7).length, label: "Old uncollected jobs", hint: "Finished more than 7 days ago" },

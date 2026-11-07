@@ -18,6 +18,7 @@ import { useToast } from "@/lib/ui/toast";
 import { fetchJobTransfers, transferCost, type AgentTransfer } from "@/lib/repair/agents";
 import { useWarranty, type WarrantyScope } from "@/cashier/contexts/WarrantyContext";
 import SignaturePad from "@/cashier/components/shared/SignaturePad";
+import { requestUnitCost, typedPartCost } from "@/lib/repair/partCost";
 
 const TA = "#34d399";
 const ff = "'Plus Jakarta Sans', sans-serif";
@@ -279,7 +280,7 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
     .filter(r => r.jobId === job.id && (r.status === "Approved" || r.status === "Issued"))
     .map(r => {
       const cat = catalog.find(p => p.sku === r.partSku);
-      const unitCost = cat?.costPrice ?? 0;
+      const unitCost = requestUnitCost(r, catalog);
       return {
         id: r.id,
         name: r.partName,
@@ -371,8 +372,9 @@ export default function StatusUpdateModal({ job, initialNext, onClose }: {
     const name = (m?.[1] ?? line).trim();
     const qty = Math.max(1, Number(m?.[2] ?? 1));
     if (jobPartLines.some(l => l.name.trim().toLowerCase() === name.toLowerCase())) return [];
-    const cat = catalog.find(p => p.name.trim().toLowerCase() === name.toLowerCase());
-    const unitCost = cat?.costPrice ?? 0;
+    const cat = catalog.find(p => p.name.trim().toLowerCase() === name.toLowerCase())
+      ?? catalog.find(p => p.formerNames?.some(old => old.trim().toLowerCase() === name.toLowerCase()));
+    const unitCost = cat ? typedPartCost(cat) : 0;
     return [{ id: `typed-${i}`, name, qty, unitCost, lineTotal: unitCost * qty, priced: !!cat, installed: true, typed: true as const, sku: cat?.sku ?? null }];
   });
   const allPartLines = [...jobPartLines.map(l => ({ ...l, typed: false as const })), ...typedPartLines];

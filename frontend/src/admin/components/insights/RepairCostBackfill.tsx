@@ -270,7 +270,7 @@ export default function RepairCostBackfill() {
         <button style={chip(view === "done", GREEN)} onClick={() => { setView("done"); setShown(PAGE); }}>Cost entered ({doneCount})</button>
         <button style={chip(view === "all", BLUE)} onClick={() => { setView("all"); setShown(PAGE); }}>All finished ({backlog.length})</button>
         {/* Outcome — one segmented control, each option in its badge colour. */}
-        <div style={{ display: "flex", padding: 3, gap: 2, borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg-card)" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", maxWidth: "100%", padding: 3, gap: 2, borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg-card)" }}>
           {(["all", "Normal", "Return", "FOC", "Cash Return"] as const).map(o => {
             const on = outcome === o;
             const color = o === "all" ? "var(--text-secondary)" : OUTCOME[o].color;

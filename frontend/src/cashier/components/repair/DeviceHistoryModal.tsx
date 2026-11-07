@@ -106,7 +106,7 @@ export default function DeviceHistoryModal({ imei, jobs, onClose }: {
                   )}
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "0 22px", padding: "10px 14px 12px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(240px, 100%), 1fr))", gap: "0 22px", padding: "10px 14px 12px" }}>
                   <div>
                     {row("Customer", j.customerName || "—")}
                     {row("Contact", j.phone || "—")}

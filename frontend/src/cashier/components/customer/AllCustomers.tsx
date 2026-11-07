@@ -411,7 +411,7 @@ export default function AllCustomers({ only }: {
 
       {/* Toolbar */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flex: 1, maxWidth: 360 }}>
+        <div style={{ position: "relative", flex: "1 1 260px", maxWidth: 360 }}>
           <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: searchFocused ? "var(--accent)" : "var(--text-muted)", transition: "color 0.18s", pointerEvents: "none" }} />
           <input
             value={search} onChange={(e) => setSearch(e.target.value)}
